@@ -114,6 +114,16 @@ fn serve(mut client: TcpStream, config: &Config) -> io::Result<()> {
     let request = read_request(&mut client)?;
     let rotation = RR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let candidates = request_candidates(&request.body, &config.fallbacks, rotation);
+    eprintln!(
+        "[toolcase-gateway] request {} {} candidates: {}",
+        request.method,
+        request.path,
+        candidates
+            .iter()
+            .map(|model| if model.is_empty() { "<empty>" } else { model })
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     for (index, model) in candidates.iter().enumerate() {
         let last = index + 1 == candidates.len();
         // Open the upstream and read only the status line + headers so the

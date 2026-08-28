@@ -135,6 +135,7 @@ for threat details.
 
 ## Docs
 
+- [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) — maintenance map, runtime flow, invariants, debugging
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — request lifecycle, module map, design tradeoffs
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — every variable, tuning guidance, deployment recipes
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — trust boundaries, threats, mitigations
