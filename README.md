@@ -13,7 +13,7 @@ model routers:
    error, the gateway retries the same request against configured fallback
    models before returning anything to the client.
 
-No crates. No async runtime. One `main.rs`, std-only, ~700 lines.
+No crates. No async runtime. Small std-only Rust codebase split by responsibility.
 
 ---
 

@@ -46,20 +46,16 @@ flowchart TD
 
 ## Components and ownership
 
-All runtime code currently lives in `src/main.rs`.
+Runtime code is split into focused modules under `src/`.
 
-| Area | Current symbols | Change here when... |
+| File | Responsibility | Change here when... |
 | --- | --- | --- |
-| Startup/config | `main`, `env_or`, `Config` | Adding environment variables, startup limits, bind behavior |
-| Admission control | `ACTIVE`, `RR_COUNTER`, connection loop | Changing concurrency or request scheduling |
-| Request parsing | `read_request`, `parse_headers`, `read_until_headers`, `read_chunked_body`, `read_more` | Changing accepted HTTP syntax or body limits |
-| Security validation | `is_token`, `is_request_target`, `is_chunked` | Changing header/framing defenses |
-| Candidate selection | `request_candidates`, `json_string_value` | Changing model order, fallback rotation, or model lookup |
-| Upstream forwarding | `open_upstream`, `replace_model`, `header_value` | Changing forwarded headers, target, or request body mutation |
-| Response parsing | `ResponseHead`, `read_response_head`, `read_one_chunk` | Changing upstream response framing |
-| Streaming/output | `stream_response`, `write_chunk`, `rewrite_tool_names` | Changing streaming, response headers, or tool-name repair |
-| Error output | `write_error`, `escape_json_string` | Changing client-visible failures |
-| Tests | `#[cfg(test)] mod tests` | Every behavior or security change needs coverage here |
+| `src/main.rs` | Startup, listener, admission control, worker lifecycle | Adding startup limits or bind behavior |
+| `src/config.rs` | `Config`, environment parsing | Adding environment variables |
+| `src/http.rs` | Request/response types, framing, headers, streaming | Changing HTTP syntax, body limits, or response framing |
+| `src/routing.rs` | Candidate selection, failover, upstream forwarding | Changing model order, retry policy, or target forwarding |
+| `src/rewrite.rs` | Model replacement, tool-name casing, JSON string helpers | Changing body transformations |
+| `src/tests.rs` | Unit and integration tests | Every behavior or security change needs coverage here |
 
 Keep changes in the existing area. Do not add abstraction layers until one
 area has multiple concrete implementations.
@@ -205,8 +201,9 @@ Test both newline-delimited output and a body split at a tool-name boundary.
 
 ### Add a new file/module
 
-Current code is intentionally single-file. Split only when a boundary becomes
-hard to review or test. A safe future split would be:
+Code is split by responsibility. Keep each module focused; do not add
+abstraction layers until a boundary has multiple concrete implementations.
+Current layout:
 
 ```text
 src/
@@ -217,8 +214,8 @@ src/
   rewrite.rs    model/tool-name transformations
 ```
 
-If splitting happens, keep functions private by default and expose only the
-smallest interfaces needed by `main` and tests.
+Keep functions and types private by default. Current cross-module APIs use
+`pub(crate)` so implementation details stay inside this binary crate.
 
 ## Validation loop
 
@@ -236,7 +233,7 @@ credentials or request bodies entered logs:
 
 ```sh
 git diff --check
-git diff -- src/main.rs
+git diff -- src/
 ```
 
 CI runs the same format, clippy, test, and release-build checks from
