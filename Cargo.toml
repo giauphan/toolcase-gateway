@@ -1,0 +1,28 @@
+[package]
+name = "toolcase-gateway"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Zero-dependency Rust HTTP reverse proxy for LLM APIs: tool-name case repair and model failover for OpenAI-compatible endpoints"
+documentation = "https://github.com/giauphan/toolcase-gateway#readme"
+repository = "https://github.com/giauphan/toolcase-gateway"
+homepage = "https://github.com/giauphan/toolcase-gateway"
+readme = "README.md"
+license = "MIT"
+keywords = ["llm", "proxy", "openai", "failover", "gateway"]
+categories = ["network-programming", "web-programming::http-server", "command-line-utilities"]
+exclude = ["/.github", "/docs"]
+
+[[bin]]
+name = "toolcase-gateway"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
