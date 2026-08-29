@@ -34,7 +34,12 @@ pub(crate) fn serve(mut client: TcpStream, config: &Config) -> io::Result<()> {
             .join(", ")
     );
     for (index, model) in candidates.iter().enumerate() {
-        let last = index + 1 == candidates.len();
+        let attempt_number = index + 1;
+        let last = attempt_number == candidates.len();
+        eprintln!(
+            "[toolcase-gateway] attempt {attempt_number}/{} model \"{model}\"",
+            candidates.len()
+        );
         // Open the upstream and read only the status line + headers so the
         // failover decision happens before any byte is streamed to the client.
         let attempt = open_upstream(&request, config, model).and_then(|mut upstream| {
@@ -46,19 +51,35 @@ pub(crate) fn serve(mut client: TcpStream, config: &Config) -> io::Result<()> {
                 eprintln!("[toolcase-gateway] upstream model \"{model}\" returned HTTP {}. Failing over to \"{}\"...", head.status, candidates[index + 1]);
             }
             Ok((mut upstream, head)) => {
+                if RETRYABLE.contains(&head.status) {
+                    eprintln!(
+                        "[toolcase-gateway] model \"{model}\" returned final HTTP {}; all {} candidates exhausted",
+                        head.status,
+                        candidates.len()
+                    );
+                } else {
+                    eprintln!(
+                        "[toolcase-gateway] model \"{model}\" accepted with HTTP {}",
+                        head.status
+                    );
+                }
                 // Committed to this model: stream its body straight through.
                 return stream_response(&mut client, &mut upstream, head, &request.body);
             }
             Err(error) if !last => {
                 eprintln!("[toolcase-gateway] upstream model \"{model}\" failed ({}). Failing over to \"{}\"...", error.kind(), candidates[index + 1]);
             }
-            Err(_) => {
+            Err(error) => {
+                eprintln!(
+                    "[toolcase-gateway] model \"{model}\" failed on final attempt ({})",
+                    error.kind()
+                );
                 return write_error(
                     &mut client,
                     502,
                     "Bad Gateway",
                     "toolcase-gateway: upstream unavailable",
-                )
+                );
             }
         }
     }
