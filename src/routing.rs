@@ -16,7 +16,7 @@ const HOP_BY_HOP: [&str; 8] = [
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub(crate) const RETRYABLE: [u16; 9] = [402, 403, 408, 429, 500, 502, 503, 504, 524];
+pub(crate) const RETRYABLE: [u16; 10] = [401, 402, 403, 408, 429, 500, 502, 503, 504, 524];
 static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn serve(mut client: TcpStream, config: &Config) -> io::Result<()> {

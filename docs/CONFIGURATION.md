@@ -28,7 +28,7 @@ needs different bounds.
 | `MAX_HEAD_BYTES` | 64 KB | Cap on request and response head size. |
 | `MAX_REQUEST_BYTES` | 64 MB | Cap on request body size. |
 | `MAX_REWRITE_WINDOW` | 1 MB | Forced flush point for newline-free response bodies. |
-| `RETRYABLE` | `402, 403, 408, 429, 500, 502, 503, 504, 524` | Statuses that trigger failover. |
+| `RETRYABLE` | `401, 402, 403, 408, 429, 500, 502, 503, 504, 524` | Statuses that trigger failover. |
 
 ## Failover behavior
 

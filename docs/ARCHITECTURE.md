@@ -77,7 +77,7 @@ sent to the client, so retries are invisible downstream.
 | Connect or IO error | yes | log, try next model |
 | Connect or IO error | no | `502` with JSON error body |
 
-`RETRYABLE` is `402, 403, 408, 429, 500, 502, 503, 504, 524`. `413` is excluded
+`RETRYABLE` is `401, 402, 403, 408, 429, 500, 502, 503, 504, 524`. `413` is excluded
 on purpose: an oversized request fails identically everywhere.
 
 ### 6. Stream and rewrite

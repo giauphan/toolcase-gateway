@@ -101,7 +101,7 @@ All configuration is environment variables, read once at startup.
 | `GW_MAX_CONNECTIONS` | `256` | Concurrent connection cap; excess gets `503`. |
 | `GW_IO_TIMEOUT_SECS` | `120` | Read/write timeout per socket. `0` disables. |
 
-Retryable upstream statuses: `402`, `403`, `408`, `429`, `500`, `502`, `503`,
+Retryable upstream statuses: `401`, `402`, `403`, `408`, `429`, `500`, `502`, `503`,
 `504`, `524`. `413` is deliberately excluded — a too-large request will fail
 identically on every model.
 
