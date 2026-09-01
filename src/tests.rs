@@ -21,6 +21,7 @@ fn replaces_model_without_changing_other_fields() {
 #[test]
 fn keeps_413_out_of_retry_statuses() {
     assert!(!RETRYABLE.contains(&413));
+    assert!(RETRYABLE.contains(&400));
     assert!(RETRYABLE.contains(&401));
     assert!(RETRYABLE.contains(&403));
 }

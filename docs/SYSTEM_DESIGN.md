@@ -123,7 +123,7 @@ Candidate order:
 A candidate is retried when:
 
 - TCP connect or upstream I/O fails; or
-- upstream status is one of `401, 402, 403, 408, 429, 500, 502, 503, 504, 524`.
+- upstream status is one of `400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524`.
 
 A `413` is not retryable. It normally means request size/content is invalid for
 all models and retrying would waste capacity.
