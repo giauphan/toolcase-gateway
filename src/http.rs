@@ -348,7 +348,75 @@ pub(crate) fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> O
         .map(|(_, value)| value.as_str())
 }
 
-pub(crate) fn write_error(
+pub(crate) fn read_full_response_body(
+    stream: &mut TcpStream,
+    head: &mut ResponseHead,
+    limit: usize,
+) -> io::Result<Vec<u8>> {
+    // We already have head.buffered_body from read_response_head.
+    // Continue reading until EOF or limit.
+    let chunked = is_chunked(&head.headers);
+    let length = header_value(&head.headers, "content-length").and_then(|v| v.parse().ok());
+    let mut body = std::mem::take(&mut head.buffered_body);
+    if chunked {
+        let mut buffered = Vec::new();
+        loop {
+            if buffered.is_empty() {
+                let mut temp = [0u8; 8192];
+                let count = stream.read(&mut temp)?;
+                if count == 0 {
+                    break;
+                }
+                buffered.extend_from_slice(&temp[..count]);
+            }
+            let decoded = crate::http::read_one_chunk_internal(&mut buffered)?;
+            match decoded {
+                Some(chunk) => {
+                    body.extend(chunk);
+                    if body.len() >= limit {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+    } else if let Some(remaining) = length {
+        let remaining = remaining.min(limit.saturating_sub(body.len()));
+        let mut buffered = Vec::new();
+        while body.len() < limit {
+            if buffered.is_empty() {
+                let mut temp = [0u8; 8192];
+                let count = stream.read(&mut temp)?;
+                if count == 0 {
+                    break;
+                }
+                buffered.extend_from_slice(&temp[..count]);
+            }
+            let take = remaining.saturating_sub(body.len()).min(buffered.len());
+            if take == 0 {
+                break;
+            }
+            body.extend(buffered.drain(..take));
+        }
+    } else {
+        // No content-length, not chunked: read until EOF or limit
+        while body.len() < limit {
+            let mut temp = [0u8; 8192];
+            let count = stream.read(&mut temp)?;
+            if count == 0 {
+                break;
+            }
+            let take = (limit - body.len()).min(count);
+            body.extend_from_slice(&temp[..take]);
+        }
+    }
+    Ok(body)
+}
+
+fn read_one_chunk_internal(buffered: &mut Vec<u8>) -> io::Result<Option<Vec<u8>>> {
+    while !buffered.windows(2).any(|w| w == b"\r\n") {
+        read_more chonded, buffered)?;
+    }
     client: &mut TcpStream,
     status: u16,
     reason: &str,

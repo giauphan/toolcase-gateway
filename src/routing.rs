@@ -48,16 +48,45 @@ pub(crate) fn serve(mut client: TcpStream, config: &Config) -> io::Result<()> {
         });
         match attempt {
             Ok((_, head)) if RETRYABLE.contains(&head.status) && !last => {
+                let body_snippet = String::from_utf8_lossy(&head.buffered_body)
+                    .trim()
+                    .to_string();
+                if !body_snippet.is_empty() {
+                    eprintln!(
+                        "[toolcase-gateway] upstream model \"{}\" returned HTTP {} with body preview: {}",
+                        model, head.status, body_snippet
+                    );
+                }
                 eprintln!("[toolcase-gateway] upstream model \"{model}\" returned HTTP {}. Failing over to \"{}\"...", head.status, candidates[index + 1]);
             }
             Ok((mut upstream, head)) => {
                 if RETRYABLE.contains(&head.status) {
+                    let body_snippet = String::from_utf8_lossy(&head.buffered_body)
+                        .trim()
+                        .to_string();
+                    if !body_snippet.is_empty() {
+                        eprintln!(
+                            "[toolcase-gateway] model \"{model}\" returned final HTTP {} with body preview: {}",
+                            head.status, body_snippet
+                        );
+                    }
                     eprintln!(
                         "[toolcase-gateway] model \"{model}\" returned final HTTP {}; all {} candidates exhausted",
                         head.status,
                         candidates.len()
                     );
                 } else {
+                    if head.status >= 400 {
+                        let body_snippet = String::from_utf8_lossy(&head.buffered_body)
+                            .trim()
+                            .to_string();
+                        if !body_snippet.is_empty() {
+                            eprintln!(
+                                "[toolcase-gateway] model \"{model}\" accepted with HTTP {} but body preview: {}",
+                                head.status, body_snippet
+                            );
+                        }
+                    }
                     eprintln!(
                         "[toolcase-gateway] model \"{model}\" accepted with HTTP {}",
                         head.status
