@@ -36,6 +36,8 @@ fn main() -> io::Result<()> {
             .map(str::to_owned)
             .collect(),
         io_timeout: (timeout_secs > 0).then(|| Duration::from_secs(timeout_secs)),
+        retry_base_delay_ms: env_or_duration_ms("GW_RETRY_BASE_DELAY_MS", 100),
+        max_retry_delay_ms: env_or_duration_ms("GW_MAX_RETRY_DELAY_MS", 5000),
     });
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     eprintln!(
