@@ -96,7 +96,6 @@ pub(crate) fn serve(mut client: TcpStream, config: &Config) -> io::Result<()> {
             }
             Ok((mut upstream, head)) => {
                 if RETRYABLE.contains(&head.status) {
-                    last_status = Some(head.status);
                     let body_snippet = String::from_utf8_lossy(&head.buffered_body)
                         .trim()
                         .to_string();

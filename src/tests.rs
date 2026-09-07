@@ -6,7 +6,7 @@ use crate::http::{
 use crate::rewrite::{escape_json_string, replace_model, rewrite_tool_names};
 use crate::routing::{open_upstream, RETRYABLE};
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
@@ -131,8 +131,14 @@ fn forces_identity_encoding_upstream() {
         target_port: port,
         fallbacks: vec![],
         io_timeout: Some(Duration::from_secs(5)),
+        retry_base_delay_ms: 100,
+        max_retry_delay_ms: 5000,
     };
-    let mut socket = open_upstream(&request, &config, "m").unwrap();
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+    let _client_socket = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    let (client_conn, _) = client_listener.accept().unwrap();
+    let mut socket = open_upstream(&client_conn, &request, &config, "m").unwrap();
     let head = read_response_head(&mut socket).unwrap();
     let length = header_value(&head.headers, "content-length")
         .unwrap()
