@@ -18,7 +18,7 @@ const HOP_BY_HOP: [&str; 8] = [
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub(crate) const RETRYABLE: [u16; 11] = [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524];
+pub(crate) const RETRYABLE: [u16; 7] = [408, 429, 500, 502, 503, 504, 524];
 static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn parse_retry_after(headers: &[(String, String)]) -> Option<Duration> {
@@ -33,10 +33,14 @@ fn calculate_retry_delay(
     max_delay_ms: u64,
     retry_after: Option<Duration>,
 ) -> Duration {
-    retry_after.unwrap_or_else(|| {
-        let exponential = base_delay_ms * 2u64.pow(attempt.saturating_sub(1) as u32);
-        Duration::from_millis(exponential.min(max_delay_ms))
-    })
+    let max = Duration::from_millis(max_delay_ms);
+    match retry_after {
+        Some(dur) => dur.min(max),
+        None => {
+            let exponential = base_delay_ms * 2u64.pow(attempt.saturating_sub(1) as u32);
+            Duration::from_millis(exponential).min(max)
+        }
+    }
 }
 
 pub(crate) fn serve(mut client: TcpStream, config: &Config) -> io::Result<()> {
