@@ -7,9 +7,17 @@ use std::net::TcpStream;
 pub(crate) fn handle_prism_chat_completion(
     client: &mut TcpStream,
     _body: &[u8],
-    _config: &Config,
+    config: &Config,
     _headers: &[(String, String)],
 ) -> io::Result<()> {
+    let _ = (
+        &config.prism_base_url,
+        &config.prism_project_id,
+        &config.prism_cookie,
+        &config.prism_sandbox_token,
+        &config.prism_user_id,
+        &config.prism_default_model,
+    );
     write_error(
         client,
         500,
