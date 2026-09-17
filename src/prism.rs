@@ -180,6 +180,43 @@ struct OpenAiChunkDelta {
     content: Option<String>,
 }
 
+struct PrismCredentials {
+    cookie: String,
+    sandbox_token: String,
+    user_id: String,
+    project_id: String,
+}
+
+fn extract_credentials(headers: &[(String, String)], config: &Config) -> PrismCredentials {
+    let mut creds = PrismCredentials {
+        cookie: config.prism_cookie.clone(),
+        sandbox_token: config.prism_sandbox_token.clone(),
+        user_id: config.prism_user_id.clone(),
+        project_id: config.prism_project_id.clone(),
+    };
+
+    let auth_header = crate::http::header_value(headers, "authorization")
+        .and_then(|v| v.strip_prefix("Bearer ").or(Some(v)))
+        .or_else(|| crate::http::header_value(headers, "x-api-key"))
+        .unwrap_or("");
+
+    let delim = if auth_header.contains("|||") { "|||" } else { "," };
+    let parts: Vec<&str> = auth_header.rsplitn(4, delim).collect();
+    
+    // rsplitn returns parts from right to left.
+    // if length is 4: parts[0]=project_id, parts[1]=user_id, parts[2]=sandbox_token, parts[3]=cookie
+    if parts.len() == 4 {
+        creds.project_id = parts[0].trim().to_string();
+        creds.user_id = parts[1].trim().to_string();
+        creds.sandbox_token = parts[2].trim().to_string();
+        
+        // The rest is the cookie. We only strip Bearer prefix from cookie just in case it started with it
+        let c = parts[3].trim();
+        creds.cookie = c.strip_prefix("Bearer ").unwrap_or(c).to_string();
+    }
+    creds
+}
+
 pub fn handle_prism_chat_completion(
     client: &mut TcpStream,
     body: &[u8],
@@ -217,15 +254,17 @@ pub fn handle_prism_chat_completion(
         .reasoning_effort
         .unwrap_or_else(|| "medium".to_string());
 
+    let creds = extract_credentials(inbound_headers, config);
+
     let prism_start = PrismStartRequest {
         input: input_items,
         metadata: PrismMetadata {
-            project_id: config.prism_project_id.clone(),
-            user_id: config.prism_user_id.clone(),
+            project_id: creds.project_id.clone(),
+            user_id: creds.user_id.clone(),
             model: requested_model.clone(),
             reasoning_effort,
             sandbox_url: format!("{}/s/sandboxes/proxy/", config.prism_base_url.trim_end_matches('/')),
-            sandbox_token: config.prism_sandbox_token.clone(),
+            sandbox_token: creds.sandbox_token.clone(),
             frontend_origin: config.prism_base_url.clone(),
             codex_listen_snapshot: None,
         },
@@ -238,15 +277,10 @@ pub fn handle_prism_chat_completion(
     let mut ureq_builder = ureq::post(&start_url)
         .header("Content-Type", "application/json")
         .header("Origin", &config.prism_base_url)
-        .header("Referer", &format!("{}/?u={}", config.prism_base_url, config.prism_project_id));
+        .header("Referer", &format!("{}/?u={}", config.prism_base_url, creds.project_id));
 
     // Forward inbound Cookie if present, otherwise fallback to configured PRISM_COOKIE
-    let cookie = inbound_headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("cookie"))
-        .map(|(_, v)| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or(&config.prism_cookie);
+    let cookie = &creds.cookie;
 
     if !cookie.is_empty() {
         ureq_builder = ureq_builder.header("Cookie", cookie);

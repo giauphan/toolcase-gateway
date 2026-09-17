@@ -88,6 +88,17 @@ GW_FALLBACK_MODELS="gpt-4o-mini,claude-3-5-sonnet" \
 
 Point your client at `http://127.0.0.1:20129` instead of the upstream address.
 
+
+### Prism OpenAI Multi-Account Settings
+
+You can use different Prism accounts per request by providing the credentials in the client's `Authorization: Bearer <API_KEY>` or `x-api-key` header instead of static `.env` settings.
+
+**API Key Format:**
+```
+<GW_PRISM_COOKIE>|||<GW_PRISM_SANDBOX_TOKEN>|||<GW_PRISM_USER_ID>|||<GW_PRISM_PROJECT_ID>
+```
+*(Or comma-separated: `<GW_PRISM_COOKIE>,<GW_PRISM_SANDBOX_TOKEN>,<GW_PRISM_USER_ID>,<GW_PRISM_PROJECT_ID>`)*
+
 ## Configuration
 
 All configuration is environment variables, read once at startup.
