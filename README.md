@@ -1,9 +1,9 @@
 # toolcase-gateway
 
-**A zero-dependency Rust reverse proxy that fixes LLM tool-name casing and fails over between models.**
+**A Rust reverse proxy that fixes LLM tool-name casing, fails over between models, and supports Prism OpenAI endpoints.**
 
 `toolcase-gateway` sits between an LLM client (editor agent, CLI, SDK) and an
-OpenAI-compatible HTTP endpoint. It solves two everyday problems with hosted
+OpenAI-compatible HTTP endpoint. It solves everyday problems with hosted
 model routers:
 
 1. **Tool-name casing drift** — upstreams frequently lowercase function/tool
@@ -12,8 +12,9 @@ model routers:
 2. **Model failure** — when a model returns `429`, `503`, or a payment/auth
    error, the gateway retries the same request against configured fallback
    models before returning anything to the client.
+3. **Prism API Adaptation** — transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism.
 
-No crates. No async runtime. Small std-only Rust codebase split by responsibility.
+Small Rust codebase with zero heavy runtimes (no async runtime).
 
 ---
 

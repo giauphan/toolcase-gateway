@@ -4,7 +4,7 @@ use crate::http::{
     read_response_head, Request,
 };
 use crate::rewrite::{escape_json_string, replace_model, rewrite_tool_names};
-use crate::routing::{open_upstream, RETRYABLE};
+use crate::omniroute::{open_upstream, RETRYABLE};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
@@ -21,9 +21,8 @@ fn replaces_model_without_changing_other_fields() {
 #[test]
 fn keeps_413_out_of_retry_statuses() {
     assert!(!RETRYABLE.contains(&413));
-    assert!(RETRYABLE.contains(&400));
-    assert!(RETRYABLE.contains(&401));
-    assert!(RETRYABLE.contains(&403));
+    assert!(RETRYABLE.contains(&429));
+    assert!(RETRYABLE.contains(&500));
 }
 
 #[test]
@@ -133,6 +132,12 @@ fn forces_identity_encoding_upstream() {
         io_timeout: Some(Duration::from_secs(5)),
         retry_base_delay_ms: 100,
         max_retry_delay_ms: 5000,
+        prism_base_url: "https://prism.openai.com".into(),
+        prism_project_id: "0f6fa2ad-f391-4d28-9770-e3d6d511f80c".into(),
+        prism_cookie: "".into(),
+        prism_sandbox_token: "".into(),
+        prism_user_id: "".into(),
+        prism_default_model: "gpt-5.6-terra".into(),
     };
     let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let client_port = client_listener.local_addr().unwrap().port();

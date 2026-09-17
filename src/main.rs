@@ -10,18 +10,22 @@ use std::time::Duration;
 
 mod config;
 mod http;
+mod omniroute;
+mod prism;
 mod rewrite;
-mod routing;
+mod routes;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use config::*;
 pub(crate) use http::*;
-pub(crate) use routing::*;
+pub(crate) use routes::*;
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> io::Result<()> {
+    let _ = dotenvy::dotenv();
+
     let listen_host = env_or("GW_LISTEN_HOST", "127.0.0.1");
     let listen_port = env_or("GW_LISTEN_PORT", "20129").parse().unwrap_or(20129);
     let max_connections: usize = env_or("GW_MAX_CONNECTIONS", "256").parse().unwrap_or(256);
@@ -38,6 +42,12 @@ fn main() -> io::Result<()> {
         io_timeout: (timeout_secs > 0).then(|| Duration::from_secs(timeout_secs)),
         retry_base_delay_ms: env_or_duration_ms("GW_RETRY_BASE_DELAY_MS", 100),
         max_retry_delay_ms: env_or_duration_ms("GW_MAX_RETRY_DELAY_MS", 5000),
+        prism_base_url: env_or("GW_PRISM_BASE_URL", "https://prism.openai.com"),
+        prism_project_id: env_or("GW_PRISM_PROJECT_ID", "0f6fa2ad-f391-4d28-9770-e3d6d511f80c"),
+        prism_cookie: env_or("GW_PRISM_COOKIE", ""),
+        prism_sandbox_token: env_or("GW_PRISM_SANDBOX_TOKEN", ""),
+        prism_user_id: env_or("GW_PRISM_USER_ID", ""),
+        prism_default_model: env_or("GW_PRISM_DEFAULT_MODEL", "gpt-5.6-terra"),
     });
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     eprintln!(
@@ -66,7 +76,7 @@ fn main() -> io::Result<()> {
         ACTIVE.fetch_add(1, Ordering::Relaxed);
         let config = config.clone();
         thread::spawn(move || {
-            if let Err(error) = serve(client, &config) {
+            if let Err(error) = route_request(client, &config) {
                 if !matches!(
                     error.kind(),
                     ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
