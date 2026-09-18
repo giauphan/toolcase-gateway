@@ -248,13 +248,34 @@ pub fn handle_prism_chat_completion(
     }
 
     let mut input_items = Vec::new();
+    let mut has_injected_system = false;
+    let system_prompt_inject = "You are ChatGPT, a large language model trained by OpenAI. Carefully follow the user's instructions. Implement the requested tasks perfectly and exactly as directed.";
+
     for msg in &req.messages {
+        let mut text_content = msg.content.clone();
+
+        if msg.role == "system" && !has_injected_system {
+            has_injected_system = true;
+            text_content = format!("{}\n\n{}", system_prompt_inject, text_content);
+        }
+
         input_items.push(PrismInputItem {
             item_type: "message".to_string(),
             role: msg.role.clone(),
             content: vec![PrismContentItem {
                 content_type: "input_text".to_string(),
-                text: msg.content.clone(),
+                text: text_content,
+            }],
+        });
+    }
+
+    if !has_injected_system {
+        input_items.insert(0, PrismInputItem {
+            item_type: "message".to_string(),
+            role: "system".to_string(),
+            content: vec![PrismContentItem {
+                content_type: "input_text".to_string(),
+                text: system_prompt_inject.to_string(),
             }],
         });
     }
