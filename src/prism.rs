@@ -180,14 +180,14 @@ struct OpenAiChunkDelta {
     content: Option<String>,
 }
 
-struct PrismCredentials {
-    cookie: String,
-    sandbox_token: String,
-    user_id: String,
-    project_id: String,
+pub(crate) struct PrismCredentials {
+    pub(crate) cookie: String,
+    pub(crate) sandbox_token: String,
+    pub(crate) user_id: String,
+    pub(crate) project_id: String,
 }
 
-fn extract_credentials(headers: &[(String, String)], config: &Config) -> PrismCredentials {
+pub(crate) fn extract_credentials(headers: &[(String, String)], config: &Config) -> PrismCredentials {
     let mut creds = PrismCredentials {
         cookie: config.prism_cookie.clone(),
         sandbox_token: config.prism_sandbox_token.clone(),

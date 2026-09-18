@@ -196,3 +196,130 @@ fn rejects_malformed_request_targets() {
 fn error_body_escapes_message() {
     assert_eq!(escape_json_string("a\"b\\c"), "a\\\"b\\\\c");
 }
+
+#[test]
+fn extracts_prism_credentials_with_triple_pipe() {
+    let config = Config {
+        target_host: "127.0.0.1".into(),
+        target_port: 8080,
+        fallbacks: vec![],
+        io_timeout: None,
+        retry_base_delay_ms: 100,
+        max_retry_delay_ms: 1000,
+        prism_base_url: "https://prism.openai.com".into(),
+        prism_project_id: "default_proj".into(),
+        prism_cookie: "default_cookie".into(),
+        prism_sandbox_token: "default_token".into(),
+        prism_user_id: "default_user".into(),
+        prism_default_model: "gpt-5.6-terra".into(),
+    };
+
+    let headers = vec![(
+        "Authorization".to_string(),
+        "Bearer custom_cookie_val; a=b|||custom_token|||custom_user|||custom_proj".to_string(),
+    )];
+
+    let creds = crate::prism::extract_credentials(&headers, &config);
+    assert_eq!(creds.cookie, "custom_cookie_val; a=b");
+    assert_eq!(creds.sandbox_token, "custom_token");
+    assert_eq!(creds.user_id, "custom_user");
+    assert_eq!(creds.project_id, "custom_proj");
+}
+
+#[test]
+fn extracts_prism_credentials_with_comma_delimiter() {
+    let config = Config {
+        target_host: "127.0.0.1".into(),
+        target_port: 8080,
+        fallbacks: vec![],
+        io_timeout: None,
+        retry_base_delay_ms: 100,
+        max_retry_delay_ms: 1000,
+        prism_base_url: "https://prism.openai.com".into(),
+        prism_project_id: "default_proj".into(),
+        prism_cookie: "default_cookie".into(),
+        prism_sandbox_token: "default_token".into(),
+        prism_user_id: "default_user".into(),
+        prism_default_model: "gpt-5.6-terra".into(),
+    };
+
+    let headers = vec![(
+        "x-api-key".to_string(),
+        "cookie_part1, cookie_part2; key=val, token_123, user_456, proj_789".to_string(),
+    )];
+
+    let creds = crate::prism::extract_credentials(&headers, &config);
+    assert_eq!(creds.cookie, "cookie_part1, cookie_part2; key=val");
+    assert_eq!(creds.sandbox_token, "token_123");
+    assert_eq!(creds.user_id, "user_456");
+    assert_eq!(creds.project_id, "proj_789");
+}
+
+#[test]
+fn falls_back_to_config_credentials_when_header_is_missing_or_short() {
+    let config = Config {
+        target_host: "127.0.0.1".into(),
+        target_port: 8080,
+        fallbacks: vec![],
+        io_timeout: None,
+        retry_base_delay_ms: 100,
+        max_retry_delay_ms: 1000,
+        prism_base_url: "https://prism.openai.com".into(),
+        prism_project_id: "default_proj".into(),
+        prism_cookie: "default_cookie".into(),
+        prism_sandbox_token: "default_token".into(),
+        prism_user_id: "default_user".into(),
+        prism_default_model: "gpt-5.6-terra".into(),
+    };
+
+    let headers = vec![("Authorization".to_string(), "Bearer sk-singlekey".to_string())];
+    let creds = crate::prism::extract_credentials(&headers, &config);
+    assert_eq!(creds.cookie, "default_cookie");
+    assert_eq!(creds.sandbox_token, "default_token");
+    assert_eq!(creds.user_id, "default_user");
+    assert_eq!(creds.project_id, "default_proj");
+}
+
+#[test]
+fn test_models_catalog_response() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    
+    let handle = thread::spawn(move || {
+        let (mut client, _) = listener.accept().unwrap();
+        crate::routes::handle_models_catalog(&mut client).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    let mut body = head.buffered_body;
+    let length = header_value(&head.headers, "content-length")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    while body.len() < length {
+        read_more(&mut client, &mut body).unwrap();
+    }
+    handle.join().unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["object"], "list");
+    assert!(json["data"].as_array().unwrap().len() >= 2);
+}
+
+#[test]
+fn test_cors_preflight_response() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let (mut client, _) = listener.accept().unwrap();
+        crate::routes::handle_cors_preflight(&mut client).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(header_value(&head.headers, "access-control-allow-origin"), Some("*"));
+    handle.join().unwrap();
+}
