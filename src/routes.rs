@@ -49,11 +49,14 @@ pub(crate) fn handle_models_catalog(client: &mut TcpStream, config: &Config) -> 
             r#"{{"id":"{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
             bm
         ));
-        for effort in efforts {
-            model_entries.push(format!(
-                r#"{{"id":"{}-{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
-                bm, effort
-            ));
+        // Only apply effort permutations to models that explicitly support reasoning
+        if bm.starts_with("gpt-5.6-") {
+            for effort in efforts {
+                model_entries.push(format!(
+                    r#"{{"id":"{}-{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
+                    bm, effort
+                ));
+            }
         }
     }
 
