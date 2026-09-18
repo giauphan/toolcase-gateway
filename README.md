@@ -12,7 +12,7 @@ model routers:
 2. **Model failure** — when a model returns `429`, `503`, or a payment/auth
    error, the gateway retries the same request against configured fallback
    models before returning anything to the client.
-3. **Prism API Adaptation** — transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism.
+3. **Prism API Adaptation** — transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism (including transparent `reasoning_effort` and suffix support).
 
 Small Rust codebase with zero heavy runtimes (no async runtime).
 

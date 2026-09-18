@@ -25,7 +25,7 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
 }
 
 pub(crate) fn handle_models_catalog(client: &mut TcpStream) -> io::Result<()> {
-    let body = r#"{"object":"list","data":[{"id":"gpt-5.6-terra","object":"model"},{"id":"gpt-5.6-sol","object":"model"}]}"#;
+    let body = r#"{"object":"list","data":[{"id":"gpt-5.6-terra","object":"model"},{"id":"gpt-5.6-terra-low","object":"model"},{"id":"gpt-5.6-terra-medium","object":"model"},{"id":"gpt-5.6-terra-high","object":"model"},{"id":"gpt-5.6-terra-xhigh","object":"model"},{"id":"gpt-5.6-sol","object":"model"},{"id":"gpt-5.6-sol-low","object":"model"},{"id":"gpt-5.6-sol-medium","object":"model"},{"id":"gpt-5.6-sol-high","object":"model"},{"id":"gpt-5.6-sol-xhigh","object":"model"}]}"#;
     let response = format!(
         "HTTP/1.1 200 OK\r\n\
         Content-Type: application/json\r\n\

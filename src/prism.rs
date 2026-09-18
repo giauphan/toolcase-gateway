@@ -233,10 +233,19 @@ pub fn handle_prism_chat_completion(
     // Fresh session / conversation ID per request to avoid noisy context
     let conv_uuid = Uuid::new_v4();
     let conversation_id = format!("cdx1_{conv_uuid}");
-    let requested_model = req
+    let mut requested_model = req
         .model
         .clone()
         .unwrap_or_else(|| config.prism_default_model.clone());
+
+    let mut inferred_reasoning = None;
+    for suffix in &["-xhigh", "-high", "-medium", "-low"] {
+        if requested_model.ends_with(suffix) {
+            requested_model = requested_model.strip_suffix(suffix).unwrap().to_string();
+            inferred_reasoning = Some(suffix.trim_start_matches('-').to_string());
+            break;
+        }
+    }
 
     let mut input_items = Vec::new();
     for msg in &req.messages {
@@ -250,9 +259,19 @@ pub fn handle_prism_chat_completion(
         });
     }
 
-    let reasoning_effort = req
+    let mut reasoning_effort = req
         .reasoning_effort
-        .unwrap_or_else(|| "medium".to_string());
+        .clone()
+        .or(inferred_reasoning)
+        .unwrap_or_else(|| "medium".to_string())
+        .to_lowercase();
+
+    if reasoning_effort == "xhight" {
+        reasoning_effort = "xhigh".to_string();
+    }
+    if !["low", "medium", "high", "xhigh"].contains(&reasoning_effort.as_str()) {
+        reasoning_effort = "medium".to_string();
+    }
 
     let creds = extract_credentials(inbound_headers, config);
 
