@@ -337,3 +337,36 @@ fn test_cors_preflight_response() {
     assert_eq!(header_value(&head.headers, "access-control-allow-origin"), Some("*"));
     handle.join().unwrap();
 }
+
+#[test]
+fn test_build_injected_prism_inputs_no_system() {
+    let messages = vec![
+        crate::prism::OpenAiMessage { role: "user".into(), content: "hello".into() }
+    ];
+    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages);
+    
+    assert_eq!(prism_inputs.len(), 2);
+    assert_eq!(prism_inputs[0].role, "system");
+    assert!(prism_inputs[0].content[0].text.starts_with("You are ChatGPT"));
+    
+    assert_eq!(prism_inputs[1].role, "user");
+    assert_eq!(prism_inputs[1].content[0].text, "hello");
+}
+
+#[test]
+fn test_build_injected_prism_inputs_with_system() {
+    let messages = vec![
+        crate::prism::OpenAiMessage { role: "system".into(), content: "{\"openFile\": \"main.rs\"}".into() },
+        crate::prism::OpenAiMessage { role: "user".into(), content: "hello".into() }
+    ];
+    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages);
+    
+    assert_eq!(prism_inputs.len(), 2);
+    assert_eq!(prism_inputs[0].role, "system");
+    // Injection should be prepended
+    assert!(prism_inputs[0].content[0].text.starts_with("You are ChatGPT"));
+    assert!(prism_inputs[0].content[0].text.contains("{\"openFile\": \"main.rs\"}"));
+    
+    assert_eq!(prism_inputs[1].role, "user");
+    assert_eq!(prism_inputs[1].content[0].text, "hello");
+}

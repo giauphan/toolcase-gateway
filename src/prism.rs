@@ -56,18 +56,18 @@ struct PrismStartRequest {
 }
 
 #[derive(Serialize)]
-struct PrismInputItem {
+pub struct PrismInputItem {
     #[serde(rename = "type")]
-    item_type: String,
-    role: String,
-    content: Vec<PrismContentItem>,
+    pub item_type: String,
+    pub role: String,
+    pub content: Vec<PrismContentItem>,
 }
 
 #[derive(Serialize)]
-struct PrismContentItem {
+pub struct PrismContentItem {
     #[serde(rename = "type")]
-    content_type: String,
-    text: String,
+    pub content_type: String,
+    pub text: String,
 }
 
 #[derive(Serialize)]
@@ -247,38 +247,7 @@ pub fn handle_prism_chat_completion(
         }
     }
 
-    let mut input_items = Vec::new();
-    let mut has_injected_system = false;
-    let system_prompt_inject = "You are ChatGPT, a large language model trained by OpenAI. Carefully follow the user's instructions. Implement the requested tasks perfectly and exactly as directed.";
-
-    for msg in &req.messages {
-        let mut text_content = msg.content.clone();
-
-        if msg.role == "system" && !has_injected_system {
-            has_injected_system = true;
-            text_content = format!("{}\n\n{}", system_prompt_inject, text_content);
-        }
-
-        input_items.push(PrismInputItem {
-            item_type: "message".to_string(),
-            role: msg.role.clone(),
-            content: vec![PrismContentItem {
-                content_type: "input_text".to_string(),
-                text: text_content,
-            }],
-        });
-    }
-
-    if !has_injected_system {
-        input_items.insert(0, PrismInputItem {
-            item_type: "message".to_string(),
-            role: "system".to_string(),
-            content: vec![PrismContentItem {
-                content_type: "input_text".to_string(),
-                text: system_prompt_inject.to_string(),
-            }],
-        });
-    }
+    let input_items = build_injected_prism_inputs(&req.messages);
 
     let mut reasoning_effort = req
         .reasoning_effort
@@ -597,4 +566,40 @@ fn extract_text_from_output(output: &[PrismOutputMessage]) -> String {
         }
     }
     text_acc
+}
+
+pub fn build_injected_prism_inputs(messages: &[OpenAiMessage]) -> Vec<PrismInputItem> {
+    let mut input_items = Vec::new();
+    let mut has_injected_system = false;
+    let system_prompt_inject = "You are ChatGPT, a large language model trained by OpenAI. Carefully follow the user's instructions. Implement the requested tasks perfectly and exactly as directed.";
+
+    for msg in messages {
+        let mut text_content = msg.content.clone();
+
+        if msg.role == "system" && !has_injected_system {
+            has_injected_system = true;
+            text_content = format!("{}\n\n{}", system_prompt_inject, text_content);
+        }
+
+        input_items.push(PrismInputItem {
+            item_type: "message".to_string(),
+            role: msg.role.clone(),
+            content: vec![PrismContentItem {
+                content_type: "input_text".to_string(),
+                text: text_content,
+            }],
+        });
+    }
+
+    if !has_injected_system {
+        input_items.insert(0, PrismInputItem {
+            item_type: "message".to_string(),
+            role: "system".to_string(),
+            content: vec![PrismContentItem {
+                content_type: "input_text".to_string(),
+                text: system_prompt_inject.to_string(),
+            }],
+        });
+    }
+    input_items
 }
