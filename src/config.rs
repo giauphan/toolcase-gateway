@@ -29,4 +29,5 @@ pub(crate) struct Config {
     pub(crate) prism_sandbox_token: String,
     pub(crate) prism_user_id: String,
     pub(crate) prism_default_model: String,
+    pub(crate) prism_system_prompt: String,
 }

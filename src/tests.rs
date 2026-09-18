@@ -138,6 +138,7 @@ fn forces_identity_encoding_upstream() {
         prism_sandbox_token: "".into(),
         prism_user_id: "".into(),
         prism_default_model: "gpt-5.6-terra".into(),
+        prism_system_prompt: "".into(),
     };
     let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let client_port = client_listener.local_addr().unwrap().port();
@@ -212,6 +213,7 @@ fn extracts_prism_credentials_with_triple_pipe() {
         prism_sandbox_token: "default_token".into(),
         prism_user_id: "default_user".into(),
         prism_default_model: "gpt-5.6-terra".into(),
+        prism_system_prompt: "".into(),
     };
 
     let headers = vec![(
@@ -241,6 +243,7 @@ fn extracts_prism_credentials_with_comma_delimiter() {
         prism_sandbox_token: "default_token".into(),
         prism_user_id: "default_user".into(),
         prism_default_model: "gpt-5.6-terra".into(),
+        prism_system_prompt: "".into(),
     };
 
     let headers = vec![(
@@ -270,6 +273,7 @@ fn falls_back_to_config_credentials_when_header_is_missing_or_short() {
         prism_sandbox_token: "default_token".into(),
         prism_user_id: "default_user".into(),
         prism_default_model: "gpt-5.6-terra".into(),
+        prism_system_prompt: "".into(),
     };
 
     let headers = vec![("Authorization".to_string(), "Bearer sk-singlekey".to_string())];
@@ -299,6 +303,7 @@ fn test_models_catalog_response() {
             prism_sandbox_token: "default_token".into(),
             prism_user_id: "default_user".into(),
             prism_default_model: "gpt-5.6-terra".into(),
+        prism_system_prompt: "".into(),
         };
         let (mut client, _) = listener.accept().unwrap();
         crate::routes::handle_models_catalog(&mut client, &config).unwrap();
@@ -343,11 +348,12 @@ fn test_build_injected_prism_inputs_no_system() {
     let messages = vec![
         crate::prism::OpenAiMessage { role: "user".into(), content: "hello".into() }
     ];
-    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages);
+    let prompt = "You are a test prompt";
+    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages, prompt);
     
     assert_eq!(prism_inputs.len(), 2);
     assert_eq!(prism_inputs[0].role, "system");
-    assert!(prism_inputs[0].content[0].text.starts_with("You are ChatGPT"));
+    assert!(prism_inputs[0].content[0].text.starts_with("You are a test prompt"));
     
     assert_eq!(prism_inputs[1].role, "user");
     assert_eq!(prism_inputs[1].content[0].text, "hello");
@@ -359,12 +365,13 @@ fn test_build_injected_prism_inputs_with_system() {
         crate::prism::OpenAiMessage { role: "system".into(), content: "{\"openFile\": \"main.rs\"}".into() },
         crate::prism::OpenAiMessage { role: "user".into(), content: "hello".into() }
     ];
-    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages);
+    let prompt = "You are a test prompt";
+    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages, prompt);
     
     assert_eq!(prism_inputs.len(), 2);
     assert_eq!(prism_inputs[0].role, "system");
     // Injection should be prepended
-    assert!(prism_inputs[0].content[0].text.starts_with("You are ChatGPT"));
+    assert!(prism_inputs[0].content[0].text.starts_with("You are a test prompt"));
     assert!(prism_inputs[0].content[0].text.contains("{\"openFile\": \"main.rs\"}"));
     
     assert_eq!(prism_inputs[1].role, "user");

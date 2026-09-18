@@ -48,6 +48,10 @@ fn main() -> io::Result<()> {
         prism_sandbox_token: env_or("GW_PRISM_SANDBOX_TOKEN", ""),
         prism_user_id: env_or("GW_PRISM_USER_ID", ""),
         prism_default_model: env_or("GW_PRISM_DEFAULT_MODEL", "gpt-5.6-terra"),
+        prism_system_prompt: env_or(
+            "GW_PRISM_SYSTEM_PROMPT",
+            "You are ChatGPT, a large language model trained by OpenAI. Carefully follow the user's instructions. Implement the requested tasks perfectly and exactly as directed.",
+        ),
     });
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     eprintln!(

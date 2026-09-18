@@ -247,7 +247,7 @@ pub fn handle_prism_chat_completion(
         }
     }
 
-    let input_items = build_injected_prism_inputs(&req.messages);
+    let input_items = build_injected_prism_inputs(&req.messages, &config.prism_system_prompt);
 
     let mut reasoning_effort = req
         .reasoning_effort
@@ -568,10 +568,9 @@ fn extract_text_from_output(output: &[PrismOutputMessage]) -> String {
     text_acc
 }
 
-pub fn build_injected_prism_inputs(messages: &[OpenAiMessage]) -> Vec<PrismInputItem> {
+pub fn build_injected_prism_inputs(messages: &[OpenAiMessage], system_prompt_inject: &str) -> Vec<PrismInputItem> {
     let mut input_items = Vec::new();
     let mut has_injected_system = false;
-    let system_prompt_inject = "You are ChatGPT, a large language model trained by OpenAI. Carefully follow the user's instructions. Implement the requested tasks perfectly and exactly as directed.";
 
     for msg in messages {
         let mut text_content = msg.content.clone();
