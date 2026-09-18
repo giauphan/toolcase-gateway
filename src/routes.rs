@@ -24,8 +24,44 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
     client.flush()
 }
 
-pub(crate) fn handle_models_catalog(client: &mut TcpStream) -> io::Result<()> {
-    let body = r#"{"object":"list","data":[{"id":"gpt-5.6-terra","object":"model"},{"id":"gpt-5.6-terra-low","object":"model"},{"id":"gpt-5.6-terra-medium","object":"model"},{"id":"gpt-5.6-terra-high","object":"model"},{"id":"gpt-5.6-terra-xhigh","object":"model"},{"id":"gpt-5.6-sol","object":"model"},{"id":"gpt-5.6-sol-low","object":"model"},{"id":"gpt-5.6-sol-medium","object":"model"},{"id":"gpt-5.6-sol-high","object":"model"},{"id":"gpt-5.6-sol-xhigh","object":"model"}]}"#;
+pub(crate) fn handle_models_catalog(client: &mut TcpStream, config: &Config) -> io::Result<()> {
+    let mut base_models = vec![
+        "gpt-5.6-terra".to_string(),
+        "gpt-5.6-sol".to_string(),
+        "gpt-4o".to_string(),
+        "gpt-4o-mini".to_string(),
+        "o1".to_string(),
+        "o3-mini".to_string(),
+    ];
+    if !config.prism_default_model.is_empty() {
+        base_models.push(config.prism_default_model.clone());
+    }
+    for fb in &config.fallbacks {
+        if !fb.is_empty() && fb != "fail-try" {
+            base_models.push(fb.clone());
+        }
+    }
+
+    base_models.sort();
+    base_models.dedup();
+
+    let efforts = ["low", "medium", "high", "xhigh"];
+    let mut model_entries = Vec::new();
+
+    for bm in base_models {
+        model_entries.push(format!(
+            r#"{{"id":"{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
+            bm
+        ));
+        for effort in efforts {
+            model_entries.push(format!(
+                r#"{{"id":"{}-{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
+                bm, effort
+            ));
+        }
+    }
+
+    let body = format!(r#"{{"object":"list","data":[{}]}}"#, model_entries.join(","));
     let response = format!(
         "HTTP/1.1 200 OK\r\n\
         Content-Type: application/json\r\n\
@@ -52,7 +88,7 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
     }
 
     if request.method.eq_ignore_ascii_case("get") && is_models_catalog_route(clean_path) {
-        return handle_models_catalog(&mut client);
+        return handle_models_catalog(&mut client, config);
     }
 
     if is_prism_completions_route(clean_path) {

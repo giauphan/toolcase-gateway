@@ -284,10 +284,24 @@ fn falls_back_to_config_credentials_when_header_is_missing_or_short() {
 fn test_models_catalog_response() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
-    
+
     let handle = thread::spawn(move || {
+        let config = Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec!["fallback-1".into(), "fallback-2".into()],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: "https://prism.openai.com".into(),
+            prism_project_id: "default_proj".into(),
+            prism_cookie: "default_cookie".into(),
+            prism_sandbox_token: "default_token".into(),
+            prism_user_id: "default_user".into(),
+            prism_default_model: "gpt-5.6-terra".into(),
+        };
         let (mut client, _) = listener.accept().unwrap();
-        crate::routes::handle_models_catalog(&mut client).unwrap();
+        crate::routes::handle_models_catalog(&mut client, &config).unwrap();
     });
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
