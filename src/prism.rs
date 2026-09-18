@@ -316,13 +316,34 @@ pub fn handle_prism_chat_completion(
 
     let start_resp_res = ureq_builder.send(&start_body);
     let mut start_resp = match start_resp_res {
-        Ok(res) => res,
+        Ok(mut res) => {
+            let status = res.status();
+            let status_u16 = u16::from(status);
+            if status_u16 >= 400 {
+                let error_body = res.body_mut().read_to_string().unwrap_or_default();
+                return crate::http::write_error(
+                    client,
+                    status_u16,
+                    "Upstream Prism Error",
+                    &format!("Prism rejected request with HTTP {}: {}", status_u16, error_body),
+                );
+            }
+            res
+        }
+        Err(ureq::Error::StatusCode(code)) => {
+            return crate::http::write_error(
+                client,
+                code,
+                "Upstream Prism Error",
+                &format!("Prism rejected request with HTTP {}", code),
+            );
+        }
         Err(e) => {
             return crate::http::write_error(
                 client,
                 502,
                 "Bad Gateway",
-                &format!("Prism start request failed: {e}"),
+                &format!("Prism start request failed (network or timeout): {e}"),
             );
         }
     };
@@ -388,7 +409,16 @@ pub fn handle_prism_chat_completion(
 
             let poll_resp_res = req_builder.send(&status_bytes);
             let mut poll_resp = match poll_resp_res {
-                Ok(r) => r,
+                Ok(r) => {
+                    let status = r.status();
+                    let status_u16 = u16::from(status);
+                    if status_u16 >= 400 {
+                        let _ = r.into_body().read_to_string(); // exhaust it
+                        continue;
+                    }
+                    r
+                }
+                Err(ureq::Error::StatusCode(_)) => continue,
                 Err(_) => continue,
             };
 

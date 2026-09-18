@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use std::net::TcpStream;
 
 pub(crate) fn is_models_catalog_route(path: &str) -> bool {
-    path == "/v1/models" || path == "/models" || path == "/prism-openai/v1/models"
+    path.ends_with("/v1/models") || path.ends_with("/models")
 }
 
 pub(crate) fn is_prism_completions_route(path: &str) -> bool {
