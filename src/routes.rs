@@ -28,10 +28,6 @@ pub(crate) fn handle_models_catalog(client: &mut TcpStream, config: &Config) -> 
     let mut base_models = vec![
         "gpt-5.6-terra".to_string(),
         "gpt-5.6-sol".to_string(),
-        "gpt-4o".to_string(),
-        "gpt-4o-mini".to_string(),
-        "o1".to_string(),
-        "o3-mini".to_string(),
     ];
     if !config.prism_default_model.is_empty() {
         base_models.push(config.prism_default_model.clone());
