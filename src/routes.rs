@@ -24,7 +24,7 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
     client.flush()
 }
 
-pub(crate) fn handle_models_catalog(client: &mut TcpStream, config: &Config) -> io::Result<()> {
+pub(crate) fn handle_models_catalog(client: &mut TcpStream, _config: &Config) -> io::Result<()> {
     let base_models = vec![
         "gpt-5.6-terra".to_string(),
         "gpt-5.6-sol".to_string(),
