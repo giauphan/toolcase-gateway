@@ -25,19 +25,12 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
 }
 
 pub(crate) fn handle_models_catalog(client: &mut TcpStream, config: &Config) -> io::Result<()> {
-    let mut base_models = vec![
+    let base_models = vec![
         "gpt-5.6-terra".to_string(),
         "gpt-5.6-sol".to_string(),
     ];
-    if !config.prism_default_model.is_empty() {
-        base_models.push(config.prism_default_model.clone());
-    }
-    for fb in &config.fallbacks {
-        if !fb.is_empty() && fb != "fail-try" {
-            base_models.push(fb.clone());
-        }
-    }
 
+    let mut base_models = base_models;
     base_models.sort();
     base_models.dedup();
 
