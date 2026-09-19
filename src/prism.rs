@@ -295,10 +295,6 @@ pub fn handle_prism_chat_completion(
         ureq_builder = ureq_builder.header("Cookie", cookie);
     }
 
-    // Inbound Authorization if provided can be forwarded as well
-    if let Some((_, auth)) = inbound_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")) {
-        ureq_builder = ureq_builder.header("Authorization", auth);
-    }
     if let Some((_, sentinel_val)) = inbound_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token")) {
         ureq_builder = ureq_builder.header("openai-sentinel-token", sentinel_val);
     }
