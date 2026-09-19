@@ -299,6 +299,9 @@ pub fn handle_prism_chat_completion(
     if let Some((_, auth)) = inbound_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("authorization")) {
         ureq_builder = ureq_builder.header("Authorization", auth);
     }
+    if let Some((_, sentinel_val)) = inbound_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token")) {
+        ureq_builder = ureq_builder.header("openai-sentinel-token", sentinel_val);
+    }
 
     let start_body = serde_json::to_vec(&prism_start).map_err(|e| {
         io::Error::new(ErrorKind::InvalidInput, format!("Serialization error: {e}"))
@@ -358,10 +361,12 @@ pub fn handle_prism_chat_completion(
         if let Some(payload) = inner.payload {
             if let Some(msg) = payload.message {
                 if inner.status.as_deref() == Some("error") {
+                    let status_code = if msg.contains("403 Forbidden") { 403 } else { 400 };
+                    let status_text = if status_code == 403 { "Forbidden" } else { "Bad Request" };
                     return crate::http::write_error(
                         client,
-                        400,
-                        "Bad Request",
+                        status_code,
+                        status_text,
                         &format!("Prism error: {msg}"),
                     );
                 }
@@ -391,7 +396,12 @@ pub fn handle_prism_chat_completion(
             let mut req_builder = ureq::post(&status_url)
                 .header("Content-Type", "application/json")
                 .header("Origin", &config.prism_base_url)
-                .header("Referer", &format!("{}/?u={}", config.prism_base_url, config.prism_project_id));
+                .header("Referer", &format!("{}/?u={}", config.prism_base_url, creds.project_id));
+
+            // Forward incoming openai-sentinel-token if present
+            if let Some((_, sentinel_val)) = inbound_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token")) {
+                req_builder = req_builder.header("openai-sentinel-token", sentinel_val);
+            }
 
             if !cookie.is_empty() {
                 req_builder = req_builder.header("Cookie", cookie);
@@ -425,10 +435,12 @@ pub fn handle_prism_chat_completion(
                 if let Some(payload) = inner.payload {
                     if let Some(msg) = payload.message {
                         if inner.status.as_deref() == Some("error") {
+                            let status_code = if msg.contains("403 Forbidden") { 403 } else { 400 };
+                            let status_text = if status_code == 403 { "Forbidden" } else { "Bad Request" };
                             return crate::http::write_error(
                                 client,
-                                400,
-                                "Bad Request",
+                                status_code,
+                                status_text,
                                 &format!("Prism error: {msg}"),
                             );
                         }

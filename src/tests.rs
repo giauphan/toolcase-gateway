@@ -377,3 +377,108 @@ fn test_build_injected_prism_inputs_with_system() {
     assert_eq!(prism_inputs[1].role, "user");
     assert_eq!(prism_inputs[1].content[0].text, "hello");
 }
+
+#[test]
+fn test_prism_403_forbidden_error_mapping() {
+    let mock_prism = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let mock_prism_port = mock_prism.local_addr().unwrap().port();
+    
+    // Spawn a thread to act as the mock Prism server
+    let prism_handle = thread::spawn(move || {
+        let (mut client, _) = mock_prism.accept().unwrap();
+        
+        // Read the request head
+        let head = crate::http::read_request(&mut client).unwrap();
+        assert!(head.path.contains("/api/llm/response_with_tools_start") || head.method == "POST");
+        let body = head.body;
+        
+        let req_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let metadata = &req_json["metadata"];
+        assert_eq!(metadata["projectId"], "proj_403");
+
+        // We check if sentinel token is forwarded correctly as well
+        let sentinel = crate::http::header_value(&head.headers, "openai-sentinel-token");
+        assert_eq!(sentinel, Some("test_sentinel_token_123"));
+        
+        // Create a Prism response that wraps an INNER error with 403 Forbidden payload message
+        let mock_resp = r#"{
+            "status": "completed",
+            "request_id": "req_123",
+            "response": {
+                "status": "error",
+                "payload": {
+                    "message": "Error while processing conversation (403 Forbidden). Submit prompt again."
+                }
+            }
+        }"#;
+        
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            mock_resp.len(),
+            mock_resp
+        ).unwrap();
+        client.flush().unwrap();
+    });
+
+    let mock_proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let proxy_port = mock_proxy.local_addr().unwrap().port();
+
+    let proxy_handle = thread::spawn(move || {
+        let config = Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: format!("http://127.0.0.1:{}", mock_prism_port),
+            prism_project_id: "default_proj".into(),
+            prism_cookie: "default_cookie".into(),
+            prism_sandbox_token: "default_token".into(),
+            prism_user_id: "default_user".into(),
+            prism_default_model: "gpt-5.6-terra".into(),
+            prism_system_prompt: "Injected system".into(),
+        };
+        let (mut client, _) = mock_proxy.accept().unwrap();
+        
+        let req_in = crate::http::read_request(&mut client).unwrap();
+        crate::prism::handle_prism_chat_completion(&mut client, &req_in.body, &config, &req_in.headers).unwrap();
+    });
+    
+    // Simulate an OpenAI client connecting to the proxy
+    let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+    let openai_req = r#"{
+        "model": "gpt-5.6-sol-high",
+        "messages": [
+            {"role": "user", "content": "hello"}
+        ]
+    }"#;
+    write!(
+        client,
+        "POST /prism-openai/v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nx-api-key: cookie|||token|||user|||proj_403\r\nopenai-sentinel-token: test_sentinel_token_123\r\nContent-Length: {}\r\n\r\n{}",
+        openai_req.len(),
+        openai_req
+    ).unwrap();
+    client.flush().unwrap();
+
+    let head = crate::http::read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 403, "Should map inner Prism 403 Forbidden to HTTP 403");
+    
+    let mut body = head.buffered_body;
+    if let Some(length_str) = crate::http::header_value(&head.headers, "content-length") {
+        let length: usize = length_str.parse().unwrap();
+        while body.len() < length {
+            crate::http::read_more(&mut client, &mut body).unwrap();
+        }
+    }
+    
+    let resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        resp["error"]["message"],
+        "Prism error: Error while processing conversation (403 Forbidden). Submit prompt again."
+    );
+
+    prism_handle.join().unwrap();
+    proxy_handle.join().unwrap();
+}
