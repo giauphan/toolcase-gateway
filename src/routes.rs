@@ -25,10 +25,7 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
 }
 
 pub(crate) fn handle_models_catalog(client: &mut TcpStream, _config: &Config) -> io::Result<()> {
-    let base_models = vec![
-        "gpt-5.6-terra".to_string(),
-        "gpt-5.6-sol".to_string(),
-    ];
+    let base_models = vec!["gpt-5.6-terra".to_string(), "gpt-5.6-sol".to_string()];
 
     let mut base_models = base_models;
     base_models.sort();
@@ -53,7 +50,10 @@ pub(crate) fn handle_models_catalog(client: &mut TcpStream, _config: &Config) ->
         }
     }
 
-    let body = format!(r#"{{"object":"list","data":[{}]}}"#, model_entries.join(","));
+    let body = format!(
+        r#"{{"object":"list","data":[{}]}}"#,
+        model_entries.join(",")
+    );
     let response = format!(
         "HTTP/1.1 200 OK\r\n\
         Content-Type: application/json\r\n\
@@ -68,12 +68,14 @@ pub(crate) fn handle_models_catalog(client: &mut TcpStream, _config: &Config) ->
 }
 
 pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Result<()> {
-    let request = match read_request(&mut client) {
-        Ok(req) => req,
-        Err(e) => return Err(e),
-    };
+    let request = read_request(&mut client)?;
 
-    let clean_path = request.path.split('?').next().unwrap_or("").trim_end_matches('/');
+    let clean_path = request
+        .path
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/');
 
     if request.method.eq_ignore_ascii_case("options") {
         return handle_cors_preflight(&mut client);

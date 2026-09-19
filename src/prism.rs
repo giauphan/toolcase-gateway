@@ -187,7 +187,10 @@ pub(crate) struct PrismCredentials {
     pub(crate) project_id: String,
 }
 
-pub(crate) fn extract_credentials(headers: &[(String, String)], config: &Config) -> PrismCredentials {
+pub(crate) fn extract_credentials(
+    headers: &[(String, String)],
+    config: &Config,
+) -> PrismCredentials {
     let mut creds = PrismCredentials {
         cookie: config.prism_cookie.clone(),
         sandbox_token: config.prism_sandbox_token.clone(),
@@ -200,16 +203,20 @@ pub(crate) fn extract_credentials(headers: &[(String, String)], config: &Config)
         .or_else(|| crate::http::header_value(headers, "x-api-key"))
         .unwrap_or("");
 
-    let delim = if auth_header.contains("|||") { "|||" } else { "," };
+    let delim = if auth_header.contains("|||") {
+        "|||"
+    } else {
+        ","
+    };
     let parts: Vec<&str> = auth_header.rsplitn(4, delim).collect();
-    
+
     // rsplitn returns parts from right to left.
     // if length is 4: parts[0]=project_id, parts[1]=user_id, parts[2]=sandbox_token, parts[3]=cookie
     if parts.len() == 4 {
         creds.project_id = parts[0].trim().to_string();
         creds.user_id = parts[1].trim().to_string();
         creds.sandbox_token = parts[2].trim().to_string();
-        
+
         // The rest is the cookie. We only strip Bearer prefix from cookie just in case it started with it
         let c = parts[3].trim();
         creds.cookie = c.strip_prefix("Bearer ").unwrap_or(c).to_string();
@@ -272,7 +279,10 @@ pub fn handle_prism_chat_completion(
             user_id: creds.user_id.clone(),
             model: requested_model.clone(),
             reasoning_effort,
-            sandbox_url: format!("{}/s/sandboxes/proxy/", config.prism_base_url.trim_end_matches('/')),
+            sandbox_url: format!(
+                "{}/s/sandboxes/proxy/",
+                config.prism_base_url.trim_end_matches('/')
+            ),
             sandbox_token: creds.sandbox_token.clone(),
             frontend_origin: config.prism_base_url.clone(),
             codex_listen_snapshot: None,
@@ -280,13 +290,22 @@ pub fn handle_prism_chat_completion(
         conversation_id,
     };
 
-    let start_url = format!("{}/api/llm/response_with_tools_start", config.prism_base_url.trim_end_matches('/'));
-    let status_url = format!("{}/api/llm/response_with_tools_status", config.prism_base_url.trim_end_matches('/'));
+    let start_url = format!(
+        "{}/api/llm/response_with_tools_start",
+        config.prism_base_url.trim_end_matches('/')
+    );
+    let status_url = format!(
+        "{}/api/llm/response_with_tools_status",
+        config.prism_base_url.trim_end_matches('/')
+    );
 
     let mut ureq_builder = ureq::post(&start_url)
         .header("Content-Type", "application/json")
         .header("Origin", &config.prism_base_url)
-        .header("Referer", &format!("{}/?u={}", config.prism_base_url, creds.project_id));
+        .header(
+            "Referer",
+            &format!("{}/?u={}", config.prism_base_url, creds.project_id),
+        );
 
     // Forward inbound Cookie if present, otherwise fallback to configured PRISM_COOKIE
     let cookie = &creds.cookie;
@@ -295,7 +314,10 @@ pub fn handle_prism_chat_completion(
         ureq_builder = ureq_builder.header("Cookie", cookie);
     }
 
-    if let Some((_, sentinel_val)) = inbound_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token")) {
+    if let Some((_, sentinel_val)) = inbound_headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token"))
+    {
         ureq_builder = ureq_builder.header("openai-sentinel-token", sentinel_val);
     }
 
@@ -314,7 +336,10 @@ pub fn handle_prism_chat_completion(
                     client,
                     status_u16,
                     "Upstream Prism Error",
-                    &format!("Prism rejected request with HTTP {}: {}", status_u16, error_body),
+                    &format!(
+                        "Prism rejected request with HTTP {}: {}",
+                        status_u16, error_body
+                    ),
                 );
             }
             res
@@ -357,8 +382,16 @@ pub fn handle_prism_chat_completion(
         if let Some(payload) = inner.payload {
             if let Some(msg) = payload.message {
                 if inner.status.as_deref() == Some("error") {
-                    let status_code = if msg.contains("403 Forbidden") { 403 } else { 400 };
-                    let status_text = if status_code == 403 { "Forbidden" } else { "Bad Request" };
+                    let status_code = if msg.contains("403 Forbidden") {
+                        403
+                    } else {
+                        400
+                    };
+                    let status_text = if status_code == 403 {
+                        "Forbidden"
+                    } else {
+                        "Bad Request"
+                    };
                     return crate::http::write_error(
                         client,
                         status_code,
@@ -392,10 +425,16 @@ pub fn handle_prism_chat_completion(
             let mut req_builder = ureq::post(&status_url)
                 .header("Content-Type", "application/json")
                 .header("Origin", &config.prism_base_url)
-                .header("Referer", &format!("{}/?u={}", config.prism_base_url, creds.project_id));
+                .header(
+                    "Referer",
+                    &format!("{}/?u={}", config.prism_base_url, creds.project_id),
+                );
 
             // Forward incoming openai-sentinel-token if present
-            if let Some((_, sentinel_val)) = inbound_headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token")) {
+            if let Some((_, sentinel_val)) = inbound_headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token"))
+            {
                 req_builder = req_builder.header("openai-sentinel-token", sentinel_val);
             }
 
@@ -431,8 +470,16 @@ pub fn handle_prism_chat_completion(
                 if let Some(payload) = inner.payload {
                     if let Some(msg) = payload.message {
                         if inner.status.as_deref() == Some("error") {
-                            let status_code = if msg.contains("403 Forbidden") { 403 } else { 400 };
-                            let status_text = if status_code == 403 { "Forbidden" } else { "Bad Request" };
+                            let status_code = if msg.contains("403 Forbidden") {
+                                403
+                            } else {
+                                400
+                            };
+                            let status_text = if status_code == 403 {
+                                "Forbidden"
+                            } else {
+                                "Bad Request"
+                            };
                             return crate::http::write_error(
                                 client,
                                 status_code,
@@ -484,7 +531,11 @@ pub fn handle_prism_chat_completion(
                 finish_reason: None,
             }],
         };
-        let _ = write!(client, "data: {}\n\n", serde_json::to_string(&chunk_start).unwrap_or_default());
+        let _ = write!(
+            client,
+            "data: {}\n\n",
+            serde_json::to_string(&chunk_start).unwrap_or_default()
+        );
         let _ = client.flush();
 
         // Delta chunk 2: text content
@@ -503,7 +554,11 @@ pub fn handle_prism_chat_completion(
                     finish_reason: None,
                 }],
             };
-            let _ = write!(client, "data: {}\n\n", serde_json::to_string(&chunk_content).unwrap_or_default());
+            let _ = write!(
+                client,
+                "data: {}\n\n",
+                serde_json::to_string(&chunk_content).unwrap_or_default()
+            );
             let _ = client.flush();
         }
 
@@ -522,7 +577,11 @@ pub fn handle_prism_chat_completion(
                 finish_reason: Some("stop".to_string()),
             }],
         };
-        let _ = write!(client, "data: {}\n\n", serde_json::to_string(&chunk_end).unwrap_or_default());
+        let _ = write!(
+            client,
+            "data: {}\n\n",
+            serde_json::to_string(&chunk_end).unwrap_or_default()
+        );
         let _ = write!(client, "data: [DONE]\n\n");
         let _ = client.flush();
         Ok(())
@@ -576,7 +635,10 @@ fn extract_text_from_output(output: &[PrismOutputMessage]) -> String {
     text_acc
 }
 
-pub fn build_injected_prism_inputs(messages: &[OpenAiMessage], system_prompt_inject: &str) -> Vec<PrismInputItem> {
+pub fn build_injected_prism_inputs(
+    messages: &[OpenAiMessage],
+    system_prompt_inject: &str,
+) -> Vec<PrismInputItem> {
     let mut input_items = Vec::new();
     let mut has_injected_system = false;
 
@@ -599,14 +661,17 @@ pub fn build_injected_prism_inputs(messages: &[OpenAiMessage], system_prompt_inj
     }
 
     if !has_injected_system {
-        input_items.insert(0, PrismInputItem {
-            item_type: "message".to_string(),
-            role: "system".to_string(),
-            content: vec![PrismContentItem {
-                content_type: "input_text".to_string(),
-                text: system_prompt_inject.to_string(),
-            }],
-        });
+        input_items.insert(
+            0,
+            PrismInputItem {
+                item_type: "message".to_string(),
+                role: "system".to_string(),
+                content: vec![PrismContentItem {
+                    content_type: "input_text".to_string(),
+                    text: system_prompt_inject.to_string(),
+                }],
+            },
+        );
     }
     input_items
 }

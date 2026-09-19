@@ -1,7 +1,5 @@
 use crate::config::Config;
-use crate::http::{
-    header_value, read_response_head, stream_response, write_error, Request,
-};
+use crate::http::{header_value, read_response_head, stream_response, write_error, Request};
 use crate::rewrite::{json_string_value, replace_model};
 use std::io::{self, Write};
 use std::net::TcpStream;
@@ -147,7 +145,7 @@ pub(crate) fn handle_omniroute_proxy(
                     "[toolcase-gateway] upstream model \"{model}\" returned HTTP {} on final attempt",
                     head.status
                 );
-                return write_error(
+                write_error(
                     client,
                     head.status,
                     match head.status {
@@ -160,7 +158,7 @@ pub(crate) fn handle_omniroute_proxy(
                         _ => "Service Unavailable",
                     },
                     "toolcase-gateway: all upstream models exhausted",
-                );
+                )
             } else {
                 if head.status >= 400 {
                     let body_snippet = String::from_utf8_lossy(&head.buffered_body)
@@ -248,11 +246,7 @@ pub(crate) fn handle_omniroute_proxy(
     )
 }
 
-pub(crate) fn candidate_models(
-    body: &[u8],
-    fallbacks: &[String],
-    rotation: usize,
-) -> Vec<String> {
+pub(crate) fn candidate_models(body: &[u8], fallbacks: &[String], rotation: usize) -> Vec<String> {
     let mut candidates = Vec::new();
     if let Ok(text) = std::str::from_utf8(body) {
         if let Some(model) = json_string_value(text, "model") {

@@ -3,8 +3,8 @@ use crate::http::{
     header_value, is_chunked, is_request_target, is_token, parse_headers, read_more,
     read_response_head, Request,
 };
-use crate::rewrite::{escape_json_string, replace_model, rewrite_tool_names};
 use crate::omniroute::{open_upstream, RETRYABLE};
+use crate::rewrite::{escape_json_string, replace_model, rewrite_tool_names};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
@@ -276,7 +276,10 @@ fn falls_back_to_config_credentials_when_header_is_missing_or_short() {
         prism_system_prompt: "".into(),
     };
 
-    let headers = vec![("Authorization".to_string(), "Bearer sk-singlekey".to_string())];
+    let headers = vec![(
+        "Authorization".to_string(),
+        "Bearer sk-singlekey".to_string(),
+    )];
     let creds = crate::prism::extract_credentials(&headers, &config);
     assert_eq!(creds.cookie, "default_cookie");
     assert_eq!(creds.sandbox_token, "default_token");
@@ -303,7 +306,7 @@ fn test_models_catalog_response() {
             prism_sandbox_token: "default_token".into(),
             prism_user_id: "default_user".into(),
             prism_default_model: "gpt-5.6-terra".into(),
-        prism_system_prompt: "".into(),
+            prism_system_prompt: "".into(),
         };
         let (mut client, _) = listener.accept().unwrap();
         crate::routes::handle_models_catalog(&mut client, &config).unwrap();
@@ -339,22 +342,28 @@ fn test_cors_preflight_response() {
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
     let head = read_response_head(&mut client).unwrap();
     assert_eq!(head.status, 200);
-    assert_eq!(header_value(&head.headers, "access-control-allow-origin"), Some("*"));
+    assert_eq!(
+        header_value(&head.headers, "access-control-allow-origin"),
+        Some("*")
+    );
     handle.join().unwrap();
 }
 
 #[test]
 fn test_build_injected_prism_inputs_no_system() {
-    let messages = vec![
-        crate::prism::OpenAiMessage { role: "user".into(), content: "hello".into() }
-    ];
+    let messages = vec![crate::prism::OpenAiMessage {
+        role: "user".into(),
+        content: "hello".into(),
+    }];
     let prompt = "You are a test prompt";
     let prism_inputs = crate::prism::build_injected_prism_inputs(&messages, prompt);
-    
+
     assert_eq!(prism_inputs.len(), 2);
     assert_eq!(prism_inputs[0].role, "system");
-    assert!(prism_inputs[0].content[0].text.starts_with("You are a test prompt"));
-    
+    assert!(prism_inputs[0].content[0]
+        .text
+        .starts_with("You are a test prompt"));
+
     assert_eq!(prism_inputs[1].role, "user");
     assert_eq!(prism_inputs[1].content[0].text, "hello");
 }
@@ -362,18 +371,28 @@ fn test_build_injected_prism_inputs_no_system() {
 #[test]
 fn test_build_injected_prism_inputs_with_system() {
     let messages = vec![
-        crate::prism::OpenAiMessage { role: "system".into(), content: "{\"openFile\": \"main.rs\"}".into() },
-        crate::prism::OpenAiMessage { role: "user".into(), content: "hello".into() }
+        crate::prism::OpenAiMessage {
+            role: "system".into(),
+            content: "{\"openFile\": \"main.rs\"}".into(),
+        },
+        crate::prism::OpenAiMessage {
+            role: "user".into(),
+            content: "hello".into(),
+        },
     ];
     let prompt = "You are a test prompt";
     let prism_inputs = crate::prism::build_injected_prism_inputs(&messages, prompt);
-    
+
     assert_eq!(prism_inputs.len(), 2);
     assert_eq!(prism_inputs[0].role, "system");
     // Injection should be prepended
-    assert!(prism_inputs[0].content[0].text.starts_with("You are a test prompt"));
-    assert!(prism_inputs[0].content[0].text.contains("{\"openFile\": \"main.rs\"}"));
-    
+    assert!(prism_inputs[0].content[0]
+        .text
+        .starts_with("You are a test prompt"));
+    assert!(prism_inputs[0].content[0]
+        .text
+        .contains("{\"openFile\": \"main.rs\"}"));
+
     assert_eq!(prism_inputs[1].role, "user");
     assert_eq!(prism_inputs[1].content[0].text, "hello");
 }
@@ -382,16 +401,16 @@ fn test_build_injected_prism_inputs_with_system() {
 fn test_prism_403_forbidden_error_mapping() {
     let mock_prism = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let mock_prism_port = mock_prism.local_addr().unwrap().port();
-    
+
     // Spawn a thread to act as the mock Prism server
     let prism_handle = thread::spawn(move || {
         let (mut client, _) = mock_prism.accept().unwrap();
-        
+
         // Read the request head
         let head = crate::http::read_request(&mut client).unwrap();
         assert!(head.path.contains("/api/llm/response_with_tools_start") || head.method == "POST");
         let body = head.body;
-        
+
         let req_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let metadata = &req_json["metadata"];
         assert_eq!(metadata["projectId"], "proj_403");
@@ -399,7 +418,7 @@ fn test_prism_403_forbidden_error_mapping() {
         // We check if sentinel token is forwarded correctly as well
         let sentinel = crate::http::header_value(&head.headers, "openai-sentinel-token");
         assert_eq!(sentinel, Some("test_sentinel_token_123"));
-        
+
         // Create a Prism response that wraps an INNER error with 403 Forbidden payload message
         let mock_resp = r#"{
             "status": "completed",
@@ -411,7 +430,7 @@ fn test_prism_403_forbidden_error_mapping() {
                 }
             }
         }"#;
-        
+
         write!(
             client,
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -441,11 +460,17 @@ fn test_prism_403_forbidden_error_mapping() {
             prism_system_prompt: "Injected system".into(),
         };
         let (mut client, _) = mock_proxy.accept().unwrap();
-        
+
         let req_in = crate::http::read_request(&mut client).unwrap();
-        crate::prism::handle_prism_chat_completion(&mut client, &req_in.body, &config, &req_in.headers).unwrap();
+        crate::prism::handle_prism_chat_completion(
+            &mut client,
+            &req_in.body,
+            &config,
+            &req_in.headers,
+        )
+        .unwrap();
     });
-    
+
     // Simulate an OpenAI client connecting to the proxy
     let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
     let openai_req = r#"{
@@ -463,8 +488,11 @@ fn test_prism_403_forbidden_error_mapping() {
     client.flush().unwrap();
 
     let head = crate::http::read_response_head(&mut client).unwrap();
-    assert_eq!(head.status, 403, "Should map inner Prism 403 Forbidden to HTTP 403");
-    
+    assert_eq!(
+        head.status, 403,
+        "Should map inner Prism 403 Forbidden to HTTP 403"
+    );
+
     let mut body = head.buffered_body;
     if let Some(length_str) = crate::http::header_value(&head.headers, "content-length") {
         let length: usize = length_str.parse().unwrap();
@@ -472,7 +500,7 @@ fn test_prism_403_forbidden_error_mapping() {
             crate::http::read_more(&mut client, &mut body).unwrap();
         }
     }
-    
+
     let resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
         resp["error"]["message"],
