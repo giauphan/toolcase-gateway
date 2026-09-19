@@ -93,11 +93,15 @@ Point your client at `http://127.0.0.1:20129` instead of the upstream address.
 
 You can use different Prism accounts per request by providing the credentials in the client's `Authorization: Bearer <API_KEY>` or `x-api-key` header instead of static `.env` settings.
 
-**API Key Format:**
+**Recommended API key format:**
+
+```text
+<GW_PRISM_COOKIE>|||<OPENAI_SENTINEL_TOKEN>|||<GW_PRISM_SANDBOX_TOKEN>|||<GW_PRISM_USER_ID>|||<GW_PRISM_PROJECT_ID>
 ```
-<GW_PRISM_COOKIE>|||<GW_PRISM_SANDBOX_TOKEN>|||<GW_PRISM_USER_ID>|||<GW_PRISM_PROJECT_ID>
-```
-*(Or comma-separated: `<GW_PRISM_COOKIE>,<GW_PRISM_SANDBOX_TOKEN>,<GW_PRISM_USER_ID>,<GW_PRISM_PROJECT_ID>`)*
+
+Send it through either `Authorization: Bearer <API_KEY>` or `x-api-key: <API_KEY>`. The gateway forwards `OPENAI_SENTINEL_TOKEN` as Prism's `openai-sentinel-token` request header.
+
+An explicit `openai-sentinel-token` inbound header overrides the token embedded in the API key. The legacy four-part triple-pipe and comma-separated formats remain accepted, but they contain no sentinel token and may receive Prism `403 Forbidden` responses.
 
 ## Configuration
 

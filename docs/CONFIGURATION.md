@@ -14,9 +14,33 @@ config file and no command-line flags. Restart to apply changes.
 | `GW_FALLBACK_MODELS` | `fail-try` | csv | Fallback models tried in round-robin order after the requested model. |
 | `GW_MAX_CONNECTIONS` | `256` | usize | Concurrent connection cap. Excess connections get `503`. |
 | `GW_IO_TIMEOUT_SECS` | `120` | u64 | Per-socket read and write timeout. `0` disables timeouts. |
+| `GW_PRISM_BASE_URL` | `https://prism.openai.com` | URL | Prism API base URL. |
+| `GW_PRISM_PROJECT_ID` | built-in default | string | Default Prism project ID. |
+| `GW_PRISM_COOKIE` | empty | string | Default Prism cookie when a request does not provide a composite key. |
+| `GW_PRISM_SANDBOX_TOKEN` | empty | string | Default Prism sandbox token. |
+| `GW_PRISM_USER_ID` | empty | string | Default Prism user ID. |
+| `GW_PRISM_DEFAULT_MODEL` | `gpt-5.6-terra` | string | Default Prism model. |
+| `GW_PRISM_SYSTEM_PROMPT` | built-in default | string | System prompt injected into Prism input. |
 
 Empty or whitespace-only values fall back to the default. Unparseable numeric
 values fall back to the default rather than failing startup.
+
+## Prism per-request credentials
+
+For multi-account Prism requests, pass one composite key through either
+`Authorization: Bearer <API_KEY>` or `x-api-key: <API_KEY>`:
+
+```text
+<COOKIE>|||<OPENAI_SENTINEL_TOKEN>|||<SANDBOX_TOKEN>|||<USER_ID>|||<PROJECT_ID>
+```
+
+The gateway forwards `OPENAI_SENTINEL_TOKEN` as the
+`openai-sentinel-token` request header. An explicit inbound
+`openai-sentinel-token` header takes precedence over the embedded token.
+
+The legacy four-part triple-pipe and comma-separated formats remain accepted,
+but carry no sentinel token and can receive Prism `403 Forbidden` responses.
+Cookies and tokens are session credentials; never commit or log real values.
 
 ## Compile-time limits
 

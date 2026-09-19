@@ -53,6 +53,8 @@ struct PrismStartRequest {
     metadata: PrismMetadata,
     #[serde(rename = "conversationId")]
     conversation_id: String,
+    #[serde(rename = "previousResponseId")]
+    previous_response_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -83,6 +85,7 @@ struct PrismMetadata {
     frontend_origin: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     codex_listen_snapshot: Option<serde_json::Value>,
+    openai_sentinel_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -182,6 +185,7 @@ struct OpenAiChunkDelta {
 
 pub(crate) struct PrismCredentials {
     pub(crate) cookie: String,
+    pub(crate) sentinel_token: Option<String>,
     pub(crate) sandbox_token: String,
     pub(crate) user_id: String,
     pub(crate) project_id: String,
@@ -193,6 +197,7 @@ pub(crate) fn extract_credentials(
 ) -> PrismCredentials {
     let mut creds = PrismCredentials {
         cookie: config.prism_cookie.clone(),
+        sentinel_token: None,
         sandbox_token: config.prism_sandbox_token.clone(),
         user_id: config.prism_user_id.clone(),
         project_id: config.prism_project_id.clone(),
@@ -203,23 +208,34 @@ pub(crate) fn extract_credentials(
         .or_else(|| crate::http::header_value(headers, "x-api-key"))
         .unwrap_or("");
 
-    let delim = if auth_header.contains("|||") {
-        "|||"
+    if auth_header.contains("|||") {
+        let parts: Vec<&str> = auth_header.rsplitn(5, "|||").collect();
+        if parts.len() == 5 {
+            creds.project_id = parts[0].trim().to_string();
+            creds.user_id = parts[1].trim().to_string();
+            creds.sandbox_token = parts[2].trim().to_string();
+            creds.sentinel_token = Some(parts[3].trim().to_string());
+
+            let cookie = parts[4].trim();
+            creds.cookie = cookie.strip_prefix("Bearer ").unwrap_or(cookie).to_string();
+        } else if parts.len() == 4 {
+            creds.project_id = parts[0].trim().to_string();
+            creds.user_id = parts[1].trim().to_string();
+            creds.sandbox_token = parts[2].trim().to_string();
+
+            let cookie = parts[3].trim();
+            creds.cookie = cookie.strip_prefix("Bearer ").unwrap_or(cookie).to_string();
+        }
     } else {
-        ","
-    };
-    let parts: Vec<&str> = auth_header.rsplitn(4, delim).collect();
+        let parts: Vec<&str> = auth_header.rsplitn(4, ",").collect();
+        if parts.len() == 4 {
+            creds.project_id = parts[0].trim().to_string();
+            creds.user_id = parts[1].trim().to_string();
+            creds.sandbox_token = parts[2].trim().to_string();
 
-    // rsplitn returns parts from right to left.
-    // if length is 4: parts[0]=project_id, parts[1]=user_id, parts[2]=sandbox_token, parts[3]=cookie
-    if parts.len() == 4 {
-        creds.project_id = parts[0].trim().to_string();
-        creds.user_id = parts[1].trim().to_string();
-        creds.sandbox_token = parts[2].trim().to_string();
-
-        // The rest is the cookie. We only strip Bearer prefix from cookie just in case it started with it
-        let c = parts[3].trim();
-        creds.cookie = c.strip_prefix("Bearer ").unwrap_or(c).to_string();
+            let cookie = parts[3].trim();
+            creds.cookie = cookie.strip_prefix("Bearer ").unwrap_or(cookie).to_string();
+        }
     }
     creds
 }
@@ -270,7 +286,20 @@ pub fn handle_prism_chat_completion(
         reasoning_effort = "medium".to_string();
     }
 
+    let start_url = format!(
+        "{}/api/llm/response_with_tools_start",
+        config.prism_base_url.trim_end_matches('/')
+    );
+    let status_url = format!(
+        "{}/api/llm/response_with_tools_status",
+        config.prism_base_url.trim_end_matches('/')
+    );
+
     let creds = extract_credentials(inbound_headers, config);
+    let sentinel_token = crate::http::header_value(inbound_headers, "openai-sentinel-token")
+        .map(str::to_string)
+        .or(creds.sentinel_token);
+    let sentinel_token = sentinel_token.as_deref();
 
     let prism_start = PrismStartRequest {
         input: input_items,
@@ -284,20 +313,13 @@ pub fn handle_prism_chat_completion(
                 config.prism_base_url.trim_end_matches('/')
             ),
             sandbox_token: creds.sandbox_token.clone(),
+            openai_sentinel_token: sentinel_token.map(str::to_string),
             frontend_origin: config.prism_base_url.clone(),
             codex_listen_snapshot: None,
         },
         conversation_id,
+        previous_response_id: None,
     };
-
-    let start_url = format!(
-        "{}/api/llm/response_with_tools_start",
-        config.prism_base_url.trim_end_matches('/')
-    );
-    let status_url = format!(
-        "{}/api/llm/response_with_tools_status",
-        config.prism_base_url.trim_end_matches('/')
-    );
 
     let mut ureq_builder = ureq::post(&start_url)
         .header("Content-Type", "application/json")
@@ -314,11 +336,8 @@ pub fn handle_prism_chat_completion(
         ureq_builder = ureq_builder.header("Cookie", cookie);
     }
 
-    if let Some((_, sentinel_val)) = inbound_headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token"))
-    {
-        ureq_builder = ureq_builder.header("openai-sentinel-token", sentinel_val);
+    if let Some(sentinel_token) = sentinel_token {
+        ureq_builder = ureq_builder.header("openai-sentinel-token", sentinel_token);
     }
 
     let start_body = serde_json::to_vec(&prism_start).map_err(|e| {
@@ -431,11 +450,8 @@ pub fn handle_prism_chat_completion(
                 );
 
             // Forward incoming openai-sentinel-token if present
-            if let Some((_, sentinel_val)) = inbound_headers
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case("openai-sentinel-token"))
-            {
-                req_builder = req_builder.header("openai-sentinel-token", sentinel_val);
+            if let Some(sentinel_token) = sentinel_token {
+                req_builder = req_builder.header("openai-sentinel-token", sentinel_token);
             }
 
             if !cookie.is_empty() {

@@ -199,7 +199,7 @@ fn error_body_escapes_message() {
 }
 
 #[test]
-fn extracts_prism_credentials_with_triple_pipe() {
+fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
     let config = Config {
         target_host: "127.0.0.1".into(),
         target_port: 8080,
@@ -216,13 +216,17 @@ fn extracts_prism_credentials_with_triple_pipe() {
         prism_system_prompt: "".into(),
     };
 
-    let headers = vec![(
-        "Authorization".to_string(),
-        "Bearer custom_cookie_val; a=b|||custom_token|||custom_user|||custom_proj".to_string(),
-    )];
+    let headers = vec![
+        ("Authorization".to_string(),
+        "Bearer custom_cookie_val; a=b|||custom_sentinel|||custom_token|||custom_user|||custom_proj"
+            .to_string(),
+        ),
+        ("openai-sentinel-token".to_string(), "test_sentinel_token_123".to_string()),
+    ];
 
     let creds = crate::prism::extract_credentials(&headers, &config);
     assert_eq!(creds.cookie, "custom_cookie_val; a=b");
+    assert_eq!(creds.sentinel_token.as_deref(), Some("custom_sentinel"));
     assert_eq!(creds.sandbox_token, "custom_token");
     assert_eq!(creds.user_id, "custom_user");
     assert_eq!(creds.project_id, "custom_proj");
@@ -481,7 +485,7 @@ fn test_prism_403_forbidden_error_mapping() {
     }"#;
     write!(
         client,
-        "POST /prism-openai/v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nx-api-key: cookie|||token|||user|||proj_403\r\nopenai-sentinel-token: test_sentinel_token_123\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /prism-openai/v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nx-api-key: cookie|||test_sentinel_token_123|||token|||user|||proj_403\r\nContent-Length: {}\r\n\r\n{}",
         openai_req.len(),
         openai_req
     ).unwrap();
