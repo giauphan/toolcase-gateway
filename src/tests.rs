@@ -218,14 +218,14 @@ fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
 
     let headers = vec![
         ("Authorization".to_string(),
-        "Bearer custom_cookie_val; a=b|||custom_sentinel|||custom_token|||custom_user|||custom_proj"
+        "Bearer custom_cookie_val; a=b|||cookie_tail|||custom_sentinel|||custom_token|||custom_user|||custom_proj"
             .to_string(),
         ),
         ("openai-sentinel-token".to_string(), "test_sentinel_token_123".to_string()),
     ];
 
     let creds = crate::prism::extract_credentials(&headers, &config);
-    assert_eq!(creds.cookie, "custom_cookie_val; a=b");
+    assert_eq!(creds.cookie, "custom_cookie_val; a=b|||cookie_tail");
     assert_eq!(creds.sentinel_token.as_deref(), Some("custom_sentinel"));
     assert_eq!(creds.sandbox_token, "custom_token");
     assert_eq!(creds.user_id, "custom_user");

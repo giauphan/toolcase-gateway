@@ -85,7 +85,6 @@ struct PrismMetadata {
     frontend_origin: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     codex_listen_snapshot: Option<serde_json::Value>,
-    openai_sentinel_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -209,20 +208,37 @@ pub(crate) fn extract_credentials(
         .unwrap_or("");
 
     if auth_header.contains("|||") {
-        let parts: Vec<&str> = auth_header.rsplitn(5, "|||").collect();
-        if parts.len() == 5 {
+        let mut parts = auth_header.rsplitn(5, "|||");
+        let project_id = parts.next();
+        let user_id = parts.next();
+        let sandbox_token = parts.next();
+        let sentinel_token = parts.next();
+        let cookie = parts.next();
+        if let (
+            Some(project_id),
+            Some(user_id),
+            Some(sandbox_token),
+            Some(sentinel_token),
+            Some(cookie),
+        ) = (project_id, user_id, sandbox_token, sentinel_token, cookie)
+        {
+            creds.project_id = project_id.trim().to_string();
+            creds.user_id = user_id.trim().to_string();
+            creds.sandbox_token = sandbox_token.trim().to_string();
+            creds.sentinel_token = Some(sentinel_token.trim().to_string());
+            creds.cookie = cookie
+                .trim()
+                .strip_prefix("Bearer ")
+                .unwrap_or(cookie.trim())
+                .to_string();
+        } else {
+            let parts: Vec<&str> = auth_header.rsplitn(4, "|||").collect();
+            if parts.len() != 4 {
+                return creds;
+            }
             creds.project_id = parts[0].trim().to_string();
             creds.user_id = parts[1].trim().to_string();
             creds.sandbox_token = parts[2].trim().to_string();
-            creds.sentinel_token = Some(parts[3].trim().to_string());
-
-            let cookie = parts[4].trim();
-            creds.cookie = cookie.strip_prefix("Bearer ").unwrap_or(cookie).to_string();
-        } else if parts.len() == 4 {
-            creds.project_id = parts[0].trim().to_string();
-            creds.user_id = parts[1].trim().to_string();
-            creds.sandbox_token = parts[2].trim().to_string();
-
             let cookie = parts[3].trim();
             creds.cookie = cookie.strip_prefix("Bearer ").unwrap_or(cookie).to_string();
         }
@@ -313,7 +329,6 @@ pub fn handle_prism_chat_completion(
                 config.prism_base_url.trim_end_matches('/')
             ),
             sandbox_token: creds.sandbox_token.clone(),
-            openai_sentinel_token: sentinel_token.map(str::to_string),
             frontend_origin: config.prism_base_url.clone(),
             codex_listen_snapshot: None,
         },
