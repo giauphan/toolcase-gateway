@@ -137,7 +137,7 @@ fn forces_identity_encoding_upstream() {
         prism_cookie: "".into(),
         prism_sandbox_token: "".into(),
         prism_user_id: "".into(),
-        prism_default_model: "gpt-5.6-terra".into(),
+        prism_default_model: "gpt-5.6-sol".into(),
         prism_system_prompt: "".into(),
     };
     let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -212,7 +212,7 @@ fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
         prism_cookie: "default_cookie".into(),
         prism_sandbox_token: "default_token".into(),
         prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-terra".into(),
+        prism_default_model: "gpt-5.6-sol".into(),
         prism_system_prompt: "".into(),
     };
 
@@ -233,6 +233,37 @@ fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
 }
 
 #[test]
+fn extracts_prism_credentials_from_x_api_key() {
+    let config = Config {
+        target_host: "127.0.0.1".into(),
+        target_port: 8080,
+        fallbacks: vec![],
+        io_timeout: None,
+        retry_base_delay_ms: 100,
+        max_retry_delay_ms: 1000,
+        prism_base_url: "https://prism.openai.com".into(),
+        prism_project_id: "default_proj".into(),
+        prism_cookie: "default_cookie".into(),
+        prism_sandbox_token: "default_token".into(),
+        prism_user_id: "default_user".into(),
+        prism_default_model: "gpt-5.6-sol".into(),
+        prism_system_prompt: "".into(),
+    };
+    let headers = vec![(
+        "x-api-key".to_string(),
+        "cookie|||{\"p\":\"sentinel\"}|||sandbox|||user|||project".to_string(),
+    )];
+
+    let creds = crate::prism::extract_credentials(&headers, &config);
+
+    assert_eq!(creds.cookie, "cookie");
+    assert_eq!(creds.sentinel_token.as_deref(), Some(r#"{"p":"sentinel"}"#));
+    assert_eq!(creds.sandbox_token, "sandbox");
+    assert_eq!(creds.user_id, "user");
+    assert_eq!(creds.project_id, "project");
+}
+
+#[test]
 fn extracts_prism_credentials_with_comma_delimiter() {
     let config = Config {
         target_host: "127.0.0.1".into(),
@@ -246,7 +277,7 @@ fn extracts_prism_credentials_with_comma_delimiter() {
         prism_cookie: "default_cookie".into(),
         prism_sandbox_token: "default_token".into(),
         prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-terra".into(),
+        prism_default_model: "gpt-5.6-sol".into(),
         prism_system_prompt: "".into(),
     };
 
@@ -276,7 +307,7 @@ fn falls_back_to_config_credentials_when_header_is_missing_or_short() {
         prism_cookie: "default_cookie".into(),
         prism_sandbox_token: "default_token".into(),
         prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-terra".into(),
+        prism_default_model: "gpt-5.6-sol".into(),
         prism_system_prompt: "".into(),
     };
 
@@ -309,7 +340,7 @@ fn test_models_catalog_response() {
             prism_cookie: "default_cookie".into(),
             prism_sandbox_token: "default_token".into(),
             prism_user_id: "default_user".into(),
-            prism_default_model: "gpt-5.6-terra".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
             prism_system_prompt: "".into(),
         };
         let (mut client, _) = listener.accept().unwrap();
@@ -328,9 +359,164 @@ fn test_models_catalog_response() {
         read_more(&mut client, &mut body).unwrap();
     }
     handle.join().unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
     assert_eq!(json["object"], "list");
-    assert!(json["data"].as_array().unwrap().len() >= 2);
+    let models = json["data"].as_array().unwrap();
+    assert_eq!(models.len(), 5);
+    assert!(models
+        .iter()
+        .all(|model| { !model["id"].as_str().unwrap().contains("terra") }));
+    assert!(models
+        .iter()
+        .any(|model| model["id"] == "gpt-5.6-sol-xhigh"));
+}
+
+#[test]
+fn test_prism_successful_start_and_status_flow() {
+    let mock_prism = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let mock_prism_port = mock_prism.local_addr().unwrap().port();
+
+    let prism_handle = thread::spawn(move || {
+        let (mut start_client, _) = mock_prism.accept().unwrap();
+        let start = crate::http::read_request(&mut start_client).unwrap();
+        assert_eq!(start.method, "POST");
+        assert_eq!(start.path, "/api/llm/response_with_tools_start");
+        assert_eq!(
+            crate::http::header_value(&start.headers, "cookie"),
+            Some("session=cookie-value|||cookie-tail")
+        );
+        assert_eq!(
+            crate::http::header_value(&start.headers, "openai-sentinel-token"),
+            Some(r#"{"p":"packed-sentinel"}"#)
+        );
+        let expected_base_url = format!("http://127.0.0.1:{mock_prism_port}");
+        assert_eq!(
+            crate::http::header_value(&start.headers, "origin"),
+            Some(expected_base_url.as_str())
+        );
+        assert_eq!(
+            crate::http::header_value(&start.headers, "referer"),
+            Some(format!("{expected_base_url}/?u=proj_flow").as_str())
+        );
+
+        let start_json: serde_json::Value = serde_json::from_slice(&start.body).unwrap();
+        assert_eq!(start_json["metadata"]["projectId"], "proj_flow");
+        assert_eq!(start_json["metadata"]["userId"], "user_flow");
+        assert_eq!(start_json["metadata"]["sandbox_token"], "sandbox_flow");
+        assert_eq!(start_json["metadata"]["model"], "gpt-5.6-sol");
+        assert_eq!(start_json["metadata"]["reasoning_effort"], "xhigh");
+
+        let start_body = r#"{
+            "status":"running",
+            "request_id":"request_flow",
+            "turn_state":{"step":1}
+        }"#;
+        write!(
+            start_client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            start_body.len(),
+            start_body
+        )
+        .unwrap();
+        start_client.flush().unwrap();
+        drop(start_client);
+
+        let (mut status_client, _) = mock_prism.accept().unwrap();
+        let status = crate::http::read_request(&mut status_client).unwrap();
+        assert_eq!(status.method, "POST");
+        assert_eq!(status.path, "/api/llm/response_with_tools_status");
+        assert_eq!(
+            crate::http::header_value(&status.headers, "cookie"),
+            Some("session=cookie-value|||cookie-tail")
+        );
+        assert_eq!(
+            crate::http::header_value(&status.headers, "openai-sentinel-token"),
+            Some(r#"{"p":"packed-sentinel"}"#)
+        );
+
+        let status_json: serde_json::Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(status_json["request_id"], "request_flow");
+        assert_eq!(status_json["turn_state"]["step"], 1);
+
+        let status_body = r#"{
+            "status":"completed",
+            "response":{
+                "status":"completed",
+                "payload":{
+                    "output":[{"content":[{"type":"output_text","text":"flow works"}]}]
+                }
+            }
+        }"#;
+        write!(
+            status_client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            status_body.len(),
+            status_body
+        )
+        .unwrap();
+        status_client.flush().unwrap();
+    });
+
+    let mock_proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let proxy_port = mock_proxy.local_addr().unwrap().port();
+    let proxy_handle = thread::spawn(move || {
+        let config = Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: format!("http://127.0.0.1:{mock_prism_port}"),
+            prism_project_id: "default_proj".into(),
+            prism_cookie: "default_cookie".into(),
+            prism_sandbox_token: "default_token".into(),
+            prism_user_id: "default_user".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "Injected system".into(),
+        };
+        let (mut client, _) = mock_proxy.accept().unwrap();
+        let req_in = crate::http::read_request(&mut client).unwrap();
+        crate::prism::handle_prism_chat_completion(
+            &mut client,
+            &req_in.body,
+            &config,
+            &req_in.headers,
+        )
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+    let openai_req = r#"{
+        "model":"gpt-5.6-sol-xhigh",
+        "messages":[{"role":"user","content":"hello"}]
+    }"#;
+    let api_key = "session=cookie-value|||cookie-tail|||{\"p\":\"packed-sentinel\"}|||sandbox_flow|||user_flow|||proj_flow";
+    write!(
+        client,
+        "POST /prism-openai/v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nx-api-key: {api_key}\r\nContent-Length: {}\r\n\r\n{}",
+        openai_req.len(),
+        openai_req
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = crate::http::read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    let mut body = head.buffered_body;
+    let length = crate::http::header_value(&head.headers, "content-length")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    while body.len() < length {
+        crate::http::read_more(&mut client, &mut body).unwrap();
+    }
+    let response: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
+    assert_eq!(response["model"], "gpt-5.6-sol");
+    assert_eq!(response["choices"][0]["message"]["content"], "flow works");
+
+    prism_handle.join().unwrap();
+    proxy_handle.join().unwrap();
 }
 
 #[test]
@@ -412,7 +598,8 @@ fn test_prism_403_forbidden_error_mapping() {
 
         // Read the request head
         let head = crate::http::read_request(&mut client).unwrap();
-        assert!(head.path.contains("/api/llm/response_with_tools_start") || head.method == "POST");
+        assert_eq!(head.method, "POST");
+        assert_eq!(head.path, "/api/llm/response_with_tools_start");
         let body = head.body;
 
         let req_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -420,6 +607,10 @@ fn test_prism_403_forbidden_error_mapping() {
         assert_eq!(metadata["projectId"], "proj_403");
 
         // We check if sentinel token is forwarded correctly as well
+        assert_eq!(
+            crate::http::header_value(&head.headers, "cookie"),
+            Some("cookie")
+        );
         let sentinel = crate::http::header_value(&head.headers, "openai-sentinel-token");
         assert_eq!(sentinel, Some("test_sentinel_token_123"));
 
@@ -460,7 +651,7 @@ fn test_prism_403_forbidden_error_mapping() {
             prism_cookie: "default_cookie".into(),
             prism_sandbox_token: "default_token".into(),
             prism_user_id: "default_user".into(),
-            prism_default_model: "gpt-5.6-terra".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
             prism_system_prompt: "Injected system".into(),
         };
         let (mut client, _) = mock_proxy.accept().unwrap();

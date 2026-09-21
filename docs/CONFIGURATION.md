@@ -19,7 +19,7 @@ config file and no command-line flags. Restart to apply changes.
 | `GW_PRISM_COOKIE` | empty | string | Default Prism cookie when a request does not provide a composite key. |
 | `GW_PRISM_SANDBOX_TOKEN` | empty | string | Default Prism sandbox token. |
 | `GW_PRISM_USER_ID` | empty | string | Default Prism user ID. |
-| `GW_PRISM_DEFAULT_MODEL` | `gpt-5.6-terra` | string | Default Prism model. |
+| `GW_PRISM_DEFAULT_MODEL` | `gpt-5.6-sol` | string | Default Prism model. |
 | `GW_PRISM_SYSTEM_PROMPT` | built-in default | string | System prompt injected into Prism input. |
 
 Empty or whitespace-only values fall back to the default. Unparseable numeric
