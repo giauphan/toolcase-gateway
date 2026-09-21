@@ -232,15 +232,7 @@ pub(crate) fn extract_credentials(
                 .unwrap_or(cookie.trim())
                 .to_string();
         } else {
-            let parts: Vec<&str> = auth_header.rsplitn(4, "|||").collect();
-            if parts.len() != 4 {
-                return creds;
-            }
-            creds.project_id = parts[0].trim().to_string();
-            creds.user_id = parts[1].trim().to_string();
-            creds.sandbox_token = parts[2].trim().to_string();
-            let cookie = parts[3].trim();
-            creds.cookie = cookie.strip_prefix("Bearer ").unwrap_or(cookie).to_string();
+            return creds;
         }
     } else {
         let parts: Vec<&str> = auth_header.rsplitn(4, ",").collect();
