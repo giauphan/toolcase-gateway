@@ -436,12 +436,14 @@ pub fn handle_prism_chat_completion(
             }
             if let Some(output) = payload.output {
                 final_output_text = extract_text_from_output(&output);
+                eprintln!("[DEBUG] start response output text: {:?}", final_output_text);
             }
         }
     }
 
     // If response is still running or pending, poll status endpoint
     if final_output_text.is_empty() && current_turn_state.is_some() && !request_id.is_empty() {
+        eprintln!("[DEBUG] entering poll loop, request_id={request_id}");
         let max_attempts = 120;
         for _ in 0..max_attempts {
             std::thread::sleep(Duration::from_millis(1000));
