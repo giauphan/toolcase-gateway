@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::http::read_request;
 use crate::omniroute::handle_omniroute_proxy;
-use crate::prism::{handle_prism_chat_completion, handle_prism_web_api};
+use crate::prism::handle_prism_chat_completion;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
@@ -11,10 +11,6 @@ pub(crate) fn is_models_catalog_route(path: &str) -> bool {
 
 pub(crate) fn is_prism_completions_route(path: &str) -> bool {
     path == "/prism-openai/v1/chat/completions"
-}
-
-pub(crate) fn is_prism_web_api_route(path: &str) -> bool {
-    path == "/prism-web-api/v1/response"
 }
 
 pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
@@ -91,10 +87,6 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
 
     if is_prism_completions_route(clean_path) {
         return handle_prism_chat_completion(&mut client, &request.body, config, &request.headers);
-    }
-
-    if is_prism_web_api_route(clean_path) {
-        return handle_prism_web_api(&mut client, &request.body, config, &request.headers);
     }
 
     handle_omniroute_proxy(&mut client, &request, config)
