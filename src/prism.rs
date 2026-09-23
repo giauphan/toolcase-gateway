@@ -47,7 +47,7 @@ where
     }
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismStartRequest {
     input: Vec<PrismInputItem>,
     metadata: PrismMetadata,
@@ -55,9 +55,11 @@ struct PrismStartRequest {
     conversation_id: String,
     #[serde(rename = "previousResponseId")]
     previous_response_id: Option<String>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PrismInputItem {
     #[serde(rename = "type")]
     pub item_type: String,
@@ -65,14 +67,14 @@ pub struct PrismInputItem {
     pub content: Vec<PrismContentItem>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PrismContentItem {
     #[serde(rename = "type")]
     pub content_type: String,
     pub text: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismMetadata {
     #[serde(rename = "projectId")]
     project_id: String,
@@ -85,15 +87,18 @@ struct PrismMetadata {
     frontend_origin: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     codex_listen_snapshot: Option<serde_json::Value>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismStatusRequest {
     request_id: String,
     turn_state: serde_json::Value,
+    diff_format: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismResponse {
     status: Option<String>,
     request_id: Option<String>,
@@ -101,13 +106,13 @@ struct PrismResponse {
     response: Option<PrismInnerResponse>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismInnerResponse {
     status: Option<String>,
     payload: Option<PrismPayload>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismPayload {
     output: Option<Vec<PrismOutputMessage>>,
     message: Option<String>,
@@ -115,12 +120,12 @@ struct PrismPayload {
     reason: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismOutputMessage {
     content: Option<Vec<PrismOutputContent>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct PrismOutputContent {
     #[serde(rename = "type")]
     #[allow(dead_code)]
@@ -202,6 +207,10 @@ pub(crate) fn extract_credentials(
         project_id: config.prism_project_id.clone(),
     };
 
+    if let Some(direct_cookie) = crate::http::header_value(headers, "cookie") {
+        creds.cookie = direct_cookie.trim().to_string();
+    }
+
     let auth_header = crate::http::header_value(headers, "authorization")
         .and_then(|v| v.strip_prefix("Bearer ").or(Some(v)))
         .or_else(|| crate::http::header_value(headers, "x-api-key"))
@@ -246,6 +255,335 @@ pub(crate) fn extract_credentials(
         }
     }
     creds
+}
+
+struct PrismExecutionError {
+    status: u16,
+    reason: &'static str,
+    message: String,
+}
+
+fn prism_execution_error(status: u16, message: impl Into<String>) -> PrismExecutionError {
+    let reason = match status {
+        400 => "Bad Request",
+        403 => "Forbidden",
+        502 => "Bad Gateway",
+        _ => "Upstream Prism Error",
+    };
+    PrismExecutionError {
+        status,
+        reason,
+        message: message.into(),
+    }
+}
+
+fn build_prism_start_request(
+    req: &OpenAiChatRequest,
+    config: &Config,
+    creds: &PrismCredentials,
+) -> PrismStartRequest {
+    let conv_uuid = Uuid::new_v4();
+    let conversation_id = format!("cdx1_{conv_uuid}");
+    let mut requested_model = req
+        .model
+        .clone()
+        .unwrap_or_else(|| config.prism_default_model.clone());
+    let mut inferred_reasoning = None;
+    for suffix in &["-xhigh", "-high", "-medium", "-low"] {
+        if requested_model.ends_with(suffix) {
+            requested_model = requested_model.strip_suffix(suffix).unwrap().to_string();
+            inferred_reasoning = Some(suffix.trim_start_matches('-').to_string());
+            break;
+        }
+    }
+    let mut reasoning_effort = req
+        .reasoning_effort
+        .clone()
+        .or(inferred_reasoning)
+        .unwrap_or_else(|| "medium".to_string())
+        .to_lowercase();
+    if reasoning_effort == "xhight" {
+        reasoning_effort = "xhigh".to_string();
+    }
+    if !["low", "medium", "high", "xhigh"].contains(&reasoning_effort.as_str()) {
+        reasoning_effort = "medium".to_string();
+    }
+
+    PrismStartRequest {
+        input: build_injected_prism_inputs(&req.messages, &config.prism_system_prompt),
+        metadata: PrismMetadata {
+            project_id: creds.project_id.clone(),
+            user_id: creds.user_id.clone(),
+            model: requested_model,
+            reasoning_effort,
+            sandbox_url: format!(
+                "{}/s/sandboxes/proxy/",
+                config.prism_base_url.trim_end_matches('/')
+            ),
+            sandbox_token: creds.sandbox_token.clone(),
+            frontend_origin: config.prism_base_url.clone(),
+            codex_listen_snapshot: None,
+            extra: serde_json::Map::new(),
+        },
+        conversation_id,
+        previous_response_id: None,
+        extra: serde_json::Map::new(),
+    }
+}
+
+fn post_with_prism_headers(
+    url: &str,
+    body: &[u8],
+    config: &Config,
+    creds: &PrismCredentials,
+    sentinel_token: Option<&str>,
+) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    let mut builder = ureq::post(url)
+        .header("Content-Type", "application/json")
+        .header("Origin", &config.prism_base_url)
+        .header(
+            "Referer",
+            &format!("{}/?u={}", config.prism_base_url, creds.project_id),
+        );
+    if !creds.cookie.is_empty() {
+        builder = builder.header("Cookie", &creds.cookie);
+    }
+    if let Some(token) = sentinel_token {
+        builder = builder.header("openai-sentinel-token", token);
+    }
+    builder.send(body)
+}
+
+fn run_prism_start_and_poll(
+    start_request: &PrismStartRequest,
+    config: &Config,
+    creds: &PrismCredentials,
+    sentinel_token: Option<&str>,
+) -> Result<serde_json::Value, PrismExecutionError> {
+    let start_url = format!(
+        "{}/api/llm/response_with_tools_start",
+        config.prism_base_url.trim_end_matches('/')
+    );
+    let status_url = format!(
+        "{}/api/llm/response_with_tools_status",
+        config.prism_base_url.trim_end_matches('/')
+    );
+    let start_body = serde_json::to_vec(start_request)
+        .map_err(|e| prism_execution_error(400, format!("Serialization error: {e}")))?;
+    eprintln!(
+        "[DEBUG] Prism start url={} body_bytes={} cookie_present={} sentinel_present={}",
+        start_url,
+        start_body.len(),
+        !creds.cookie.is_empty(),
+        sentinel_token.is_some()
+    );
+
+    let mut start_response =
+        match post_with_prism_headers(&start_url, &start_body, config, creds, sentinel_token) {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(code)) => {
+                return Err(prism_execution_error(
+                    code,
+                    format!("Prism rejected start request with HTTP {code}"),
+                ));
+            }
+            Err(error) => {
+                return Err(prism_execution_error(
+                    502,
+                    format!("Prism start request failed: {error}"),
+                ));
+            }
+        };
+    let mut current_raw = start_response
+        .body_mut()
+        .read_json::<serde_json::Value>()
+        .map_err(|e| {
+            prism_execution_error(502, format!("Failed to parse Prism start response: {e}"))
+        })?;
+    let mut current: PrismResponse = serde_json::from_value(current_raw.clone())
+        .map_err(|e| prism_execution_error(502, format!("Invalid Prism start response: {e}")))?;
+    let request_id = current.request_id.clone().unwrap_or_default();
+    let mut turn_state = current.turn_state.clone();
+    let mut completed = current.status.as_deref() == Some("completed");
+
+    if let Some(inner) = &current.response {
+        if inner.status.as_deref() == Some("error") {
+            if let Some(message) = inner
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.message.clone())
+            {
+                let status = if message.contains("403 Forbidden") {
+                    403
+                } else {
+                    400
+                };
+                return Err(prism_execution_error(
+                    status,
+                    format!("Prism error: {message}"),
+                ));
+            }
+        }
+    }
+
+    for attempt in 0..120 {
+        if completed || request_id.is_empty() || turn_state.is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1000));
+        let status_request = PrismStatusRequest {
+            request_id: request_id.clone(),
+            turn_state: turn_state.clone().unwrap(),
+            diff_format: "structured_v1".to_string(),
+        };
+        let status_body = serde_json::to_vec(&status_request)
+            .map_err(|e| prism_execution_error(400, format!("Serialization error: {e}")))?;
+        let mut status_response =
+            match post_with_prism_headers(&status_url, &status_body, config, creds, sentinel_token)
+            {
+                Ok(response) => response,
+                Err(ureq::Error::StatusCode(code)) => {
+                    eprintln!(
+                        "[DEBUG] Prism status attempt={} http_status={}",
+                        attempt + 1,
+                        code
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[DEBUG] Prism status attempt={} transport_error={}",
+                        attempt + 1,
+                        error
+                    );
+                    continue;
+                }
+            };
+        let next_raw = match status_response.body_mut().read_json::<serde_json::Value>() {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!(
+                    "[DEBUG] Prism status attempt={} parse_error={}",
+                    attempt + 1,
+                    error
+                );
+                continue;
+            }
+        };
+        let next = match serde_json::from_value::<PrismResponse>(next_raw.clone()) {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!(
+                    "[DEBUG] Prism status attempt={} shape_error={}",
+                    attempt + 1,
+                    error
+                );
+                continue;
+            }
+        };
+        current_raw = next_raw;
+        current = next;
+        turn_state = current.turn_state.clone();
+        completed = current.status.as_deref() == Some("completed");
+        if let Some(inner) = &current.response {
+            if inner.status.as_deref() == Some("error") {
+                if let Some(message) = inner
+                    .payload
+                    .as_ref()
+                    .and_then(|payload| payload.message.clone())
+                {
+                    let status = if message.contains("403 Forbidden") {
+                        403
+                    } else {
+                        400
+                    };
+                    return Err(prism_execution_error(
+                        status,
+                        format!("Prism error: {message}"),
+                    ));
+                }
+            }
+            if inner
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.output.as_ref())
+                .map(|output| !extract_text_from_output(output).is_empty())
+                .unwrap_or(false)
+            {
+                completed = true;
+            }
+        }
+        if completed {
+            break;
+        }
+    }
+    eprintln!(
+        "[DEBUG] Prism response status={} request_id={} completed={}",
+        current.status.as_deref().unwrap_or("unknown"),
+        request_id,
+        completed
+    );
+    Ok(current_raw)
+}
+
+pub(crate) fn handle_prism_web_api(
+    client: &mut TcpStream,
+    body: &[u8],
+    config: &Config,
+    inbound_headers: &[(String, String)],
+) -> io::Result<()> {
+    let creds = extract_credentials(inbound_headers, config);
+    let sentinel_token = crate::http::header_value(inbound_headers, "openai-sentinel-token")
+        .map(str::to_string)
+        .or(creds.sentinel_token.clone());
+    let mut start_request = match serde_json::from_slice::<PrismStartRequest>(body) {
+        Ok(request) => request,
+        Err(_) => {
+            let req: OpenAiChatRequest = serde_json::from_slice(body).map_err(|e| {
+                io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Invalid JSON request: {e}"),
+                )
+            })?;
+            build_prism_start_request(&req, config, &creds)
+        }
+    };
+
+    if start_request.metadata.project_id.is_empty() {
+        start_request.metadata.project_id = creds.project_id.clone();
+    }
+    if start_request.metadata.user_id.is_empty() {
+        start_request.metadata.user_id = creds.user_id.clone();
+    }
+    if start_request.metadata.sandbox_token.is_empty() {
+        start_request.metadata.sandbox_token = creds.sandbox_token.clone();
+    }
+    if start_request.metadata.frontend_origin.is_empty() {
+        start_request.metadata.frontend_origin = config.prism_base_url.clone();
+    }
+    if start_request.metadata.sandbox_url.is_empty() {
+        start_request.metadata.sandbox_url = format!(
+            "{}/s/sandboxes/proxy/",
+            config.prism_base_url.trim_end_matches('/')
+        );
+    }
+    let response =
+        run_prism_start_and_poll(&start_request, config, &creds, sentinel_token.as_deref());
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            return crate::http::write_error(client, error.status, error.reason, &error.message)
+        }
+    };
+    let response_body = serde_json::to_vec(&response)
+        .map_err(|e| io::Error::new(ErrorKind::InvalidData, format!("Serialization error: {e}")))?;
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response_body.len()
+    )?;
+    client.write_all(&response_body)?;
+    client.flush()
 }
 
 pub fn handle_prism_chat_completion(
@@ -323,9 +661,11 @@ pub fn handle_prism_chat_completion(
             sandbox_token: creds.sandbox_token.clone(),
             frontend_origin: config.prism_base_url.clone(),
             codex_listen_snapshot: None,
+            extra: serde_json::Map::new(),
         },
         conversation_id,
         previous_response_id: None,
+        extra: serde_json::Map::new(),
     };
 
     let mut ureq_builder = ureq::post(&start_url)
@@ -428,7 +768,10 @@ pub fn handle_prism_chat_completion(
             }
             if let Some(output) = payload.output {
                 final_output_text = extract_text_from_output(&output);
-                eprintln!("[DEBUG] start response output text: {:?}", final_output_text);
+                eprintln!(
+                    "[DEBUG] start response output text: {:?}",
+                    final_output_text
+                );
             }
         }
     }
@@ -443,6 +786,7 @@ pub fn handle_prism_chat_completion(
             let status_req = PrismStatusRequest {
                 request_id: request_id.clone(),
                 turn_state: current_turn_state.clone().unwrap(),
+                diff_format: "structured_v1".to_string(),
             };
 
             let status_bytes = match serde_json::to_vec(&status_req) {

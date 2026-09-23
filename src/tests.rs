@@ -536,6 +536,7 @@ fn test_prism_web_api_response() {
 
     let cookie_value = prism_cookie.clone();
     let prism_handle = thread::spawn(move || {
+        // Step 1: Start request
         let (mut client, _) = prism_listener.accept().unwrap();
         let req = crate::http::read_request(&mut client).unwrap();
         assert_eq!(req.method, "POST");
@@ -544,15 +545,44 @@ fn test_prism_web_api_response() {
             .headers
             .iter()
             .any(|(k, v)| k == "cookie" && v.contains(&cookie_value)));
+        let sentinel = crate::http::header_value(&req.headers, "openai-sentinel-token");
+        assert_eq!(sentinel, Some("test_sentinel_xyz"));
 
-        let mock_resp = r#"{"status":"completed","request_id":"c172c25f-fb09-42f2-938b-b9714677d359","codex_async_job_id":"3417","response":{"status":"success","payload":{"id":"resp_muca5mj9_row8fsvt","output":[{"id":"out_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello","annotations":[]}]}],"conversationId":"cdx1_250d7977-ffd4-444f-ade0-3a98aa7cddfb"}}}"#;
+        let start_body_val: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+        assert_eq!(start_body_val["metadata"]["projectId"], "proj_403");
+        assert_eq!(start_body_val["metadata"]["userId"], "user_123");
+        assert_eq!(start_body_val["metadata"]["model"], "gpt-5.6-sol");
+
+        let mock_start_resp = r#"{"status":"started","request_id":"c172c25f-fb09-42f2-938b-b9714677d359","turn_state":{"turn":1},"codex_async_job_id":"3417","response":{"status":"in_progress","payload":{"id":"resp_start_1"}}}"#;
         write!(
             client,
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            mock_resp.len(),
-            mock_resp
+            mock_start_resp.len(),
+            mock_start_resp
         ).unwrap();
         client.flush().unwrap();
+
+        // Step 2: Status polling request
+        let (mut client2, _) = prism_listener.accept().unwrap();
+        let status_req = crate::http::read_request(&mut client2).unwrap();
+        assert_eq!(status_req.method, "POST");
+        assert_eq!(status_req.path, "/api/llm/response_with_tools_status");
+        let status_body_val: serde_json::Value = serde_json::from_slice(&status_req.body).unwrap();
+        assert_eq!(
+            status_body_val["request_id"],
+            "c172c25f-fb09-42f2-938b-b9714677d359"
+        );
+        assert_eq!(status_body_val["diff_format"], "structured_v1");
+        assert_eq!(status_body_val["turn_state"]["turn"], 1);
+
+        let mock_final_resp = r#"{"status":"completed","request_id":"c172c25f-fb09-42f2-938b-b9714677d359","codex_async_job_id":"3417","response":{"status":"success","payload":{"id":"resp_muca5mj9_row8fsvt","output":[{"id":"out_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello from prism","annotations":[]}]}],"conversationId":"cdx1_250d7977-ffd4-444f-ade0-3a98aa7cddfb"}}}"#;
+        write!(
+            client2,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            mock_final_resp.len(),
+            mock_final_resp
+        ).unwrap();
+        client2.flush().unwrap();
     });
 
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -575,21 +605,25 @@ fn test_prism_web_api_response() {
         };
         let (mut client, _) = listener.accept().unwrap();
         let request = crate::http::read_request(&mut client).unwrap();
-        crate::routes::handle_prism_web_api(&mut client, &request.body, &config, &request.headers)
+        crate::prism::handle_prism_web_api(&mut client, &request.body, &config, &request.headers)
             .unwrap();
     });
     let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+    let openai_req = r#"{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"hi"}]}"#;
     write!(
         client,
-        "POST /prism-web-api/v1/response HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 2\r\n\r\n{{}}",
-        proxy_port
+        "POST /prism-web-api/v1/response HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nopenai-sentinel-token: test_sentinel_xyz\r\nContent-Length: {}\r\n\r\n{}",
+        proxy_port,
+        openai_req.len(),
+        openai_req
     )
     .unwrap();
     client.flush().unwrap();
     let mut resp = crate::http::read_response_head(&mut client).unwrap();
     assert_eq!(resp.status, 200);
-    // If we didn't get the full body in buffered_body, try to read the rest based on content-length
-    let content_length = resp.headers.iter()
+    let content_length = resp
+        .headers
+        .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         .and_then(|(_, v)| v.parse::<usize>().ok())
         .unwrap_or(0);
@@ -602,10 +636,12 @@ fn test_prism_web_api_response() {
 
     let body = String::from_utf8_lossy(&resp.buffered_body);
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["codex_async_job_id"], "3417");
     assert_eq!(json["response"]["status"], "success");
     assert_eq!(
         json["response"]["payload"]["output"][0]["content"][0]["text"],
-        "hello"
+        "hello from prism"
     );
 
     prism_handle.join().unwrap();

@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::http::read_request;
 use crate::omniroute::handle_omniroute_proxy;
-use crate::prism::{extract_credentials, handle_prism_chat_completion};
+use crate::prism::{handle_prism_chat_completion, handle_prism_web_api};
 use std::io::{self, Write};
 use std::net::TcpStream;
 
@@ -25,66 +25,6 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
                     Content-Length: 0\r\n\
                     Connection: close\r\n\r\n";
     client.write_all(response.as_bytes())?;
-    client.flush()
-}
-
-pub(crate) fn handle_prism_web_api(
-    client: &mut TcpStream,
-    body: &[u8],
-    config: &Config,
-    inbound_headers: &[(String, String)],
-) -> io::Result<()> {
-    let prism_url = format!(
-        "{}/api/llm/response_with_tools_start",
-        config.prism_base_url
-    );
-    let creds = extract_credentials(inbound_headers, config);
-    let sentinel_token = crate::http::header_value(inbound_headers, "openai-sentinel-token")
-        .map(str::to_string)
-        .or(creds.sentinel_token);
-    let mut ureq_builder = ureq::post(&prism_url)
-        .header("Content-Type", "application/json")
-        .header("Origin", &config.prism_base_url)
-        .header(
-            "Referer",
-            &format!("{}/?u={}", config.prism_base_url, creds.project_id),
-        );
-
-    if !creds.cookie.is_empty() {
-        ureq_builder = ureq_builder.header("Cookie", &creds.cookie);
-    }
-
-    if let Some(sentinel_token) = sentinel_token {
-        ureq_builder = ureq_builder.header("openai-sentinel-token", sentinel_token);
-    }
-
-    let response = ureq_builder.send(body);
-
-    let mut response = match response {
-        Ok(res) => res,
-        Err(ureq::Error::StatusCode(code)) => {
-            return crate::http::write_error(
-                client,
-                code,
-                "Upstream Prism Error",
-                &format!("Prism rejected request with HTTP {}", code),
-            );
-        }
-        Err(_) => {
-            return Err(io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Prism request failed",
-            ));
-        }
-    };
-
-    let response_text = response.body_mut().read_to_string().unwrap_or_default();
-    let head = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        response_text.len(),
-    );
-    client.write_all(head.as_bytes())?;
-    client.write_all(response_text.as_bytes())?;
     client.flush()
 }
 
