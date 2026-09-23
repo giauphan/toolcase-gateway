@@ -520,6 +520,99 @@ fn test_prism_successful_start_and_status_flow() {
 }
 
 #[test]
+fn test_prism_web_api_response() {
+    let prism_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let prism_port = prism_listener.local_addr().unwrap().port();
+    let header_text =
+        std::fs::read_to_string("/home/ubuntu/toolcase-gateway-rs/target/request-header.txt")
+            .unwrap();
+    let cookie_line = header_text.lines().find(|l| *l == "cookie").unwrap();
+    let cookie_index = header_text.lines().position(|l| l == cookie_line).unwrap();
+    let prism_cookie = header_text
+        .lines()
+        .nth(cookie_index + 1)
+        .unwrap()
+        .to_string();
+
+    let cookie_value = prism_cookie.clone();
+    let prism_handle = thread::spawn(move || {
+        let (mut client, _) = prism_listener.accept().unwrap();
+        let req = crate::http::read_request(&mut client).unwrap();
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.path, "/api/llm/response_with_tools_start");
+        assert!(req
+            .headers
+            .iter()
+            .any(|(k, v)| k == "cookie" && v.contains(&cookie_value)));
+
+        let mock_resp = r#"{"status":"completed","request_id":"c172c25f-fb09-42f2-938b-b9714677d359","codex_async_job_id":"3417","response":{"status":"success","payload":{"id":"resp_muca5mj9_row8fsvt","output":[{"id":"out_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello","annotations":[]}]}],"conversationId":"cdx1_250d7977-ffd4-444f-ade0-3a98aa7cddfb"}}}"#;
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            mock_resp.len(),
+            mock_resp
+        ).unwrap();
+        client.flush().unwrap();
+    });
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let proxy_port = listener.local_addr().unwrap().port();
+    let proxy_handle = thread::spawn(move || {
+        let config = Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: format!("http://127.0.0.1:{}", prism_port),
+            prism_project_id: "proj_403".into(),
+            prism_cookie: prism_cookie.clone(),
+            prism_sandbox_token: "".into(),
+            prism_user_id: "user_123".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "You are a test prompt".into(),
+        };
+        let (mut client, _) = listener.accept().unwrap();
+        let request = crate::http::read_request(&mut client).unwrap();
+        crate::routes::handle_prism_web_api(&mut client, &request.body, &config, &request.headers)
+            .unwrap();
+    });
+    let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
+    write!(
+        client,
+        "POST /prism-web-api/v1/response HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 2\r\n\r\n{{}}",
+        proxy_port
+    )
+    .unwrap();
+    client.flush().unwrap();
+    let mut resp = crate::http::read_response_head(&mut client).unwrap();
+    assert_eq!(resp.status, 200);
+    // If we didn't get the full body in buffered_body, try to read the rest based on content-length
+    let content_length = resp.headers.iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.parse::<usize>().ok())
+        .unwrap_or(0);
+
+    if resp.buffered_body.len() < content_length {
+        let mut rest = vec![0; content_length - resp.buffered_body.len()];
+        client.read_exact(&mut rest).unwrap();
+        resp.buffered_body.extend_from_slice(&rest);
+    }
+
+    let body = String::from_utf8_lossy(&resp.buffered_body);
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["response"]["status"], "success");
+    assert_eq!(
+        json["response"]["payload"]["output"][0]["content"][0]["text"],
+        "hello"
+    );
+
+    prism_handle.join().unwrap();
+    proxy_handle.join().unwrap();
+}
+
+#[test]
 fn test_cors_preflight_response() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
