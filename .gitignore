@@ -5,3 +5,5 @@
 .env.*
 !.env.example
 .codeatlas/*
+scripts/__pycache__
+gateway.log

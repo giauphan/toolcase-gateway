@@ -89,5 +89,9 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
         return handle_prism_chat_completion(&mut client, &request.body, config, &request.headers);
     }
 
+    if clean_path == "/muse-ai/v1" {
+        return crate::museai::handle_museai_v1(&mut client, &request.body, config);
+    }
+
     handle_omniroute_proxy(&mut client, &request, config)
 }

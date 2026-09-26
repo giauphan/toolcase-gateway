@@ -119,6 +119,44 @@ pub(crate) fn handle_omniroute_proxy(
             candidates.len()
         );
 
+        if model == "muse" {
+            match crate::museai::request_museai_chat_completion(&request.body, config) {
+                Ok(response) => return crate::museai::write_chat_completion(client, &response),
+                Err(error) if !last => {
+                    let delay = calculate_retry_delay(
+                        index,
+                        config.retry_base_delay_ms,
+                        config.max_retry_delay_ms,
+                        None,
+                    );
+                    eprintln!(
+                        "[toolcase-gateway] upstream model \"muse\" failed ({}: {}). Failing over to \"{}\" (retry in {}ms)...",
+                        error.kind(),
+                        error,
+                        candidates[index + 1],
+                        delay.as_millis()
+                    );
+                    if !delay.is_zero() {
+                        thread::sleep(delay);
+                    }
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[toolcase-gateway] model \"muse\" failed on final attempt ({}: {})",
+                        error.kind(),
+                        error
+                    );
+                    return write_error(
+                        client,
+                        502,
+                        "Bad Gateway",
+                        "toolcase-gateway: all upstream models exhausted",
+                    );
+                }
+            }
+        }
+
         let attempt = open_upstream(client, request, config, model).and_then(|mut upstream| {
             let head = read_response_head(&mut upstream)?;
             last_status = Some(head.status);

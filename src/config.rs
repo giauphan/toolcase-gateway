@@ -30,4 +30,10 @@ pub(crate) struct Config {
     pub(crate) prism_user_id: String,
     pub(crate) prism_default_model: String,
     pub(crate) prism_system_prompt: String,
+    pub(crate) museai_base_url: String,
+    pub(crate) museai_cookie: String,
+    pub(crate) museai_ws_url: String,
+    pub(crate) museai_access_token: String,
+    pub(crate) museai_notary_token: String,
+    pub(crate) museai_vm_id: String,
 }

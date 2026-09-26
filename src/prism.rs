@@ -428,7 +428,10 @@ pub fn handle_prism_chat_completion(
             }
             if let Some(output) = payload.output {
                 final_output_text = extract_text_from_output(&output);
-                eprintln!("[DEBUG] start response output text: {:?}", final_output_text);
+                eprintln!(
+                    "[DEBUG] start response output text: {:?}",
+                    final_output_text
+                );
             }
         }
     }

@@ -10,6 +10,11 @@ use std::time::Duration;
 
 mod config;
 mod http;
+mod museai;
+mod museai_business;
+mod museai_noise;
+mod museai_protocol;
+mod museai_transport;
 mod omniroute;
 mod prism;
 mod rewrite;
@@ -52,6 +57,12 @@ fn main() -> io::Result<()> {
             "GW_PRISM_SYSTEM_PROMPT",
             "You are ChatGPT, a large language model trained by OpenAI. Carefully follow the user's instructions. Implement the requested tasks perfectly and exactly as directed.",
         ),
+        museai_base_url: env_or("GW_MUSEAI_BASE_URL", "https://muse.ai"),
+        museai_cookie: env_or("GW_MUSEAI_COOKIE", ""),
+        museai_ws_url: env_or("GW_MUSEAI_WS_URL", "wss://hatch.metaaivm.com/v1/noise"),
+        museai_access_token: env_or("GW_MUSEAI_ACCESS_TOKEN", ""),
+        museai_notary_token: env_or("GW_MUSEAI_NOTARY_TOKEN", ""),
+        museai_vm_id: env_or("GW_MUSEAI_VM_ID", ""),
     });
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     eprintln!(
