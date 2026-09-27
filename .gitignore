@@ -6,4 +6,5 @@
 !.env.example
 .codeatlas/*
 scripts/__pycache__
+scripts/patches/
 gateway.log
