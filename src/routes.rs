@@ -24,28 +24,33 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
     client.flush()
 }
 
-pub(crate) fn handle_models_catalog(client: &mut TcpStream, _config: &Config) -> io::Result<()> {
-    let base_models = vec!["gpt-5.6-sol".to_string()];
-
-    let mut base_models = base_models;
-    base_models.sort();
-    base_models.dedup();
-
-    let efforts = ["low", "medium", "high", "xhigh"];
+pub(crate) fn handle_models_catalog(client: &mut TcpStream, clean_path: &str, _config: &Config) -> io::Result<()> {
     let mut model_entries = Vec::new();
 
-    for bm in base_models {
+    if clean_path.starts_with("/muse-ai") {
         model_entries.push(format!(
-            r#"{{"id":"{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
-            bm
+            r#"{{"id":"muse","object":"model","created":1700000000,"owned_by":"system"}}"#
         ));
-        // Only apply effort permutations to models that explicitly support reasoning
-        if bm.starts_with("gpt-5.6-") {
-            for effort in efforts {
-                model_entries.push(format!(
-                    r#"{{"id":"{}-{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
-                    bm, effort
-                ));
+    } else {
+        let base_models = vec!["gpt-5.6-sol".to_string(), "muse".to_string()];
+        let mut base_models = base_models;
+        base_models.sort();
+        base_models.dedup();
+
+        let efforts = ["low", "medium", "high", "xhigh"];
+
+        for bm in base_models {
+            model_entries.push(format!(
+                r#"{{"id":"{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
+                bm
+            ));
+            if bm.starts_with("gpt-5.6-") {
+                for effort in efforts {
+                    model_entries.push(format!(
+                        r#"{{"id":"{}-{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
+                        bm, effort
+                    ));
+                }
             }
         }
     }
@@ -82,7 +87,7 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
     }
 
     if request.method.eq_ignore_ascii_case("get") && is_models_catalog_route(clean_path) {
-        return handle_models_catalog(&mut client, config);
+        return handle_models_catalog(&mut client, clean_path, config);
     }
 
     if is_prism_completions_route(clean_path) {

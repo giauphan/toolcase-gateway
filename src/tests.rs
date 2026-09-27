@@ -671,7 +671,7 @@ fn test_models_catalog_response() {
             museai_vm_id: "".into(),
         };
         let (mut client, _) = listener.accept().unwrap();
-        crate::routes::handle_models_catalog(&mut client, &config).unwrap();
+        crate::routes::handle_models_catalog(&mut client, "/v1/models", &config).unwrap();
     });
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -689,13 +689,46 @@ fn test_models_catalog_response() {
     let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
     assert_eq!(json["object"], "list");
     let models = json["data"].as_array().unwrap();
-    assert_eq!(models.len(), 5);
+    assert_eq!(models.len(), 6);
     assert!(models
         .iter()
         .all(|model| { !model["id"].as_str().unwrap().contains("terra") }));
     assert!(models
         .iter()
         .any(|model| model["id"] == "gpt-5.6-sol-xhigh"));
+    assert!(models
+        .iter()
+        .any(|model| model["id"] == "muse"));
+}
+
+#[test]
+fn test_museai_models_catalog_response() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    
+    let handle = thread::spawn(move || {
+        let config = test_config();
+        let (mut client, _) = listener.accept().unwrap();
+        crate::routes::handle_models_catalog(&mut client, "/muse-ai/v1/models", &config).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    let mut body = head.buffered_body;
+    let length = header_value(&head.headers, "content-length")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    while body.len() < length {
+        read_more(&mut client, &mut body).unwrap();
+    }
+    handle.join().unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
+    assert_eq!(json["object"], "list");
+    let models = json["data"].as_array().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["id"], "muse");
 }
 
 #[test]
