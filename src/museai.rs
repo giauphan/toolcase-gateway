@@ -129,6 +129,12 @@ fn extract_user_prompt(request_body: &[u8]) -> io::Result<String> {
 }
 
 fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> {
+    if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
+        if event == "delta.message_done" || event == "task.status" || event == "agent.status" || event == "approvals.snapshot" {
+            return None;
+        }
+    }
+
     if let Some(content) = val.get("content").and_then(|c| c.as_str()) {
         if !content.is_empty() {
             return Some(content.to_string());
@@ -145,6 +151,16 @@ fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> 
         }
     }
     if let Some(payload) = val.get("payload") {
+        if let Some(text) = payload.get("text").and_then(|t| t.as_str()) {
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+        if let Some(content) = payload.get("content").and_then(|c| c.as_str()) {
+            if !content.is_empty() {
+                return Some(content.to_string());
+            }
+        }
         if let Some(transcript) = payload.get("transcript") {
             if let Some(messages) = transcript.get("messages").and_then(|m| m.as_array()) {
                 let mut combined = String::new();
@@ -500,8 +516,15 @@ pub(crate) fn request_museai_chat_completion(
                         received_any_text = true;
                     }
                     
+                    if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
+                        if (event == "delta.message_done" || event == "task.complete") && received_any_text {
+                            println!("[museai] Stream completed successfully via event!");
+                            break;
+                        }
+                    }
+
                     if let Some(status) = val.get("payload").and_then(|p| p.get("status")).and_then(|s| s.as_str()) {
-                        if status == "completed" {
+                        if status == "completed" && received_any_text {
                             println!("[museai] Stream completed successfully!");
                             break;
                         }
