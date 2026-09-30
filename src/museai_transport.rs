@@ -57,11 +57,11 @@ impl MuseWebSocket {
         let (mut socket, _) = connect(request).map_err(io::Error::other)?;
         match socket.get_mut() {
             tungstenite::stream::MaybeTlsStream::Plain(tcp) => {
-                tcp.set_read_timeout(Some(Duration::from_secs(15)))?;
+                tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
             }
             tungstenite::stream::MaybeTlsStream::Rustls(tls) => {
                 tls.get_mut()
-                    .set_read_timeout(Some(Duration::from_secs(15)))?;
+                    .set_read_timeout(Some(Duration::from_secs(300)))?;
             }
             _ => {}
         }

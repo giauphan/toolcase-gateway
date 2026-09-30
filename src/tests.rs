@@ -1354,3 +1354,11 @@ fn test_create_video_route() {
         .unwrap()
         .contains("prompt must not be empty"));
 }
+
+#[test]
+fn museai_stream_request_uses_resolved_session_id() {
+    let source = include_str!("museai.rs");
+    assert!(source.contains(r#""/chat/stream""#));
+    assert!(source.contains(r#""session_id": resolved_session_id.clone()"#));
+    assert!(!source.contains(r#""chat_id": resolved_session_id.clone()"#));
+}

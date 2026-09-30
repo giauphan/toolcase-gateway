@@ -181,7 +181,20 @@ fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> 
             return Some(delta.to_string());
         }
     }
+
     if let Some(payload) = val.get("payload") {
+        if let Some(data) = payload.get("data") {
+            if let Some(url) = data.get("url").and_then(|u| u.as_str()) {
+                if !url.is_empty() {
+                    return Some(format!("\nVideo URL: {url}\n"));
+                }
+            }
+            if let Some(fallback) = data.get("fallback_text").and_then(|f| f.as_str()) {
+                if !fallback.is_empty() {
+                    return Some(format!("\nVideo: {fallback}\n"));
+                }
+            }
+        }
         if let Some(text) = payload.get("text").and_then(|t| t.as_str()) {
             if !text.is_empty() {
                 return Some(text.to_string());
@@ -514,26 +527,6 @@ pub(crate) fn request_museai_chat_completion(
         .map_err(|e| io::Error::other(format!("Thread spawn error: {e}")))?;
     let thread_id = channel.strip_prefix("thread:").unwrap_or("").to_string();
 
-    let chat_payload = serde_json::json!({
-        "items": [
-            {
-                "type": "text",
-                "text": prompt
-            }
-        ],
-        "node_id": active_vm_id.clone(),
-        "thread_id": thread_id.clone(),
-        "session_id": thread_id.clone(),
-        "chat_id": thread_id.clone(),
-        "capabilities": [
-            "chat_cancel",
-            "delta_stream"
-        ]
-    });
-
-    let payload_bytes = serde_json::to_vec(&chat_payload)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-
     let stream_id = 1;
     let headers = vec![
         Header {
@@ -577,23 +570,67 @@ pub(crate) fn request_museai_chat_completion(
         &sub_bytes,
     )?;
 
-    // Give it a small delay
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // Wait for the subscribe confirmation and extract the active session_id
+    let mut resolved_session_id = thread_id.clone();
+    for _ in 0..50 {
+        match socket.read_encrypted_service_frame(&mut session) {
+            Ok(frame) => {
+                if let ServiceFrameKind::BodyChunk { data, end_body: _ } = frame.kind {
+                    if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
+                        if let Some(sess) = val
+                            .get("payload")
+                            .and_then(|p| p.get("session_id"))
+                            .and_then(|s| s.as_str())
+                        {
+                            if !sess.is_empty() {
+                                debug_log(&format!("Discovered active daemon session_id: {sess}"));
+                                resolved_session_id = sess.to_string();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                debug_log(&format!("Note: subscribe frame read: {e}"));
+                break;
+            }
+        }
+    }
 
-    debug_log("Sending encrypted POST /api/chats/stream over Noise...");
+    let chat_payload = serde_json::json!({
+        "items": [
+            {
+                "type": "text",
+                "text": prompt
+            }
+        ],
+        "node_id": active_vm_id.clone(),
+        "session_id": resolved_session_id.clone(),
+        "capabilities": [
+            "chat_cancel",
+            "delta_stream"
+        ]
+    });
+
+    let payload_bytes = serde_json::to_vec(&chat_payload)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    debug_log("Sending encrypted POST /chat/stream over Noise...");
 
     socket.send_encrypted_service_request(
         &mut session,
         SERVICE_DAEMON,
         stream_id,
         "POST",
-        "/api/chats/stream",
+        "/chat/stream",
         &headers,
         &payload_bytes,
     )?;
 
     let mut full_assistant_text = String::new();
     let mut received_any_text = false;
+    let mut stream_status = None;
 
     debug_log("Waiting for encrypted response frames...");
     for _ in 0..1000 {
@@ -619,6 +656,7 @@ pub(crate) fn request_museai_chat_completion(
                 headers: _,
             } => {
                 debug_log(&format!("Response status: {}", status));
+                stream_status = Some(status);
                 if !body.is_empty() {
                     let s = String::from_utf8_lossy(&body);
                     debug_log(&format!("Response body length: {} bytes", s.len()));
@@ -653,6 +691,19 @@ pub(crate) fn request_museai_chat_completion(
                             debug_log("Stream completed successfully via event!");
                             break;
                         }
+
+                        if event == "agent.status" && received_any_text {
+                            if let Some(code) = val
+                                .get("payload")
+                                .and_then(|p| p.get("activity_code"))
+                                .and_then(|c| c.as_str())
+                            {
+                                if code == "online" {
+                                    debug_log("Stream completed as agent returned online!");
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     if let Some(status) = val
@@ -673,6 +724,13 @@ pub(crate) fn request_museai_chat_completion(
         }
     }
 
+    if let Some(status) = stream_status {
+        if status >= 400 {
+            return Err(io::Error::other(format!(
+                "Muse.ai stream request failed with status {status}"
+            )));
+        }
+    }
     if full_assistant_text.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -778,7 +836,19 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
 
     let completion = request_museai_chat_completion(&request_json, config)?;
 
-    let video_url = extract_url_from_text(&completion);
+    let completion_json: serde_json::Value = serde_json::from_str(&completion)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let content = completion_json
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+
+    let video_url = extract_url_from_text(content);
     let status = if video_url.is_empty() {
         "pending".to_string()
     } else {
@@ -815,7 +885,9 @@ fn extract_url_from_text(text: &str) -> String {
 }
 
 fn trim_trailing_punct(s: &str) -> &str {
-    s.trim_end_matches(['"', '\'', ',', ';', ')', '}'])
+    s.trim_matches([
+        '"', '\'', ',', ';', ')', '}', '(', '{', ']', '[', '\\', '\n', '\r', ' ',
+    ])
 }
 
 pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Result<()> {
