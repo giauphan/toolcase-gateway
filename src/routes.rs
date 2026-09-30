@@ -24,13 +24,18 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
     client.flush()
 }
 
-pub(crate) fn handle_models_catalog(client: &mut TcpStream, clean_path: &str, _config: &Config) -> io::Result<()> {
+pub(crate) fn handle_models_catalog(
+    client: &mut TcpStream,
+    clean_path: &str,
+    _config: &Config,
+) -> io::Result<()> {
     let mut model_entries = Vec::new();
 
     if clean_path.starts_with("/muse-ai") {
-        model_entries.push(format!(
-            r#"{{"id":"muse","object":"model","created":1700000000,"owned_by":"system"}}"#
-        ));
+        model_entries.push(
+            r#"{"id":"muse","object":"model","created":1700000000,"owned_by":"system"}"#
+                .to_string(),
+        );
     } else {
         let base_models = vec!["gpt-5.6-sol".to_string(), "muse".to_string()];
         let mut base_models = base_models;
@@ -96,6 +101,10 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
 
     if clean_path == "/muse-ai/v1" {
         return crate::museai::handle_museai_v1(&mut client, &request.body, config);
+    }
+
+    if clean_path == "/muse-ai/v1/create-video" && request.method.eq_ignore_ascii_case("post") {
+        return crate::museai::handle_create_video(&mut client, &request.body, config);
     }
 
     handle_omniroute_proxy(&mut client, &request, config)

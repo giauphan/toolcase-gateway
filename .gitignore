@@ -8,3 +8,4 @@
 scripts/__pycache__
 scripts/patches/
 gateway.log
+plan/*

@@ -7,6 +7,12 @@ use std::net::TcpStream;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+fn debug_log(msg: &str) {
+    if std::env::var("MUSEAI_DEBUG").is_ok() {
+        eprintln!("[museai] {msg}");
+    }
+}
+
 fn append_query_component(url: &mut String, key: &str, value: &str) {
     url.push(if url.contains('?') { '&' } else { '?' });
     url.push_str(key);
@@ -147,7 +153,11 @@ fn extract_user_prompt(request_body: &[u8]) -> io::Result<String> {
 
 fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> {
     if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
-        if event == "delta.message_done" || event == "task.status" || event == "agent.status" || event == "approvals.snapshot" {
+        if event == "delta.message_done"
+            || event == "task.status"
+            || event == "agent.status"
+            || event == "approvals.snapshot"
+        {
             return None;
         }
     }
@@ -162,7 +172,11 @@ fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> 
             return Some(text.to_string());
         }
     }
-    if let Some(delta) = val.get("delta").and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
+    if let Some(delta) = val
+        .get("delta")
+        .and_then(|d| d.get("text"))
+        .and_then(|t| t.as_str())
+    {
         if !delta.is_empty() {
             return Some(delta.to_string());
         }
@@ -226,6 +240,57 @@ fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> 
     None
 }
 
+pub(crate) fn spawn_muse_thread(base_url: &str, config: &Config) -> io::Result<String> {
+    let create_thread_url = format!("{base_url}/thread/new");
+    let mut req = ureq::post(&create_thread_url)
+        .header("Content-Type", "text/plain;charset=UTF-8")
+        .header("Accept", "text/x-component")
+        .header("Origin", base_url)
+        .header("Referer", &format!("{base_url}/thread/new"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
+        .header("sec-ch-ua", r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#)
+        .header("sec-ch-ua-mobile", "?0")
+        .header("sec-ch-ua-platform", r#""Windows""#)
+        .header("sec-fetch-dest", "empty")
+        .header("sec-fetch-mode", "cors")
+        .header("sec-fetch-site", "same-origin")
+        .header("x-nextjs-data", "true");
+
+    if !config.museai_cookie.is_empty() {
+        req = req.header("Cookie", &config.museai_cookie);
+    }
+
+    let response = req
+        .send("[]")
+        .map_err(|e| io::Error::other(format!("Thread creation request failed: {e}")))?;
+    let mut reader = response.into_body();
+    let text = reader
+        .read_to_string()
+        .map_err(|e| io::Error::other(format!("Failed to read thread response: {e}")))?;
+    let thread_id = extract_new_thread_id(&text);
+    if thread_id.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "failed to extract thread ID from /thread/new response",
+        ));
+    }
+    let channel = format!("thread:{}", thread_id);
+    Ok(channel)
+}
+
+fn extract_new_thread_id(rsc_text: &str) -> String {
+    let needle = "/thread/";
+    if let Some(idx) = rsc_text.rfind(needle) {
+        let start = idx + needle.len();
+        let remaining = &rsc_text[start..];
+        let end = remaining
+            .find(|c: char| !c.is_alphanumeric() && c != '-')
+            .unwrap_or(remaining.len());
+        return remaining[..end].to_string();
+    }
+    String::new()
+}
+
 pub(crate) fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
     if !config.museai_access_token.is_empty() && !config.museai_notary_token.is_empty() {
         return Ok(config.clone());
@@ -249,30 +314,56 @@ pub(crate) fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
     };
 
     let mut body = serde_json::Map::new();
-    body.insert("vmAddress".to_string(), serde_json::Value::String(vm_address));
+    body.insert(
+        "vmAddress".to_string(),
+        serde_json::Value::String(vm_address),
+    );
 
     let shared_vm = if config.museai_ws_url.is_empty() {
-        if config.museai_base_url.contains("metaaivm.com") && !config.museai_base_url.contains("hatch.metaaivm.com") {
-            config.museai_base_url.split("://").nth(1).unwrap_or("").split('.').next().unwrap_or("").to_string()
+        if config.museai_base_url.contains("metaaivm.com")
+            && !config.museai_base_url.contains("hatch.metaaivm.com")
+        {
+            config
+                .museai_base_url
+                .split("://")
+                .nth(1)
+                .unwrap_or("")
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .to_string()
         } else {
             "".to_string()
         }
     } else {
-        if config.museai_ws_url.contains("metaaivm.com") && !config.museai_ws_url.contains("hatch.metaaivm.com") {
-            config.museai_ws_url.split("://").nth(1).unwrap_or("").split('.').next().unwrap_or("").to_string()
+        if config.museai_ws_url.contains("metaaivm.com")
+            && !config.museai_ws_url.contains("hatch.metaaivm.com")
+        {
+            config
+                .museai_ws_url
+                .split("://")
+                .nth(1)
+                .unwrap_or("")
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .to_string()
         } else {
             "".to_string()
         }
     };
-    
+
     let active_vm_id = if !config.museai_vm_id.is_empty() && config.museai_vm_id != "." {
         config.museai_vm_id.clone()
     } else {
         shared_vm
     };
-    
+
     if !active_vm_id.is_empty() {
-        body.insert("vmName".to_string(), serde_json::Value::String(active_vm_id.clone()));
+        body.insert(
+            "vmName".to_string(),
+            serde_json::Value::String(active_vm_id.clone()),
+        );
 
         let wake_body = serde_json::json!({
             "vm_id": active_vm_id.clone(),
@@ -291,19 +382,19 @@ pub(crate) fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
             .header("sec-fetch-dest", "empty")
             .header("sec-fetch-mode", "cors")
             .header("sec-fetch-site", "same-origin");
-            
+
         if !config.museai_cookie.is_empty() {
             wake_req = wake_req.header("Cookie", &config.museai_cookie);
         }
-        
+
         match wake_req.send_json(wake_body) {
             Ok(response) => {
                 if let Ok(json) = response.into_body().read_json::<serde_json::Value>() {
-                    println!("[museai] Note: Woke VM. Response: {}", json);
+                    debug_log(&format!("Note: Woke VM. Response: {}", json));
                 }
             }
             Err(e) => {
-                println!("[museai] Note: Failed to wake VM. Error: {}", e);
+                debug_log(&format!("Note: Failed to wake VM. Error: {}", e));
             }
         }
     }
@@ -342,7 +433,7 @@ pub(crate) fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
             }
         }
         Err(e) => {
-            println!("[museai] Note: POST /api/hatch/token failed: {e}");
+            debug_log(&format!("Note: POST /api/hatch/token failed: {e}"));
         }
     }
 
@@ -406,12 +497,23 @@ pub(crate) fn request_museai_chat_completion(
     let active_vm_id = if !config.museai_vm_id.is_empty() && config.museai_vm_id != "." {
         config.museai_vm_id.clone()
     } else if shared {
-        base_url.split("://").nth(1).unwrap_or("").split('.').next().unwrap_or("").to_string()
+        base_url
+            .split("://")
+            .nth(1)
+            .unwrap_or("")
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .to_string()
     } else {
         uuid::Uuid::new_v4().to_string()
     };
-    // // let node_id = active_vm_id.clone();
-    
+
+    // Spawn an isolated thread for this request to prevent cross-request context leakage
+    let channel = spawn_muse_thread(base_origin, &config)
+        .map_err(|e| io::Error::other(format!("Thread spawn error: {e}")))?;
+    let thread_id = channel.strip_prefix("thread:").unwrap_or("").to_string();
+
     let chat_payload = serde_json::json!({
         "items": [
             {
@@ -420,12 +522,15 @@ pub(crate) fn request_museai_chat_completion(
             }
         ],
         "node_id": active_vm_id.clone(),
+        "thread_id": thread_id.clone(),
+        "session_id": thread_id.clone(),
+        "chat_id": thread_id.clone(),
         "capabilities": [
             "chat_cancel",
             "delta_stream"
         ]
     });
-    
+
     let payload_bytes = serde_json::to_vec(&chat_payload)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
@@ -457,10 +562,9 @@ pub(crate) fn request_museai_chat_completion(
         },
     ];
 
-    
-    println!("[museai] Sending encrypted POST /chat/subscribe over Noise...");
+    debug_log("Sending encrypted POST /chat/subscribe over Noise...");
     let sub_payload = serde_json::json!({
-        "channel": "main"
+        "channel": channel
     });
     let sub_bytes = serde_json::to_vec(&sub_payload).unwrap();
     socket.send_encrypted_service_request(
@@ -476,14 +580,14 @@ pub(crate) fn request_museai_chat_completion(
     // Give it a small delay
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    println!("[museai] Sending encrypted POST /chat/stream over Noise...");
+    debug_log("Sending encrypted POST /api/chats/stream over Noise...");
 
     socket.send_encrypted_service_request(
         &mut session,
         SERVICE_DAEMON,
         stream_id,
         "POST",
-        "/chat/stream",
+        "/api/chats/stream",
         &headers,
         &payload_bytes,
     )?;
@@ -491,31 +595,36 @@ pub(crate) fn request_museai_chat_completion(
     let mut full_assistant_text = String::new();
     let mut received_any_text = false;
 
-    println!("[museai] Waiting for encrypted response frames...");
+    debug_log("Waiting for encrypted response frames...");
     for _ in 0..1000 {
         let frame = match socket.read_encrypted_service_frame(&mut session) {
             Ok(f) => f,
             Err(e) if received_any_text => {
-                println!("[museai] Error reading frame after text received: {}", e);
+                debug_log(&format!("Error reading frame after text received: {}", e));
                 break;
-            },
+            }
             Err(e) => {
                 // If it hits EOF/timeout, don't fail immediately if we got SOME text
                 return Err(e);
             }
         };
 
-        println!("[museai] Received encrypted frame: {:?}", frame.kind);
+        debug_log(&format!("Received encrypted frame: {:?}", frame.kind));
 
         match frame.kind {
-            ServiceFrameKind::Response { body, end_body: _, status, headers: _ } => {
-                println!("[museai] Response status: {}", status);
+            ServiceFrameKind::Response {
+                body,
+                end_body: _,
+                status,
+                headers: _,
+            } => {
+                debug_log(&format!("Response status: {}", status));
                 if !body.is_empty() {
                     let s = String::from_utf8_lossy(&body);
-                    println!("[museai] RAW Response Body: {}", s);
+                    debug_log(&format!("Response body length: {} bytes", s.len()));
                     if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&body) {
                         if let Some(text) = parse_assistant_content_from_json(&val) {
-                            println!("[museai] Parsed Chunk: {}", text);
+                            debug_log(&format!("Parsed chunk length: {} chars", text.len()));
                             full_assistant_text.push_str(&text);
                             received_any_text = true;
                         }
@@ -523,26 +632,36 @@ pub(crate) fn request_museai_chat_completion(
                 }
                 // if end_body && received_any_text { break; }
             }
-                        ServiceFrameKind::BodyChunk { data, end_body } => {
+            ServiceFrameKind::BodyChunk { data, end_body } => {
                 let s = String::from_utf8_lossy(&data);
-                println!("[museai] RAW BodyChunk (end_body={}): {}", end_body, s);
+                debug_log(&format!(
+                    "BodyChunk length: {} bytes (end_body={})",
+                    s.len(),
+                    end_body
+                ));
                 if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
                     if let Some(text) = parse_assistant_content_from_json(&val) {
-                        println!("[museai] Parsed Chunk: {}", text);
+                        debug_log(&format!("Parsed chunk length: {} chars", text.len()));
                         full_assistant_text.push_str(&text);
                         received_any_text = true;
                     }
-                    
+
                     if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
-                        if (event == "delta.message_done" || event == "task.complete") && received_any_text {
-                            println!("[museai] Stream completed successfully via event!");
+                        if (event == "delta.message_done" || event == "task.complete")
+                            && received_any_text
+                        {
+                            debug_log("Stream completed successfully via event!");
                             break;
                         }
                     }
 
-                    if let Some(status) = val.get("payload").and_then(|p| p.get("status")).and_then(|s| s.as_str()) {
+                    if let Some(status) = val
+                        .get("payload")
+                        .and_then(|p| p.get("status"))
+                        .and_then(|s| s.as_str())
+                    {
                         if status == "completed" && received_any_text {
-                            println!("[museai] Stream completed successfully!");
+                            debug_log("Stream completed successfully!");
                             break;
                         }
                     }
@@ -592,6 +711,113 @@ pub(crate) fn request_museai_chat_completion(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+const SUPPORTED_MODELS: [&str; 3] = ["gen-3", "gen-2", "kling"];
+const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
+
+pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
+    let body: serde_json::Value = if request_body.is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_slice(request_body).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid JSON: {e}"))
+        })?
+    };
+
+    let prompt = body
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing 'prompt' field"))?
+        .trim()
+        .to_string();
+    if prompt.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "prompt must not be empty",
+        ));
+    }
+
+    let model = body
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("gen-3");
+    if !SUPPORTED_MODELS.contains(&model) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "unsupported model '{model}'; supported: {}",
+                SUPPORTED_MODELS.join(", ")
+            ),
+        ));
+    }
+
+    let aspect_ratio = body
+        .get("aspect_ratio")
+        .and_then(|v| v.as_str())
+        .unwrap_or("16:9");
+    if !SUPPORTED_ASPECT_RATIOS.contains(&aspect_ratio) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "unsupported aspect_ratio '{aspect_ratio}'; supported: {}",
+                SUPPORTED_ASPECT_RATIOS.join(", ")
+            ),
+        ));
+    }
+
+    let full_prompt = format!(
+        "Create a video using the {model} model. Prompt: \"{prompt}\". Aspect ratio: {aspect_ratio}. Duration: 5 seconds. Output only a URL"
+    );
+
+    let request_json = serde_json::to_vec(&serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "user", "content": full_prompt}
+        ]
+    }))
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let completion = request_museai_chat_completion(&request_json, config)?;
+
+    let video_url = extract_url_from_text(&completion);
+    let status = if video_url.is_empty() {
+        "pending".to_string()
+    } else {
+        "completed".to_string()
+    };
+
+    Ok(serde_json::json!({
+        "id": format!("video-{}", Uuid::new_v4()),
+        "object": "video.generation",
+        "created": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+        "model": model,
+        "prompt": prompt,
+        "aspect_ratio": aspect_ratio,
+        "status": status,
+        "video_url": video_url
+    }))
+}
+
+fn extract_url_from_text(text: &str) -> String {
+    let urls: Vec<&str> = text
+        .split_whitespace()
+        .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
+        .collect();
+    for url in &urls {
+        let cleaned = trim_trailing_punct(url);
+        if cleaned.contains(".mp4") || cleaned.contains(".mov") || cleaned.contains(".webm") {
+            return cleaned.to_string();
+        }
+    }
+    if let Some(url) = urls.first() {
+        return trim_trailing_punct(url).to_string();
+    }
+    String::new()
+}
+
+fn trim_trailing_punct(s: &str) -> &str {
+    s.trim_end_matches(['"', '\'', ',', ';', ')', '}'])
+}
+
 pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Result<()> {
     write!(
         client,
@@ -600,6 +826,41 @@ pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> i
         response
     )?;
     client.flush()
+}
+
+pub(crate) fn handle_create_video(
+    client: &mut TcpStream,
+    request_body: &[u8],
+    config: &Config,
+) -> io::Result<()> {
+    match create_video(request_body, config) {
+        Ok(result) => {
+            let response_str = serde_json::to_string(&result)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            write!(
+                client,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_str.len(),
+                response_str
+            )?;
+            client.flush()
+        }
+        Err(e) => {
+            let (status_code, error_type) = match e.kind() {
+                io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
+                io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
+                io::ErrorKind::NotFound => (404, "Not Found"),
+                io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
+                _ => (502, "Bad Gateway"),
+            };
+            crate::http::write_error(
+                client,
+                status_code,
+                error_type,
+                &format!("Failed to create video: {}", e),
+            )
+        }
+    }
 }
 
 pub(crate) fn handle_museai_v1(
@@ -643,5 +904,105 @@ pub(crate) fn handle_museai_v1(
             "Bad Gateway",
             &format!("Failed to proxy to Muse.ai: {}", err),
         ),
+    }
+}
+
+#[cfg(test)]
+mod museai_tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_new_thread_id() {
+        let valid_rsc = r#"something something /thread/1234abcd-5678-efgh-ijkl-9876mnopqrst"\n"#;
+        assert_eq!(
+            extract_new_thread_id(valid_rsc),
+            "1234abcd-5678-efgh-ijkl-9876mnopqrst"
+        );
+
+        let valid_rsc_2 = r#"/thread/some-id-1234"#;
+        assert_eq!(extract_new_thread_id(valid_rsc_2), "some-id-1234");
+
+        let empty_rsc = r#"/thread/ "#;
+        assert_eq!(extract_new_thread_id(empty_rsc), "");
+
+        let no_thread = r#"something else"#;
+        assert_eq!(extract_new_thread_id(no_thread), "");
+    }
+
+    #[test]
+    fn test_extract_url_from_text() {
+        let valid_text = "Here is your video: https://cdn.muse.ai/video/xyz123.mp4";
+        assert_eq!(
+            extract_url_from_text(valid_text),
+            "https://cdn.muse.ai/video/xyz123.mp4"
+        );
+
+        let mov_text = "Watch this https://cdn.muse.ai/video/xyz123.mov, and enjoy!";
+        assert_eq!(
+            extract_url_from_text(mov_text),
+            "https://cdn.muse.ai/video/xyz123.mov"
+        );
+
+        let no_video_ext = "Here is a link https://muse.ai/some-link";
+        // Fails back to the first URL if no video extension is found.
+        assert_eq!(
+            extract_url_from_text(no_video_ext),
+            "https://muse.ai/some-link"
+        );
+
+        let no_url = "Just some text without links";
+        assert_eq!(extract_url_from_text(no_url), "");
+    }
+
+    #[test]
+    fn test_create_video_validation() {
+        let config = crate::config::Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: "https://prism.openai.com".into(),
+            prism_project_id: "".into(),
+            prism_cookie: "".into(),
+            prism_sandbox_token: "".into(),
+            prism_user_id: "".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "".into(),
+            museai_base_url: "https://muse.ai".into(),
+            museai_cookie: "".into(),
+            museai_ws_url: "".into(),
+            museai_access_token: "".into(),
+            museai_notary_token: "".into(),
+            museai_vm_id: "".into(),
+        };
+
+        // 1. Empty prompt
+        let empty_prompt = serde_json::json!({
+            "prompt": "   ",
+            "model": "gen-3"
+        });
+        let result = create_video(&serde_json::to_vec(&empty_prompt).unwrap(), &config);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+
+        // 2. Invalid model
+        let invalid_model = serde_json::json!({
+            "prompt": "A cat",
+            "model": "invalid-model"
+        });
+        let result = create_video(&serde_json::to_vec(&invalid_model).unwrap(), &config);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+
+        // 3. Invalid aspect ratio
+        let invalid_ar = serde_json::json!({
+            "prompt": "A cat",
+            "aspect_ratio": "4:5"
+        });
+        let result = create_video(&serde_json::to_vec(&invalid_ar).unwrap(), &config);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
     }
 }

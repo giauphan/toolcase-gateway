@@ -66,7 +66,6 @@ pub(crate) fn encode_application_request(
     output
 }
 
-
 pub(crate) fn encode_body_chunk(data: &[u8], end_body: bool) -> Vec<u8> {
     let mut output = Vec::new();
     if !data.is_empty() {

@@ -696,16 +696,14 @@ fn test_models_catalog_response() {
     assert!(models
         .iter()
         .any(|model| model["id"] == "gpt-5.6-sol-xhigh"));
-    assert!(models
-        .iter()
-        .any(|model| model["id"] == "muse"));
+    assert!(models.iter().any(|model| model["id"] == "muse"));
 }
 
 #[test]
 fn test_museai_models_catalog_response() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
-    
+
     let handle = thread::spawn(move || {
         let config = test_config();
         let (mut client, _) = listener.accept().unwrap();
@@ -1213,7 +1211,7 @@ fn test_museai_bootstrap_fetches_hatch_token() {
     let mock_hatch = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = mock_hatch.local_addr().unwrap().port();
 
-        let server_thread = std::thread::spawn(move || {
+    let server_thread = std::thread::spawn(move || {
         let (mut client, _) = mock_hatch.accept().unwrap();
         let request = crate::http::read_request(&mut client).unwrap();
 
@@ -1232,10 +1230,11 @@ Connection: close
 {}",
             response_body1.len(),
             response_body1
-        ).unwrap();
+        )
+        .unwrap();
         client.flush().unwrap();
         drop(client);
-        
+
         // now accept the token request
         let (mut client, _) = mock_hatch.accept().unwrap();
         let request = crate::http::read_request(&mut client).unwrap();
@@ -1254,7 +1253,8 @@ Connection: close
 {}",
             response_body.len(),
             response_body
-        ).unwrap();
+        )
+        .unwrap();
         client.flush().unwrap();
     });
 
@@ -1290,27 +1290,67 @@ Connection: close
 fn test_confidential_vm_message_three_payload() {
     let notary_token = "test_notary_token_12345";
     let payload = crate::museai_noise::encode_confidential_vm_message_three(notary_token);
-    
+
     // Tag 1 (notary_token) = 10
     assert_eq!(payload[0], 10);
-    
+
     // Length of token
     let token_len = notary_token.len() as u8;
     assert_eq!(payload[1], token_len);
-    
+
     // Token content
     let token_end = 2 + token_len as usize;
     assert_eq!(&payload[2..token_end], notary_token.as_bytes());
-    
+
     // Tag 2 (fresh_rv_key) = 18
     assert_eq!(payload[token_end], 18);
-    
+
     // Length of fresh_rv_key = 32
     assert_eq!(payload[token_end + 1], 32);
-    
+
     // Total len: tag(1) + len(1) + str(23) + tag(1) + len(1) + bytes(32) = 59
     assert_eq!(payload.len(), 59);
-    
+
     // Ensure rv_key isn't all zeros
     assert_ne!(&payload[token_end + 2..], &[0u8; 32]);
+}
+
+#[test]
+fn test_create_video_route() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let config = test_config();
+        let (mut client, _) = listener.accept().unwrap();
+        // Since we don't have a valid Muse.ai session, create_video should fail,
+        // but we're testing that it routes correctly and returns 400 or another structured error instead of crashing.
+        crate::museai::handle_create_video(
+            &mut client,
+            br#"{"prompt": "", "model": "gen-3"}"#,
+            &config,
+        )
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    // Prompt is empty, so we expect 400 Bad Request
+    assert_eq!(head.status, 400);
+
+    let mut body = head.buffered_body;
+    let length = header_value(&head.headers, "content-length")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    while body.len() < length {
+        read_more(&mut client, &mut body).unwrap();
+    }
+    handle.join().unwrap();
+
+    let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("prompt must not be empty"));
 }

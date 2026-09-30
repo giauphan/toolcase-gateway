@@ -1,6 +1,6 @@
+use crate::config::Config;
 use crate::museai_noise::MuseNoiseSession;
 use crate::museai_protocol::Header;
-use crate::config::Config;
 use std::io;
 use std::net::TcpStream;
 use std::time::Duration;
@@ -69,7 +69,10 @@ impl MuseWebSocket {
     }
 
     pub(crate) fn send_binary(&mut self, message: &[u8]) -> io::Result<()> {
-        println!("[museai_transport] Sending binary frame (length: {})", message.len());
+        println!(
+            "[museai_transport] Sending binary frame (length: {})",
+            message.len()
+        );
         if message.len() > MAX_MUSE_WS_FRAME_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -109,7 +112,7 @@ impl MuseWebSocket {
     }
 
     #[allow(clippy::too_many_arguments)]
-                pub(crate) fn send_encrypted_service_request(
+    pub(crate) fn send_encrypted_service_request(
         &mut self,
         session: &mut MuseNoiseSession,
         service: u64,
@@ -119,22 +122,24 @@ impl MuseWebSocket {
         headers: &[Header],
         body: &[u8],
     ) -> io::Result<()> {
-        
         let chunk_id = (uuid::Uuid::new_v4().as_u128() & 0x7FFF_FFFF_FFFF_FFFF) as i64;
-        
+
         // Send single ApplicationRequest with body and end_body = true
         let app_req =
             crate::museai_protocol::encode_application_request(verb, path, headers, body, true);
         let frame_req = crate::museai_protocol::encode_service_frame_request(stream_id, &app_req);
         let svc_req = crate::museai_protocol::encode_service_request(service, &frame_req);
-        
+
         let frames = crate::museai_protocol::encode_transport_frames(chunk_id, &svc_req)?;
         for frame in frames {
             let mut encrypted = vec![0u8; frame.len() + 64];
             let len = session
                 .encrypt(&frame, &mut encrypted)
                 .map_err(io::Error::other)?;
-            println!("[museai_transport] Sending ApplicationRequest frame with full body (len: {})", len);
+            println!(
+                "[museai_transport] Sending ApplicationRequest frame with full body (len: {})",
+                len
+            );
             self.send_binary(&encrypted[..len])?;
         }
 

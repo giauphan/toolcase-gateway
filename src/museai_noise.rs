@@ -9,10 +9,9 @@ use std::error::Error;
 pub const NOISE_PATTERN_XX: &str = "Noise_XX_25519_AESGCM_SHA256";
 pub const NOISE_PATTERN_IK: &str = "Noise_IK_25519_AESGCM_SHA256";
 
-
 pub(crate) fn encode_confidential_vm_message_three(notary_token: &str) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // Field 1: notary_token (string)
     if !notary_token.is_empty() {
         // Tag 1 (wire type 2) = (1 << 3) | 2 = 10
@@ -27,7 +26,7 @@ pub(crate) fn encode_confidential_vm_message_three(notary_token: &str) -> Vec<u8
         payload.push(len as u8);
         payload.extend_from_slice(token_bytes);
     }
-    
+
     // Field 2: fresh_rv_key (bytes), unprovisioned branch
     // Tag 2 (wire type 2) = (2 << 3) | 2 = 18
     payload.push(18);
@@ -36,14 +35,13 @@ pub(crate) fn encode_confidential_vm_message_three(notary_token: &str) -> Vec<u8
     let r2 = uuid::Uuid::new_v4();
     rv_key[..16].copy_from_slice(r1.as_bytes());
     rv_key[16..].copy_from_slice(r2.as_bytes());
-    
+
     // len is 32
     payload.push(32);
     payload.extend_from_slice(&rv_key);
-    
+
     payload
 }
-
 
 pub(crate) fn get_primary_message_one_payload() -> Vec<u8> {
     let mut nonce = [0u8; 32];
@@ -163,7 +161,7 @@ impl MuseNoiseSession {
             "[museai_noise] Handshake Phase: Message 2 decrypted successfully (payload length: {})",
             payload_length
         );
-        
+
         let msg3_payload = if payload_length > 0 {
             println!("[museai_noise] Handshake Phase: CVM challenge detected, generating message 3 credentials");
             encode_confidential_vm_message_three(notary_token)
@@ -172,7 +170,10 @@ impl MuseNoiseSession {
             vec![]
         };
 
-        println!("[museai_noise] Handshake Phase: Sending message 3 (length: {})", msg3_payload.len());
+        println!(
+            "[museai_noise] Handshake Phase: Sending message 3 (length: {})",
+            msg3_payload.len()
+        );
         let length = self.write_handshake_message(&msg3_payload, &mut message)?;
         socket.send_binary(&message[..length])?;
         self.into_transport_mode()?;
