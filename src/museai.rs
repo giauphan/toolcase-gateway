@@ -822,8 +822,21 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
         ));
     }
 
+    let duration: u64 = body
+        .get("duration")
+        .and_then(|v| {
+            if let Some(n) = v.as_u64() {
+                Some(n)
+            } else if let Some(s) = v.as_str() {
+                s.trim_end_matches('s').parse::<u64>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(5);
+
     let full_prompt = format!(
-        "Create a video using the {model} model. Prompt: \"{prompt}\". Aspect ratio: {aspect_ratio}. Duration: 5 seconds. Output only a URL"
+        "Create a video using the {model} model. Prompt: \"{prompt}\". Aspect ratio: {aspect_ratio}. Duration: {duration} seconds. Output only a URL"
     );
 
     let request_json = serde_json::to_vec(&serde_json::json!({
@@ -862,6 +875,7 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
         "model": model,
         "prompt": prompt,
         "aspect_ratio": aspect_ratio,
+        "duration": duration,
         "status": status,
         "video_url": video_url
     }))

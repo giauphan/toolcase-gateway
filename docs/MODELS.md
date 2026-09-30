@@ -93,6 +93,7 @@ The gateway provides a distinct wrapper endpoint for upstream video generation u
 - `prompt` (string, **required**): The descriptive text describing the video to generate. Must not be empty.
 - `model` (string, optional): Target video model. Supported values: `gen-3` (default), `gen-2`, `kling`.
 - `aspect_ratio` (string, optional): Desired aspect ratio. Supported values: `16:9` (default), `9:16`, `1:1`, `5:4`, `4:3`.
+- `duration` (number or string, optional): Generation duration in seconds (e.g., `5`, `10`, `30`, `60`, `90`, `120`). Defaults to `5`.
 
 ### Response Schema
 Success returns `200 OK` with the following structure:
@@ -104,6 +105,7 @@ Success returns `200 OK` with the following structure:
   "model": "gen-3",
   "prompt": "flying over glowing neon mountains at night",
   "aspect_ratio": "16:9",
+  "duration": 5,
   "status": "completed",
   "video_url": "https://cdn.muse.ai/video/xyz123.mp4"
 }

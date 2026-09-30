@@ -1362,3 +1362,10 @@ fn museai_stream_request_uses_resolved_session_id() {
     assert!(source.contains(r#""session_id": resolved_session_id.clone()"#));
     assert!(!source.contains(r#""chat_id": resolved_session_id.clone()"#));
 }
+
+#[test]
+fn test_create_video_duration_support() {
+    let source = include_str!("museai.rs");
+    assert!(source.contains(r#"Duration: {duration} seconds"#));
+    assert!(source.contains(r#""duration": duration"#));
+}
