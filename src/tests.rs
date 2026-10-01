@@ -31,6 +31,8 @@ fn test_config() -> Config {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     }
 }
 
@@ -291,6 +293,8 @@ fn forces_identity_encoding_upstream() {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
     let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let client_port = client_listener.local_addr().unwrap().port();
@@ -372,6 +376,8 @@ fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
 
     let headers = vec![
@@ -412,6 +418,8 @@ fn extracts_prism_credentials_from_x_api_key() {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
     let headers = vec![(
         "x-api-key".to_string(),
@@ -449,6 +457,8 @@ fn extracts_prism_credentials_with_comma_delimiter() {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
 
     let headers = vec![(
@@ -485,6 +495,8 @@ fn falls_back_to_config_credentials_when_header_is_missing_or_short() {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
 
     let headers = vec![(
@@ -520,6 +532,8 @@ fn test_museai_business_builds_configured_request() {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
 
     let request = br#"{"target":"session","method":"GET"}"#;
@@ -552,6 +566,8 @@ fn test_museai_business_rejects_unsafe_target() {
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
 
     let request = br#"{"target":"../session","method":"GET"}"#;
@@ -607,6 +623,8 @@ fn test_museai_v1_mock_proxy_flow() {
             museai_access_token: "".into(),
             museai_notary_token: "".into(),
             museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
         };
 
         let (mut client, _) = mock_gw.accept().unwrap();
@@ -669,6 +687,8 @@ fn test_models_catalog_response() {
             museai_access_token: "".into(),
             museai_notary_token: "".into(),
             museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
         };
         let (mut client, _) = listener.accept().unwrap();
         crate::routes::handle_models_catalog(&mut client, "/v1/models", &config).unwrap();
@@ -838,6 +858,8 @@ fn test_prism_successful_start_and_status_flow() {
             museai_access_token: "".into(),
             museai_notary_token: "".into(),
             museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
         };
         let (mut client, _) = mock_proxy.accept().unwrap();
         let req_in = crate::http::read_request(&mut client).unwrap();
@@ -1023,6 +1045,8 @@ fn test_prism_403_forbidden_error_mapping() {
             museai_access_token: "".into(),
             museai_notary_token: "".into(),
             museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
         };
         let (mut client, _) = mock_proxy.accept().unwrap();
 
@@ -1278,6 +1302,8 @@ Connection: close
         museai_access_token: "".into(),
         museai_notary_token: "".into(),
         museai_vm_id: "test_vm_id".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 86400,
     };
 
     let bootstrapped = crate::museai::bootstrap_museai_config(&config).unwrap();

@@ -63,6 +63,12 @@ fn main() -> io::Result<()> {
         museai_access_token: env_or("GW_MUSEAI_ACCESS_TOKEN", ""),
         museai_notary_token: env_or("GW_MUSEAI_NOTARY_TOKEN", ""),
         museai_vm_id: env_or("GW_MUSEAI_VM_ID", ""),
+        museai_auto_cleanup_threads: env_or("GW_MUSEAI_AUTO_CLEANUP_THREADS", "true")
+            .parse()
+            .unwrap_or(true),
+        museai_thread_retention_secs: env_or("GW_MUSEAI_THREAD_RETENTION_SECS", "86400")
+            .parse()
+            .unwrap_or(86400),
     });
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     eprintln!(
@@ -71,6 +77,9 @@ fn main() -> io::Result<()> {
     );
     if listen_host != "127.0.0.1" && listen_host != "::1" && listen_host != "localhost" {
         eprintln!("[toolcase-gateway] WARNING: listening on {listen_host} exposes an unauthenticated proxy; put it behind an authenticating front end");
+    }
+    if config.museai_auto_cleanup_threads && config.museai_thread_retention_secs > 0 {
+        crate::museai::start_cleanup_worker();
     }
     for stream in listener.incoming() {
         let Ok(client) = stream else { continue };

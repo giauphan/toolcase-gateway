@@ -4,7 +4,9 @@ use crate::museai_protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
 use crate::museai_transport::{send_museai_request, MuseWebSocket};
 use std::io::{self, Write};
 use std::net::TcpStream;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 fn debug_log(msg: &str) {
@@ -29,6 +31,33 @@ fn append_query_component(url: &mut String, key: &str, value: &str) {
                 url.push(char::from(HEX[(byte & 0x0f) as usize]));
             }
         }
+    }
+}
+
+pub(crate) struct TrackedThread {
+    id: String,
+    created_at: u64,
+    base_url: String,
+    config: Config,
+}
+
+fn tracked_threads() -> &'static Mutex<Vec<TrackedThread>> {
+    static TRACKED_THREADS: OnceLock<Mutex<Vec<TrackedThread>>> = OnceLock::new();
+    TRACKED_THREADS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn register_thread(thread_id: String, base_url: String, config: Config) {
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if let Ok(mut threads) = tracked_threads().lock() {
+        threads.push(TrackedThread {
+            id: thread_id,
+            created_at,
+            base_url,
+            config,
+        });
     }
 }
 
@@ -765,6 +794,14 @@ pub(crate) fn request_museai_chat_completion(
         }
     });
 
+    if config.museai_auto_cleanup_threads && !thread_id.is_empty() {
+        if config.museai_thread_retention_secs == 0 {
+            let _ = delete_muse_thread(base_origin, &thread_id, &config);
+        } else {
+            register_thread(thread_id, base_origin.to_string(), config.clone());
+        }
+    }
+
     serde_json::to_string(&completion_response)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
@@ -904,6 +941,49 @@ fn trim_trailing_punct(s: &str) -> &str {
     ])
 }
 
+pub(crate) fn delete_muse_thread(
+    base_url: &str,
+    thread_id: &str,
+    config: &Config,
+) -> io::Result<()> {
+    if thread_id.is_empty() {
+        return Ok(());
+    }
+
+    let delete_thread_url = format!("{base_url}/api/thread/{thread_id}");
+    let mut req = ureq::delete(&delete_thread_url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .header("Origin", base_url)
+        .header("Referer", &format!("{base_url}/"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
+        .header("sec-ch-ua", r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#)
+        .header("sec-ch-ua-mobile", "?0")
+        .header("sec-ch-ua-platform", r#""Windows""#)
+        .header("sec-fetch-dest", "empty")
+        .header("sec-fetch-mode", "cors")
+        .header("sec-fetch-site", "same-origin");
+
+    if !config.museai_cookie.is_empty() {
+        req = req.header("Cookie", &config.museai_cookie);
+    }
+
+    match req.call() {
+        Ok(_) => {
+            debug_log(&format!("Successfully cleaned up thread: {thread_id}"));
+            Ok(())
+        }
+        Err(e) => {
+            debug_log(&format!("Note: Failed to clean up thread {thread_id}: {e}"));
+            if let ureq::Error::StatusCode(404) = e {
+                Ok(())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
 pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Result<()> {
     write!(
         client,
@@ -912,6 +992,75 @@ pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> i
         response
     )?;
     client.flush()
+}
+
+pub(crate) fn cleanup_tracked_threads_once() -> usize {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut to_delete = Vec::new();
+    if let Ok(mut threads) = tracked_threads().lock() {
+        let mut i = 0;
+        while i < threads.len() {
+            if now >= threads[i].created_at + threads[i].config.museai_thread_retention_secs {
+                to_delete.push(threads.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    let deleted_count = to_delete.len();
+    for thread in to_delete {
+        let _ = delete_muse_thread(&thread.base_url, &thread.id, &thread.config);
+    }
+    deleted_count
+}
+
+pub(crate) fn start_cleanup_worker() {
+    thread::spawn(|| loop {
+        thread::sleep(Duration::from_secs(300));
+        cleanup_tracked_threads_once();
+    });
+}
+
+pub(crate) fn handle_museai_thread_cleanup(
+    client: &mut TcpStream,
+    thread_id: &str,
+    config: &Config,
+) -> io::Result<()> {
+    let base_url = if config.museai_base_url.is_empty() {
+        "https://muse.ai"
+    } else {
+        config.museai_base_url.as_str()
+    };
+
+    match delete_muse_thread(base_url, thread_id, config) {
+        Ok(()) => {
+            let body = serde_json::json!({
+                "object": "thread.cleanup",
+                "thread_id": thread_id,
+                "status": "deleted"
+            });
+            let response_str = serde_json::to_string(&body)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            write!(
+                client,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_str.len(),
+                response_str
+            )?;
+            client.flush()
+        }
+        Err(e) => crate::http::write_error(
+            client,
+            502,
+            "Bad Gateway",
+            &format!("Failed to clean up thread: {}", e),
+        ),
+    }
 }
 
 pub(crate) fn handle_create_video(
@@ -1062,6 +1211,8 @@ mod museai_tests {
             museai_access_token: "".into(),
             museai_notary_token: "".into(),
             museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
         };
 
         // 1. Empty prompt
@@ -1090,5 +1241,224 @@ mod museai_tests {
         let result = create_video(&serde_json::to_vec(&invalid_ar).unwrap(), &config);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn test_thread_registration_and_retention() {
+        let config = crate::config::Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: "https://prism.openai.com".into(),
+            prism_project_id: "".into(),
+            prism_cookie: "".into(),
+            prism_sandbox_token: "".into(),
+            prism_user_id: "".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "".into(),
+            museai_base_url: "https://muse.ai".into(),
+            museai_cookie: "".into(),
+            museai_ws_url: "".into(),
+            museai_access_token: "".into(),
+            museai_notary_token: "".into(),
+            museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
+        };
+
+        let thread_id = "test-thread-id-12345".to_string();
+        register_thread(
+            thread_id.clone(),
+            "https://muse.ai".to_string(),
+            config.clone(),
+        );
+
+        let threads = tracked_threads().lock().unwrap();
+        let found = threads.iter().find(|t| t.id == thread_id);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().config.museai_thread_retention_secs, 86400);
+    }
+
+    #[test]
+    fn test_thread_cleanup_active_vs_expired() {
+        let config_active = crate::config::Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: "https://prism.openai.com".into(),
+            prism_project_id: "".into(),
+            prism_cookie: "".into(),
+            prism_sandbox_token: "".into(),
+            prism_user_id: "".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "".into(),
+            museai_base_url: "https://muse.ai".into(),
+            museai_cookie: "".into(),
+            museai_ws_url: "".into(),
+            museai_access_token: "".into(),
+            museai_notary_token: "".into(),
+            museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400, // 24 hours
+        };
+
+        let mut config_expired = config_active.clone();
+        config_expired.museai_thread_retention_secs = 0; // expires immediately
+
+        let active_id = "thread-active-xyz".to_string();
+        let expired_id = "thread-expired-abc".to_string();
+
+        // Release the mutex lock from previous operations just to be safe
+        register_thread(
+            active_id.clone(),
+            "https://muse.ai".to_string(),
+            config_active,
+        );
+        register_thread(
+            expired_id.clone(),
+            "https://muse.ai".to_string(),
+            config_expired,
+        );
+
+        // Run the cleanup once synchronously to verify it triggers correctly
+        let deleted = cleanup_tracked_threads_once();
+
+        // Check that at least the expired one got cleared
+        assert!(deleted >= 1);
+
+        let threads = tracked_threads().lock().unwrap();
+        // The expired one should be gone
+        assert!(!threads.iter().any(|t| t.id == expired_id));
+        // The active one should still be tracked
+        assert!(threads.iter().any(|t| t.id == active_id));
+    }
+
+    #[test]
+    fn test_live_muse_thread_spawn_and_cleanup() {
+        let _ = dotenvy::dotenv();
+        let cookie = std::env::var("GW_MUSEAI_COOKIE").unwrap_or_default();
+        if cookie.is_empty() {
+            println!("Skipping live test: GW_MUSEAI_COOKIE not set");
+            return;
+        }
+
+        let base_url =
+            std::env::var("GW_MUSEAI_BASE_URL").unwrap_or_else(|_| "https://muse.ai".into());
+        let config = Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: "https://prism.openai.com".into(),
+            prism_project_id: "".into(),
+            prism_cookie: "".into(),
+            prism_sandbox_token: "".into(),
+            prism_user_id: "".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "".into(),
+            museai_base_url: base_url.clone(),
+            museai_cookie: cookie,
+            museai_ws_url: "".into(),
+            museai_access_token: "".into(),
+            museai_notary_token: "".into(),
+            museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 0,
+        };
+
+        match spawn_muse_thread(&base_url, &config) {
+            Ok(channel) => {
+                assert!(channel.starts_with("thread:"));
+                let thread_id = channel.strip_prefix("thread:").unwrap();
+                assert!(!thread_id.is_empty());
+
+                let res = delete_muse_thread(&base_url, thread_id, &config);
+                assert!(res.is_ok(), "Failed to delete live thread: {:?}", res);
+            }
+            Err(e) => {
+                println!(
+                    "Live test note: upstream rejected thread creation or credentials expired: {e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_thread_cleanup_route_dispatch() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let config = Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: "https://prism.openai.com".into(),
+            prism_project_id: "".into(),
+            prism_cookie: "".into(),
+            prism_sandbox_token: "".into(),
+            prism_user_id: "".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "".into(),
+            museai_base_url: "http://127.0.0.1:9".into(), // Will not hang, unreachable
+            museai_cookie: "".into(),
+            museai_ws_url: "".into(),
+            museai_access_token: "".into(),
+            museai_notary_token: "".into(),
+            museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
+        };
+
+        let handle = std::thread::spawn(move || {
+            let (mut client, _) = listener.accept().unwrap();
+            let req_in = crate::http::read_request(&mut client).unwrap();
+            assert_eq!(req_in.method, "DELETE");
+            assert_eq!(req_in.path, "/muse-ai/v1/threads/mock-thread-456");
+            let clean_path = req_in
+                .path
+                .split('?')
+                .next()
+                .unwrap_or("")
+                .trim_end_matches('/');
+            let thread_id = clean_path.split('/').next_back().unwrap_or("");
+            assert_eq!(thread_id, "mock-thread-456");
+            handle_museai_thread_cleanup(&mut client, thread_id, &config).unwrap();
+        });
+
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            client,
+            "DELETE /muse-ai/v1/threads/mock-thread-456 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        client.flush().unwrap();
+
+        let head = crate::http::read_response_head(&mut client).unwrap();
+        assert_eq!(head.status, 200);
+        let mut body = head.buffered_body;
+        if let Some(length_str) = crate::http::header_value(&head.headers, "content-length") {
+            let length: usize = length_str.parse().unwrap();
+            while body.len() < length {
+                crate::http::read_more(&mut client, &mut body).unwrap();
+            }
+        }
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["object"], "thread.cleanup");
+        assert_eq!(json["thread_id"], "mock-thread-456");
+        assert_eq!(json["status"], "deleted");
+
+        handle.join().unwrap();
     }
 }

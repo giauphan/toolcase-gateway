@@ -36,4 +36,6 @@ pub(crate) struct Config {
     pub(crate) museai_access_token: String,
     pub(crate) museai_notary_token: String,
     pub(crate) museai_vm_id: String,
+    pub(crate) museai_auto_cleanup_threads: bool,
+    pub(crate) museai_thread_retention_secs: u64,
 }

@@ -107,5 +107,13 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
         return crate::museai::handle_create_video(&mut client, &request.body, config);
     }
 
+    // Thread cleanup endpoint
+    if clean_path.starts_with("/muse-ai/v1/threads/")
+        && request.method.eq_ignore_ascii_case("delete")
+    {
+        let thread_id = clean_path.split('/').next_back().unwrap_or("");
+        return crate::museai::handle_museai_thread_cleanup(&mut client, thread_id, config);
+    }
+
     handle_omniroute_proxy(&mut client, &request, config)
 }
