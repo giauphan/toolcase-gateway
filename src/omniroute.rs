@@ -151,7 +151,10 @@ pub(crate) fn handle_omniroute_proxy(
                         client,
                         502,
                         "Bad Gateway",
-                        "toolcase-gateway: all upstream models exhausted",
+                        &format!(
+                            "toolcase-gateway: all upstream models exhausted; model \"muse\" failed ({})",
+                            error.kind()
+                        ),
                     );
                 }
             }
@@ -195,7 +198,10 @@ pub(crate) fn handle_omniroute_proxy(
                         504 => "Gateway Timeout",
                         _ => "Service Unavailable",
                     },
-                    "toolcase-gateway: all upstream models exhausted",
+                    &format!(
+                        "toolcase-gateway: all upstream models exhausted; model \"{model}\" returned HTTP {}",
+                        head.status
+                    ),
                 )
             } else {
                 if head.status >= 400 {
@@ -262,7 +268,10 @@ pub(crate) fn handle_omniroute_proxy(
                         Some(504) => "Gateway Timeout",
                         _ => "Bad Gateway",
                     },
-                    "toolcase-gateway: all upstream models exhausted",
+                    &format!(
+                        "toolcase-gateway: all upstream models exhausted; model \"{model}\" failed ({})",
+                        error.kind()
+                    ),
                 );
             }
         }
@@ -280,7 +289,12 @@ pub(crate) fn handle_omniroute_proxy(
             Some(504) => "Gateway Timeout",
             _ => "Bad Gateway",
         },
-        "toolcase-gateway: all upstream models exhausted",
+        &format!(
+            "toolcase-gateway: all upstream models exhausted; last upstream status: {}",
+            last_status
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "unavailable".to_string())
+        ),
     )
 }
 

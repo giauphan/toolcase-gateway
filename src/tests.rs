@@ -1173,6 +1173,57 @@ fn museai_noise_url_rejects_missing_auth_token() {
 }
 
 #[test]
+fn exhausted_models_report_final_model_and_status() {
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+    let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_host = "127.0.0.1".into();
+    config.target_port = upstream_port;
+    config.fallbacks = vec!["fallback-model".into()];
+    config.retry_base_delay_ms = 0;
+    config.max_retry_delay_ms = 0;
+
+    let gateway = thread::spawn(move || {
+        let (client, _) = client_listener.accept().unwrap();
+        crate::routes::route_request(client, &config).unwrap();
+    });
+    let upstream = thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut socket, _) = upstream_listener.accept().unwrap();
+            let _request = crate::http::read_request(&mut socket).unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 503 Service Unavailable\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n",
+                )
+                .unwrap();
+        }
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    let request = b"{\"model\":\"primary-model\",\"messages\":[]}";
+    write!(
+        client,
+        "POST /v1/chat/completions HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: {}\\r\\n\\r\\n{}",
+        request.len(),
+        std::str::from_utf8(request).unwrap()
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let response = read_response_head(&mut client).unwrap();
+    assert_eq!(response.status, 503);
+    let body = String::from_utf8_lossy(&response.buffered_body);
+    assert!(body.contains("fallback-model"));
+    assert!(body.contains("HTTP 503"));
+
+    gateway.join().unwrap();
+    upstream.join().unwrap();
+}
+
+#[test]
 fn museai_fails_over_to_fallback() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
