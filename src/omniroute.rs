@@ -290,10 +290,11 @@ pub(crate) fn handle_omniroute_proxy(
             _ => "Bad Gateway",
         },
         &format!(
-            "toolcase-gateway: all upstream models exhausted; last upstream status: {}",
+            "toolcase-gateway: all upstream models exhausted; model \"{}\" returned {}",
+            candidates.last().map(String::as_str).unwrap_or("unknown"),
             last_status
-                .map(|status| status.to_string())
-                .unwrap_or_else(|| "unavailable".to_string())
+                .map(|status| format!("HTTP {status}"))
+                .unwrap_or_else(|| "an unavailable upstream response".to_string())
         ),
     )
 }

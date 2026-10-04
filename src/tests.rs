@@ -1196,7 +1196,7 @@ fn exhausted_models_report_final_model_and_status() {
             let _request = crate::http::read_request(&mut socket).unwrap();
             socket
                 .write_all(
-                    b"HTTP/1.1 503 Service Unavailable\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n",
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 )
                 .unwrap();
         }
@@ -1206,7 +1206,7 @@ fn exhausted_models_report_final_model_and_status() {
     let request = b"{\"model\":\"primary-model\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: {}\\r\\n\\r\\n{}",
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         request.len(),
         std::str::from_utf8(request).unwrap()
     )
@@ -1215,7 +1215,9 @@ fn exhausted_models_report_final_model_and_status() {
 
     let response = read_response_head(&mut client).unwrap();
     assert_eq!(response.status, 503);
-    let body = String::from_utf8_lossy(&response.buffered_body);
+    let mut body = response.buffered_body;
+    client.read_to_end(&mut body).unwrap();
+    let body = String::from_utf8_lossy(&body);
     assert!(body.contains("fallback-model"));
     assert!(body.contains("HTTP 503"));
 
