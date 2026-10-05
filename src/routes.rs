@@ -115,5 +115,12 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
         return crate::museai::handle_museai_thread_cleanup(&mut client, thread_id, config);
     }
 
+    // Video template UI page (also serve on /video-template/<name>)
+    if request.method.eq_ignore_ascii_case("get")
+        && (clean_path == "/video-template" || clean_path.starts_with("/video-template/"))
+    {
+        return crate::video_template::handle_video_template_page(&mut client);
+    }
+
     handle_omniroute_proxy(&mut client, &request, config)
 }

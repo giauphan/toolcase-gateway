@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Video Template Studio</title>
+<style>
+:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#e8eaf0;--muted:#9aa0b0;--accent:#5b8cff;--ok:#3fd08a;--err:#ff6b6b;--border:#2a2f3f;--radius:12px}
+@media (prefers-color-scheme: light){:root{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f6;--text:#1a1c24;--muted:#5a5f6e;--accent:#2f5be0;--ok:#1b9e68;--err:#d63;--border:#d8dbe4}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px 16px 60px}
+.wrap{max-width:960px;margin:0 auto}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+.card h2{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:700}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.req{color:var(--err);font-weight:700}
+input[type=text],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+.row{margin-bottom:14px}.row:last-child{margin-bottom:0}
+.pill{display:flex;gap:10px;flex-wrap:wrap}
+.chip{cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--panel2);color:var(--text);font-size:13px;user-select:none}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.preview{background:var(--panel2);border:1px dashed var(--border);border-radius:8px;padding:14px;font-size:13px;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--text);min-height:60px}
+.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button{font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;padding:12px 20px;background:var(--accent);color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+.status{font-size:13px;font-weight:600;min-height:20px}
+.status.ok{color:var(--ok)}
+.status.err{color:var(--err)}
+.status.busy{color:var(--accent)}
+pre{margin:0}
+.err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:12px;font-size:13px;color:var(--err);margin-top:12px;display:none;white-space:pre-wrap}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Video Template Studio</h1>
+  <p class="sub">Fill Topic + Character. We auto-derive the rest, preview the exact template prompt, then generate via Muse.ai.</p>
+
+  <div class="card">
+    <h2>Fields</h2>
+    <div class="grid">
+      <div class="row">
+        <label>Topic <span class="req">*</span></label>
+        <input type="text" id="topic" name="topic" placeholder="e.g. a cozy bakery at dawn">
+      </div>
+      <div class="row">
+        <label>Character <span class="req">*</span></label>
+        <input type="text" id="character" name="character" placeholder="e.g. a round orange fox baker, big eyes, apron">
+      </div>
+      <div class="row">
+        <label>Setting</label>
+        <input type="text" id="setting" name="setting" placeholder="auto-derived from topic">
+      </div>
+      <div class="row">
+        <label>Action (ONE beat only)</label>
+        <input type="text" id="action" name="action" placeholder="auto-derived from topic">
+      </div>
+      <div class="row">
+        <label>Camera</label>
+        <input type="text" id="camera" name="camera" placeholder="slow push-in / gentle pan / static">
+      </div>
+      <div class="row">
+        <label>Sound</label>
+        <input type="text" id="sound" name="sound" placeholder="music mood + 1-2 SFX">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Options</h2>
+
+    <div class="row">
+      <label>Aspect ratio</label>
+      <div class="pill" id="aspect">
+        <span class="chip on" data-v="9:16">9:16</span>
+        <span class="chip" data-v="16:9">16:9</span>
+        <span class="chip" data-v="1:1">1:1</span>
+        <span class="chip" data-v="4:3">4:3</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <label>Model</label>
+      <div class="pill" id="model">
+        <span class="chip on" data-v="gen-3">gen-3</span>
+        <span class="chip" data-v="gen-2">gen-2</span>
+        <span class="chip" data-v="kling">kling</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <label>Duration (seconds)</label>
+      <select id="duration">
+        <option value="5">5s</option>
+        <option value="10" selected>10s</option>
+        <option value="15">15s</option>
+        <option value="30">30s</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Live prompt preview</h2>
+    <div class="preview" id="preview"></div>
+  </div>
+
+  <div class="card">
+    <h2>Generate</h2>
+    <div class="btns">
+      <button id="go" type="button">Generate video</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <div class="mono" id="video-url" style="display:none;"></div>
+      <div id="raw" style="margin-top:10px"></div>
+      <div class="err-box" id="errbox"></div>
+    </div>
+
+    <p style="color:var(--muted);margin:12px 0 0;font-size:13px">If Muse returns <b>pending</b>, the video URL wasn’t ready in time—try again.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var state={aspect:"9:16",model:"gen-3"};
+
+  function derived(id, topic){
+    topic=topic.trim();
+    if(!topic) return "";
+    if(id==="setting") return "the scene of "+topic+", soft cinematic backdrop";
+    if(id==="action") return "the character performs one gentle, looping beat related to "+topic;
+    if(id==="camera") return "slow push-in";
+    if(id==="sound") return "warm lo-fi music, subtle ambient SFX";
+    return "";
+  }
+
+  function val(id){
+    var el=document.getElementById(id);
+    var v=el.value.trim();
+    if(v) return v;
+    if(id==="character") return "";
+    if(id==="topic") return "";
+    var topic=document.getElementById("topic").value;
+    return derived(id, topic);
+  }
+
+  function header(ratio){
+    if(ratio==="9:16") return "Vertical 9:16";
+    if(ratio==="16:9") return "Horizontal 16:9";
+    if(ratio==="1:1") return "Square 1:1";
+    if(ratio==="4:3") return "Classic 4:3";
+    return ratio;
+  }
+
+  function buildPrompt(){
+    return [
+      header(state.aspect)+", high-quality 3D cartoon animation, soft rounded character design, warm cinematic lighting, vibrant colors.",
+      "",
+      "Character: "+val("character"),
+      "Setting: "+val("setting"),
+      "Action (ONE beat only): "+val("action"),
+      "Camera: "+val("camera"),
+      "Sound: "+val("sound"),
+      "No dialogue, no on-screen text, no watermark, no logos."
+    ].join("\n");
+  }
+
+  function render(){
+    document.getElementById("preview").textContent=buildPrompt();
+  }
+
+  ["topic","character","setting","action","camera","sound"].forEach(function(id){
+    document.getElementById(id).addEventListener("input", render);
+  });
+
+  function bindGroup(groupEl, field){
+    groupEl.addEventListener("click", function(e){
+      var chip=e.target.closest(".chip");
+      if(!chip) return;
+      Array.prototype.slice.call(groupEl.querySelectorAll(".chip")).forEach(function(c){c.classList.remove("on")});
+      chip.classList.add("on");
+      state[field]=chip.dataset.v;
+      render();
+    });
+  }
+
+  bindGroup(document.getElementById("aspect"), "aspect");
+  bindGroup(document.getElementById("model"), "model");
+  document.getElementById("duration").addEventListener("change", render);
+
+  function setStatus(text, cls){
+    var s=document.getElementById("status");
+    s.className="status"+(cls?" "+cls:"");
+    s.textContent=text;
+  }
+
+  function setError(text){
+    var box=document.getElementById("errbox");
+    box.style.display="block";
+    box.textContent=text;
+  }
+
+  function clearError(){
+    var box=document.getElementById("errbox");
+    box.style.display="none";
+    box.textContent="";
+  }
+
+  document.getElementById("go").addEventListener("click", function(){
+    clearError();
+    var go=document.getElementById("go");
+    var topic=document.getElementById("topic").value.trim();
+    var character=document.getElementById("character").value.trim();
+
+    if(!topic || !character){
+      setStatus("", "");
+      setError("Topic and Character are required.");
+      return;
+    }
+
+    go.disabled=true;
+    setStatus("Generating… (can take ~1-3 min)", "busy");
+
+    var body={
+      prompt: buildPrompt(),
+      model: state.model,
+      aspect_ratio: state.aspect,
+      duration: parseInt(document.getElementById("duration").value, 10)
+    };
+
+    fetch("/muse-ai/v1/create-video", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    }).then(function(r){
+      return r.json().then(function(d){
+        return {ok:r.ok, data:d};
+      });
+    }).then(function(res){
+      go.disabled=false;
+
+      if(!res.ok){
+        setStatus("", "");
+        var msg=res.data && res.data.error && res.data.error.message ? res.data.error.message : "Request failed.";
+        setError(msg);
+        return;
+      }
+
+      var d=res.data;
+      var raw=document.getElementById("raw");
+      raw.innerHTML="";
+      var urlEl=document.getElementById("video-url");
+      urlEl.style.display="none";
+
+      if(d && d.status==="completed" && d.video_url){
+        setStatus("Done.", "ok");
+        urlEl.textContent=d.video_url;
+        urlEl.style.display="block";
+      } else {
+        setStatus("Pending.", "busy");
+        var pre=document.createElement("pre");
+        pre.textContent=JSON.stringify(d,null,2);
+        raw.appendChild(pre);
+      }
+    }).catch(function(e){
+      go.disabled=false;
+      setStatus("", "");
+      setError(String(e));
+    });
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -19,6 +19,8 @@ mod omniroute;
 mod prism;
 mod rewrite;
 mod routes;
+mod video_template;
+
 #[cfg(test)]
 mod tests;
 

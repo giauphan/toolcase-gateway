@@ -1448,3 +1448,149 @@ fn test_create_video_duration_support() {
     assert!(source.contains(r#"Duration: {duration} seconds"#));
     assert!(source.contains(r#""duration": duration"#));
 }
+
+#[test]
+fn test_video_template_route_returns_html() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let config = test_config();
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &config).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "GET /video-template HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(
+        header_value(&head.headers, "content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    let mut body = head.buffered_body;
+    let length = header_value(&head.headers, "content-length")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    while body.len() < length {
+        read_more(&mut client, &mut body).unwrap();
+    }
+    let html = String::from_utf8_lossy(&body[..length]);
+    assert!(html.contains("Video Template Studio"));
+    assert!(html.contains("name=\"topic\""));
+    assert!(html.contains("name=\"character\""));
+    assert!(html.contains("/muse-ai/v1/create-video"));
+
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_video_template_named_route_returns_html() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let config = test_config();
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &config).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "GET /video-template/my-cartoon HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(
+        header_value(&head.headers, "content-type"),
+        Some("text/html; charset=utf-8")
+    );
+
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_video_template_html_contains_full_template_structure() {
+    let html = include_str!("../assets/video-template.html");
+    // The exact template format the user specified must be wired into the prompt builder.
+    assert!(html.contains("high-quality 3D cartoon animation"));
+    assert!(html.contains("soft rounded character design"));
+    assert!(html.contains("\"Character: \"+val(\"character\")"));
+    assert!(html.contains("\"Setting: \"+val(\"setting\")"));
+    assert!(html.contains("\"Action (ONE beat only): \"+val(\"action\")"));
+    assert!(html.contains("\"Camera: \"+val(\"camera\")"));
+    assert!(html.contains("\"Sound: \"+val(\"sound\")"));
+    assert!(html.contains("No dialogue, no on-screen text, no watermark, no logos."));
+    // Auto-derive: optional fields fall back to values derived from the topic.
+    assert!(html.contains("function derived("));
+}
+
+#[test]
+fn test_video_template_trailing_slash_serves_page() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let config = test_config();
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &config).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "GET /video-template/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(
+        header_value(&head.headers, "content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_video_template_only_served_on_get() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let config = test_config();
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &config).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    // POST must NOT match the GET-only page route; it falls through to the proxy,
+    // which fails (no upstream) and must not return the HTML page.
+    write!(
+        client,
+        "POST /video-template HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    // Page route is GET-only; POST must not serve the HTML page.
+    assert_ne!(head.status, 200);
+    assert_ne!(
+        header_value(&head.headers, "content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    handle.join().unwrap();
+}
