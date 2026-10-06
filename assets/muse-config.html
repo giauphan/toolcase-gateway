@@ -29,8 +29,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;font-size:13px}
 .report{display:none;margin-top:14px}
 .report.show{display:block}
-.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:13px;margin-top:8px}
+.kv{display:grid;grid-template-columns:minmax(210px,auto) 1fr;gap:10px 12px;font-size:13px;margin-top:8px;align-items:center}
 .kv .k{color:var(--muted)}
+.value-row{display:flex;gap:8px;align-items:center;min-width:0}
+.value-row .mono{flex:1;min-width:0}
+.copy{padding:5px 9px;border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--text);font-size:11px;white-space:nowrap}
 .tag{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);margin-left:6px}
 .err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:12px;font-size:13px;color:var(--err);margin-top:12px;display:none;white-space:pre-wrap}
 .ok-box{background:rgba(63,208,138,.12);border:1px solid var(--ok);border-radius:8px;padding:12px;font-size:13px;color:var(--ok);margin-top:12px;display:none}
@@ -58,6 +61,7 @@ a{color:var(--accent)}
 
   <div class="card report" id="report">
     <h2>2. Effective Muse config</h2>
+    <p style="margin:0 0 12px;color:var(--muted);font-size:13px">Secret values are masked only on this page. Their complete values are saved directly to the env file; do not copy the masked text.</p>
     <div class="kv" id="kv"></div>
     <div style="margin-top:10px" id="kept"></div>
   </div>
@@ -102,25 +106,52 @@ a{color:var(--accent)}
   function setStatus(t,c){var s=document.getElementById("status");s.className="status"+(c?" "+c:"");s.textContent=t;}
   function clearBoxes(){document.getElementById("errbox").style.display="none";document.getElementById("okbox").style.display="none";document.getElementById("report").classList.remove("show");}
 
+  var envNames={
+    ws_url:"GW_MUSEAI_WS_URL",
+    base_url:"GW_MUSEAI_BASE_URL",
+    access_token:"GW_MUSEAI_ACCESS_TOKEN",
+    notary_token:"GW_MUSEAI_NOTARY_TOKEN",
+    vm_id:"GW_MUSEAI_VM_ID",
+    cookie:"GW_MUSEAI_COOKIE"
+  };
+
+  function copyText(text,button){
+    if(!navigator.clipboard){button.textContent="Copy unavailable";return;}
+    navigator.clipboard.writeText(text).then(function(){
+      button.textContent="Copied";
+      setTimeout(function(){button.textContent="Copy";},1200);
+    }).catch(function(){button.textContent="Copy failed";});
+  }
+
   function renderReport(d){
     var kv=document.getElementById("kv");
     kv.innerHTML="";
     (d.config||d.applied||[]).forEach(function(f){
+      var envName=envNames[f.key]||f.key;
       var k=document.createElement("div");
-      k.className="k";
-      var keyText=document.createTextNode(f.key);
-      k.appendChild(keyText);
-      if(f.masked){
-        var tag=document.createElement("span");
-        tag.className="tag";
-        tag.textContent="masked";
-        k.appendChild(tag);
-      }
+      k.className="k mono";
+      k.appendChild(document.createTextNode(envName));
+      var tag=document.createElement("span");
+      tag.className="tag";
+      tag.textContent=f.masked?"saved · masked":"saved";
+      k.appendChild(tag);
+
+      var row=document.createElement("div");
+      row.className="value-row";
       var v=document.createElement("div");
       v.className="mono";
       v.textContent=f.value;
+      row.appendChild(v);
+      if(!f.masked){
+        var copy=document.createElement("button");
+        copy.type="button";
+        copy.className="copy";
+        copy.textContent="Copy";
+        copy.addEventListener("click",function(){copyText(envName+"="+f.value,copy);});
+        row.appendChild(copy);
+      }
       kv.appendChild(k);
-      kv.appendChild(v);
+      kv.appendChild(row);
     });
 
     var kept=document.getElementById("kept");
@@ -132,7 +163,7 @@ a{color:var(--accent)}
     var ok=document.getElementById("okbox");
     if(env.status==="written"){
       ok.style.display="block";
-      ok.textContent="Applied live. Effective Muse config persisted at "+env.path+" ("+(env.keys||[]).length+" keys).";
+      ok.textContent="Applied live. Complete values (including unmasked secrets) were saved directly to "+env.path+" ("+(env.keys||[]).length+" keys). No manual copy is needed.";
     } else if(env.status==="failed"){
       ok.style.display="block";
       ok.textContent="Applied live, but .env write failed: "+env.message;

@@ -36,4 +36,14 @@ mod template_tests {
         assert!(html.contains("name=\"sound\""));
         assert!(html.contains("/muse-ai/v1/create-video"));
     }
+
+    #[test]
+    fn muse_config_explains_masking_and_safe_copying() {
+        let html = include_str!("../assets/muse-config.html");
+        assert!(html.contains("GW_MUSEAI_ACCESS_TOKEN"));
+        assert!(html.contains("GW_MUSEAI_COOKIE"));
+        assert!(html.contains("do not copy the masked text"));
+        assert!(html.contains("No manual copy is needed"));
+        assert!(html.contains("if(!f.masked)"));
+    }
 }
