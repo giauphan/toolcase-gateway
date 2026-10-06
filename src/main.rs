@@ -4,11 +4,11 @@
 use std::io::{self, ErrorKind};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 mod config;
+mod har_config;
 mod http;
 mod museai;
 mod museai_business;
@@ -37,7 +37,7 @@ fn main() -> io::Result<()> {
     let listen_port = env_or("GW_LISTEN_PORT", "20129").parse().unwrap_or(20129);
     let max_connections: usize = env_or("GW_MAX_CONNECTIONS", "256").parse().unwrap_or(256);
     let timeout_secs: u64 = env_or("GW_IO_TIMEOUT_SECS", "120").parse().unwrap_or(120);
-    let config = Arc::new(Config {
+    let config = Config {
         target_host: env_or("GW_TARGET_HOST", "127.0.0.1"),
         target_port: env_or("GW_TARGET_PORT", "20128").parse().unwrap_or(20128),
         fallbacks: env_or("GW_FALLBACK_MODELS", "fail-try")
@@ -71,8 +71,10 @@ fn main() -> io::Result<()> {
         museai_thread_retention_secs: env_or("GW_MUSEAI_THREAD_RETENTION_SECS", "86400")
             .parse()
             .unwrap_or(86400),
-    });
+    };
+    let store = ConfigStore::new(config, resolve_env_file());
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
+    let config = store.snapshot();
     eprintln!(
         "[toolcase-gateway] {listen_host}:{listen_port} -> {}:{}",
         config.target_host, config.target_port
@@ -100,9 +102,9 @@ fn main() -> io::Result<()> {
             let _ = client.set_write_timeout(Some(timeout));
         }
         ACTIVE.fetch_add(1, Ordering::Relaxed);
-        let config = config.clone();
+        let store = store.clone();
         thread::spawn(move || {
-            if let Err(error) = route_request(client, &config) {
+            if let Err(error) = route_request(client, &store) {
                 if !matches!(
                     error.kind(),
                     ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof

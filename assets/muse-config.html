@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Muse Config — HAR Import</title>
+<style>
+:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#e8eaf0;--muted:#9aa0b0;--accent:#5b8cff;--ok:#3fd08a;--err:#ff6b6b;--border:#2a2f3f;--radius:12px}
+@media (prefers-color-scheme: light){:root{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f6;--text:#1a1c24;--muted:#5a5f6e;--accent:#2f5be0;--ok:#1b9e68;--err:#d63;--border:#d8dbe4}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px 16px 60px}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+.card h2{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:700}
+.drop{border:2px dashed var(--border);border-radius:10px;padding:26px;text-align:center;color:var(--muted);cursor:pointer}
+.drop.on{border-color:var(--accent);color:var(--text)}
+.drop input{display:none}
+.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+button{font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;padding:12px 20px;background:var(--accent);color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+.status{font-size:13px;font-weight:600;min-height:20px}
+.status.ok{color:var(--ok)}
+.status.err{color:var(--err)}
+.status.busy{color:var(--accent)}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;font-size:13px}
+.report{display:none;margin-top:14px}
+.report.show{display:block}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:13px;margin-top:8px}
+.kv .k{color:var(--muted)}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);margin-left:6px}
+.err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:12px;font-size:13px;color:var(--err);margin-top:12px;display:none;white-space:pre-wrap}
+.ok-box{background:rgba(63,208,138,.12);border:1px solid var(--ok);border-radius:8px;padding:12px;font-size:13px;color:var(--ok);margin-top:12px;display:none}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Muse Config — HAR import</h1>
+  <p class="sub">Upload a DevTools HAR capture (<b>muse-ai.har</b>) to extract and apply Muse WebSocket config. Values apply live and persist to <code>.env</code>.</p>
+
+  <div class="card">
+    <h2>1. HAR file</h2>
+    <label class="drop" id="drop" for="har-file">
+      <span id="drop-label">Click to choose or drop a .har file</span>
+      <input type="file" id="har-file" accept=".har,.json">
+    </label>
+    <div class="btns">
+      <button id="apply" type="button" disabled>Parse &amp; apply</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="ok-box" id="okbox"></div>
+    <div class="err-box" id="errbox"></div>
+  </div>
+
+  <div class="card report" id="report">
+    <h2>2. Applied values</h2>
+    <div class="kv" id="kv"></div>
+    <div style="margin-top:10px" id="kept"></div>
+  </div>
+
+  <div class="card">
+    <h2>Next</h2>
+    <p style="margin:0;font-size:14px;color:var(--muted)">
+      Config is live now — no restart needed. <a href="/video-template">Open Video Template Studio</a> to generate.
+    </p>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var file=null;
+  var drop=document.getElementById("drop");
+  var label=document.getElementById("drop-label");
+  var input=document.getElementById("har-file");
+  var btn=document.getElementById("apply");
+
+  input.addEventListener("change",function(){
+    file=input.files[0]||null;
+    if(file){label.textContent=file.name+" ("+(file.size/1048576).toFixed(1)+" MB)";}
+    else{label.textContent="Click to choose or drop a .har file";}
+    btn.disabled=!file;
+  });
+
+  ["dragover","dragleave","drop"].forEach(function(ev){
+    drop.addEventListener(ev,function(e){
+      e.preventDefault();
+      if(ev==="drop"){
+        file=e.dataTransfer.files[0]||null;
+        if(file){label.textContent=file.name;}
+        btn.disabled=!file;
+      }
+      drop.classList.toggle("on",ev==="dragover");
+    });
+  });
+
+  function setStatus(t,c){var s=document.getElementById("status");s.className="status"+(c?" "+c:"");s.textContent=t;}
+  function clearBoxes(){document.getElementById("errbox").style.display="none";document.getElementById("okbox").style.display="none";document.getElementById("report").classList.remove("show");}
+
+  function renderReport(d){
+    var kv=document.getElementById("kv");
+    kv.innerHTML="";
+    (d.applied||[]).forEach(function(f){
+      var k=document.createElement("div");
+      k.className="k";
+      var keyText=document.createTextNode(f.key);
+      k.appendChild(keyText);
+      if(f.masked){
+        var tag=document.createElement("span");
+        tag.className="tag";
+        tag.textContent="masked";
+        k.appendChild(tag);
+      }
+      var v=document.createElement("div");
+      v.className="mono";
+      v.textContent=f.value;
+      kv.appendChild(k);
+      kv.appendChild(v);
+    });
+
+    var kept=document.getElementById("kept");
+    kept.innerHTML=(d.kept&&d.kept.length)
+      ? "Kept existing values for: "+d.kept.join(", ")
+      : "";
+
+    var env=d.env||{};
+    var ok=document.getElementById("okbox");
+    if(env.status==="written"){
+      ok.style.display="block";
+      ok.textContent="Applied live. .env updated at "+env.path+" ("+(env.keys||[]).length+" keys).";
+    } else if(env.status==="failed"){
+      ok.style.display="block";
+      ok.textContent="Applied live, but .env write failed: "+env.message;
+    }
+    document.getElementById("report").classList.add("show");
+  }
+
+  btn.addEventListener("click",function(){
+    clearBoxes();
+    if(!file)return;
+    btn.disabled=true;
+    setStatus("Parsing HAR…","busy");
+
+    file.text().then(function(text){
+      return fetch("/muse-ai/v1/config/har",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:text
+      });
+    }).then(function(r){
+      return r.json().then(function(d){return {ok:r.ok,data:d};});
+    }).then(function(res){
+      btn.disabled=false;
+      if(!res.ok){
+        setStatus("","");
+        var e=document.getElementById("errbox");
+        e.style.display="block";
+        e.textContent=(res.data&&res.data.error&&res.data.error.message)||"Request failed.";
+        return;
+      }
+      setStatus("Applied.","ok");
+      renderReport(res.data);
+    }).catch(function(err){
+      btn.disabled=false;
+      setStatus("","");
+      var e=document.getElementById("errbox");
+      e.style.display="block";
+      e.textContent=String(err);
+    });
+  });
+})();
+</script>
+</body>
+</html>

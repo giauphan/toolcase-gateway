@@ -302,9 +302,37 @@ pub(crate) fn spawn_muse_thread(base_url: &str, config: &Config) -> io::Result<S
         req = req.header("Cookie", &config.museai_cookie);
     }
 
-    let response = req
-        .send("[]")
-        .map_err(|e| io::Error::other(format!("Thread creation request failed: {e}")))?;
+    let response = match req.send("[]") {
+        Ok(res) => res,
+        Err(ureq::Error::StatusCode(401)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Muse.ai thread creation returned 401 Unauthorized — credentials are invalid or expired",
+            ));
+        }
+        Err(ureq::Error::StatusCode(403)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Muse.ai thread creation returned 403 Forbidden — access denied",
+            ));
+        }
+        Err(ureq::Error::StatusCode(404)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Muse.ai thread creation returned 404 — endpoint not found or cookie expired",
+            ));
+        }
+        Err(ureq::Error::StatusCode(status)) => {
+            return Err(io::Error::other(format!(
+                "Muse.ai thread creation returned HTTP {status}"
+            )));
+        }
+        Err(e) => {
+            return Err(io::Error::other(format!(
+                "Thread creation request failed: {e}"
+            )));
+        }
+    };
     let mut reader = response.into_body();
     let text = reader
         .read_to_string()
@@ -553,7 +581,7 @@ pub(crate) fn request_museai_chat_completion(
 
     // Spawn an isolated thread for this request to prevent cross-request context leakage
     let channel = spawn_muse_thread(base_origin, &config)
-        .map_err(|e| io::Error::other(format!("Thread spawn error: {e}")))?;
+        .map_err(|e| io::Error::new(e.kind(), format!("Thread spawn error: {e}")))?;
     let thread_id = channel.strip_prefix("thread:").unwrap_or("").to_string();
 
     let stream_id = 1;
@@ -1460,5 +1488,149 @@ mod museai_tests {
         assert_eq!(json["status"], "deleted");
 
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn parse_cookie_from_header_dump_extracts_cookie_value() {
+        let dump =
+            b":authority\nmuse.ai\n:method\nGET\ncookie\nsite.example; session=abc\n:method2\nx\n";
+        assert_eq!(
+            parse_cookie_from_header_dump(dump),
+            Some("site.example; session=abc".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_cookie_from_header_dump_without_cookie_is_none() {
+        let dump = b":authority\nmuse.ai\n:method\nGET\nreferer\nhttps://muse.ai/thread/new\n";
+        assert_eq!(parse_cookie_from_header_dump(dump), None);
+    }
+
+    #[test]
+    fn parse_cookie_from_header_dump_empty_value_is_none() {
+        let dump = b"cookie\n\npriority\nu=1, i\n";
+        assert_eq!(parse_cookie_from_header_dump(dump), None);
+    }
+
+    #[test]
+    fn parse_cookie_from_header_dump_case_insensitive_key() {
+        let dump = b"Cookie\nsession=xyz\n";
+        assert_eq!(
+            parse_cookie_from_header_dump(dump),
+            Some("session=xyz".to_string())
+        );
+    }
+
+    #[test]
+    fn test_live_create_video_from_har_capture() {
+        if std::env::var("MUSE_LIVE_TEST").ok().as_deref() != Some("1") {
+            return;
+        }
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let har_path = manifest.join("target/muse.ai.har");
+        let header_path = manifest.join("target/muse-header.txt");
+
+        let har_bytes = match std::fs::read(&har_path) {
+            Ok(b) => b,
+            Err(_) => {
+                println!("Skipping live test: {} not found", har_path.display());
+                return;
+            }
+        };
+        let extracted = match crate::har_config::extract_muse_config_from_har(&har_bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Skipping live test: HAR parse failed: {e:?}");
+                return;
+            }
+        };
+
+        let cookie = extracted.cookie.clone().or_else(|| {
+            std::fs::read(&header_path)
+                .ok()
+                .and_then(|bytes| parse_cookie_from_header_dump(&bytes))
+        });
+        let cookie = match cookie {
+            Some(c) if !c.is_empty() => c,
+            _ => {
+                println!(
+                    "Skipping live test: no cookie in HAR or {}",
+                    header_path.display()
+                );
+                return;
+            }
+        };
+
+        let config = Config {
+            target_host: "127.0.0.1".into(),
+            target_port: 8080,
+            fallbacks: vec![],
+            io_timeout: None,
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 1000,
+            prism_base_url: "https://prism.openai.com".into(),
+            prism_project_id: "default_proj".into(),
+            prism_cookie: "".into(),
+            prism_sandbox_token: "".into(),
+            prism_user_id: "".into(),
+            prism_default_model: "gpt-5.6-sol".into(),
+            prism_system_prompt: "".into(),
+            museai_base_url: extracted
+                .base_url
+                .unwrap_or_else(|| "https://muse.ai".into()),
+            museai_cookie: cookie,
+            museai_ws_url: extracted.ws_url.unwrap_or_default(),
+            museai_access_token: extracted.access_token.unwrap_or_default(),
+            museai_notary_token: extracted.notary_token.unwrap_or_default(),
+            museai_vm_id: extracted.vm_id.unwrap_or_default(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 0,
+        };
+
+        let body = serde_json::json!({
+            "prompt": "A single white square rotating slowly on a black background, 3D cartoon style",
+            "model": "gen-3",
+            "aspect_ratio": "16:9",
+            "duration": 5
+        });
+
+        match create_video(body.to_string().as_bytes(), &config) {
+            Ok(result) => {
+                assert_eq!(result["object"], "video.generation");
+                let status = result["status"].as_str().unwrap_or("");
+                assert!(
+                    matches!(status, "completed" | "pending"),
+                    "unexpected status: {status}"
+                );
+                if status == "completed" {
+                    let url = result["video_url"].as_str().unwrap_or("");
+                    assert!(
+                        url.starts_with("https://"),
+                        "completed but video_url is not https: {url}"
+                    );
+                }
+                println!("Live e2e create_video finished with status={status}");
+            }
+            Err(e) => {
+                println!(
+                    "Live e2e note: upstream rejected or credentials expired: {}",
+                    e.kind()
+                );
+            }
+        }
+    }
+
+    fn parse_cookie_from_header_dump(bytes: &[u8]) -> Option<String> {
+        let text = String::from_utf8_lossy(bytes);
+        let lines: Vec<&str> = text.lines().collect();
+        let mut i = 0;
+        while i + 1 < lines.len() {
+            if lines[i].trim().eq_ignore_ascii_case("cookie") {
+                let value = lines[i + 1].trim();
+                return (!value.is_empty()).then(|| value.to_string());
+            }
+            i += 1;
+        }
+        None
     }
 }

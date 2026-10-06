@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, ConfigStore};
 use crate::http::read_request;
 use crate::omniroute::handle_omniroute_proxy;
 use crate::prism::handle_prism_chat_completion;
@@ -27,7 +27,7 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
 pub(crate) fn handle_models_catalog(
     client: &mut TcpStream,
     clean_path: &str,
-    _config: &Config,
+    config: &Config,
 ) -> io::Result<()> {
     let mut model_entries = Vec::new();
 
@@ -37,14 +37,24 @@ pub(crate) fn handle_models_catalog(
                 .to_string(),
         );
     } else {
-        let base_models = vec!["gpt-5.6-sol".to_string(), "muse".to_string()];
-        let mut base_models = base_models;
+        // Detail the configured OmniRoute pipeline: the default upstream model,
+        // every configured fallback, and the local Muse provider.
+        let mut base_models: Vec<String> = Vec::new();
+        if !config.prism_default_model.trim().is_empty() {
+            base_models.push(config.prism_default_model.trim().to_string());
+        }
+        for fallback in &config.fallbacks {
+            if !fallback.trim().is_empty() {
+                base_models.push(fallback.trim().to_string());
+            }
+        }
+        base_models.push("muse".to_string());
         base_models.sort();
         base_models.dedup();
 
         let efforts = ["low", "medium", "high", "xhigh"];
 
-        for bm in base_models {
+        for bm in &base_models {
             model_entries.push(format!(
                 r#"{{"id":"{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
                 bm
@@ -77,9 +87,8 @@ pub(crate) fn handle_models_catalog(
     client.flush()
 }
 
-pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Result<()> {
+pub(crate) fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<()> {
     let request = read_request(&mut client)?;
-
     let clean_path = request
         .path
         .split('?')
@@ -91,20 +100,44 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
         return handle_cors_preflight(&mut client);
     }
 
+    // Runtime-config routes operate on the live store.
+    if request.method.eq_ignore_ascii_case("get") && clean_path == "/muse-config" {
+        return crate::video_template::handle_muse_config_page(&mut client);
+    }
+    if request.method.eq_ignore_ascii_case("post") && clean_path == "/muse-ai/v1/config/har" {
+        return crate::har_config::apply_har_config(&mut client, &request.body, store);
+    }
+
+    let snapshot = store.snapshot();
+    route_request_impl(&mut client, &request, &snapshot)
+}
+
+fn route_request_impl(
+    client: &mut TcpStream,
+    request: &crate::http::Request,
+    config: &Config,
+) -> io::Result<()> {
+    let clean_path = request
+        .path
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/');
+
     if request.method.eq_ignore_ascii_case("get") && is_models_catalog_route(clean_path) {
-        return handle_models_catalog(&mut client, clean_path, config);
+        return handle_models_catalog(client, clean_path, config);
     }
 
     if is_prism_completions_route(clean_path) {
-        return handle_prism_chat_completion(&mut client, &request.body, config, &request.headers);
+        return handle_prism_chat_completion(client, &request.body, config, &request.headers);
     }
 
     if clean_path == "/muse-ai/v1" {
-        return crate::museai::handle_museai_v1(&mut client, &request.body, config);
+        return crate::museai::handle_museai_v1(client, &request.body, config);
     }
 
     if clean_path == "/muse-ai/v1/create-video" && request.method.eq_ignore_ascii_case("post") {
-        return crate::museai::handle_create_video(&mut client, &request.body, config);
+        return crate::museai::handle_create_video(client, &request.body, config);
     }
 
     // Thread cleanup endpoint
@@ -112,15 +145,15 @@ pub(crate) fn route_request(mut client: TcpStream, config: &Config) -> io::Resul
         && request.method.eq_ignore_ascii_case("delete")
     {
         let thread_id = clean_path.split('/').next_back().unwrap_or("");
-        return crate::museai::handle_museai_thread_cleanup(&mut client, thread_id, config);
+        return crate::museai::handle_museai_thread_cleanup(client, thread_id, config);
     }
 
     // Video template UI page (also serve on /video-template/<name>)
     if request.method.eq_ignore_ascii_case("get")
         && (clean_path == "/video-template" || clean_path.starts_with("/video-template/"))
     {
-        return crate::video_template::handle_video_template_page(&mut client);
+        return crate::video_template::handle_video_template_page(client);
     }
 
-    handle_omniroute_proxy(&mut client, &request, config)
+    handle_omniroute_proxy(client, request, config)
 }

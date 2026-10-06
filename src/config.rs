@@ -1,4 +1,6 @@
 use std::env;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub(crate) fn env_or(key: &str, fallback: &str) -> String {
@@ -13,6 +15,14 @@ pub(crate) fn env_or_duration_ms(key: &str, fallback: u64) -> u64 {
         .ok()
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(fallback)
+}
+
+pub(crate) fn resolve_env_file() -> PathBuf {
+    env::var("GW_ENV_FILE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".env"))
 }
 
 #[derive(Clone)]
@@ -38,4 +48,27 @@ pub(crate) struct Config {
     pub(crate) museai_vm_id: String,
     pub(crate) museai_auto_cleanup_threads: bool,
     pub(crate) museai_thread_retention_secs: u64,
+}
+
+#[derive(Clone)]
+pub(crate) struct ConfigStore {
+    inner: Arc<RwLock<Config>>,
+    pub(crate) env_file: PathBuf,
+}
+
+impl ConfigStore {
+    pub(crate) fn new(config: Config, env_file: PathBuf) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(config)),
+            env_file,
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> Config {
+        self.inner.read().unwrap().clone()
+    }
+
+    pub(crate) fn write_guard(&self) -> std::sync::RwLockWriteGuard<'_, Config> {
+        self.inner.write().unwrap()
+    }
 }
