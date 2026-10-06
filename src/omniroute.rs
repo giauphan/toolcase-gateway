@@ -93,7 +93,12 @@ pub(crate) fn handle_omniroute_proxy(
     config: &Config,
 ) -> io::Result<()> {
     let rotation = RR_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let candidates = candidate_models(&request.body, &config.fallbacks, rotation);
+    let candidates = candidate_models(
+        &request.body,
+        &config.fallbacks,
+        rotation,
+        &config.prism_default_model,
+    );
     let has_auth = header_value(&request.headers, "authorization").is_some();
     let has_x_api_key = header_value(&request.headers, "x-api-key").is_some();
     eprintln!(
@@ -299,11 +304,57 @@ pub(crate) fn handle_omniroute_proxy(
     )
 }
 
-pub(crate) fn candidate_models(body: &[u8], fallbacks: &[String], rotation: usize) -> Vec<String> {
+const EFFORT_SUFFIXES: [&str; 4] = ["-xhigh", "-high", "-medium", "-low"];
+
+fn normalize_model_id(requested: &str, default_model: &str) -> String {
+    let trimmed = default_model.trim();
+    if trimmed.is_empty() {
+        return requested.to_string();
+    }
+    // Already a known model id — pass through unchanged.
+    if requested == trimmed {
+        return requested.to_string();
+    }
+    for suffix in EFFORT_SUFFIXES {
+        if let Some(base) = requested.strip_suffix(suffix) {
+            if base == trimmed {
+                // e.g. "gpt-5.6-sol-high" — already valid, keep it.
+                return requested.to_string();
+            }
+            // Unknown base with a recognised effort level: keep the effort,
+            // rewrite the base to the configured default.
+            eprintln!(
+                "[toolcase-gateway] repairing unknown model \"{}\" to \"{trimmed}{suffix}\"",
+                requested
+            );
+            return format!("{trimmed}{suffix}");
+        }
+    }
+    // No recognised effort suffix and the base is not the default: fall back to
+    // the default model so the request uses an id the upstream actually knows.
+    eprintln!(
+        "[toolcase-gateway] repairing unknown model \"{}\" to configured default \"{trimmed}\"",
+        requested
+    );
+    trimmed.to_string()
+}
+
+pub(crate) fn candidate_models(
+    body: &[u8],
+    fallbacks: &[String],
+    rotation: usize,
+    default_model: &str,
+) -> Vec<String> {
     let mut candidates = Vec::new();
     if let Ok(text) = std::str::from_utf8(body) {
         if let Some(model) = json_string_value(text, "model") {
-            candidates.push(model);
+            let normalized = if model.eq_ignore_ascii_case("muse") {
+                // The local Muse provider is a routing key, not an upstream model.
+                "muse".to_string()
+            } else {
+                normalize_model_id(&model, default_model)
+            };
+            candidates.push(normalized);
         }
     }
     if !fallbacks.is_empty() {
@@ -316,7 +367,7 @@ pub(crate) fn candidate_models(body: &[u8], fallbacks: &[String], rotation: usiz
         }
     }
     if candidates.is_empty() {
-        candidates.push(String::new());
+        candidates.push(default_model.trim().to_string());
     }
     candidates
 }

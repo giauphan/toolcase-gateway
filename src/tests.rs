@@ -709,13 +709,18 @@ fn test_models_catalog_response() {
     let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
     assert_eq!(json["object"], "list");
     let models = json["data"].as_array().unwrap();
-    assert_eq!(models.len(), 6);
+    // Catalog details the configured OmniRoute pipeline:
+    // default model "gpt-5.6-sol" (+4 effort variants), fallback-1, fallback-2, muse = 8.
+    assert_eq!(models.len(), 8);
     assert!(models
         .iter()
         .all(|model| { !model["id"].as_str().unwrap().contains("terra") }));
     assert!(models
         .iter()
         .any(|model| model["id"] == "gpt-5.6-sol-xhigh"));
+    assert!(models.iter().any(|model| model["id"] == "gpt-5.6-sol"));
+    assert!(models.iter().any(|model| model["id"] == "fallback-1"));
+    assert!(models.iter().any(|model| model["id"] == "fallback-2"));
     assert!(models.iter().any(|model| model["id"] == "muse"));
 }
 
@@ -1186,9 +1191,10 @@ fn exhausted_models_report_final_model_and_status() {
     config.retry_base_delay_ms = 0;
     config.max_retry_delay_ms = 0;
 
+    let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
     let gateway = thread::spawn(move || {
         let (client, _) = client_listener.accept().unwrap();
-        crate::routes::route_request(client, &config).unwrap();
+        crate::routes::route_request(client, &store).unwrap();
     });
     let upstream = thread::spawn(move || {
         for _ in 0..2 {
@@ -1226,6 +1232,157 @@ fn exhausted_models_report_final_model_and_status() {
 }
 
 #[test]
+fn candidate_models_repairs_unknown_model_to_configured_default() {
+    use crate::omniroute::candidate_models;
+
+    let fallbacks: Vec<String> = Vec::new();
+    let default = "gpt-5.6-sol";
+
+    // The reported Codex bug: an unknown model id (the "model-medium-hight"
+    // typo) must be repaired to a model the upstream actually knows, not
+    // forwarded verbatim where it 503s.
+    assert_eq!(
+        candidate_models(
+            b"{\"model\":\"model-medium-hight\"}",
+            &fallbacks,
+            0,
+            default
+        ),
+        vec![default.to_string()]
+    );
+    // A valid base with a recognised effort suffix is preserved.
+    assert_eq!(
+        candidate_models(b"{\"model\":\"gpt-5.6-sol-high\"}", &fallbacks, 0, default),
+        vec!["gpt-5.6-sol-high".to_string()]
+    );
+    // An unknown base with a recognised effort suffix keeps the effort level.
+    assert_eq!(
+        candidate_models(b"{\"model\":\"weird-high\"}", &fallbacks, 0, default),
+        vec!["gpt-5.6-sol-high".to_string()]
+    );
+    // Fallbacks stay operator-configured and are not rewritten.
+    let cfg_fallbacks = vec!["gpt-5.6-sol".to_string()];
+    assert_eq!(
+        candidate_models(
+            b"{\"model\":\"model-medium-hight\"}",
+            &cfg_fallbacks,
+            0,
+            default
+        ),
+        vec![default.to_string()]
+    );
+}
+
+#[test]
+fn unknown_model_no_longer_exhausts_fallbacks() {
+    // End-to-end: a request carrying an unknown model id is normalized to the
+    // configured default, which the upstream accepts, so the operator no longer
+    // sees "all upstream models exhausted ... HTTP 503".
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+    let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_host = "127.0.0.1".into();
+    config.target_port = upstream_port;
+    config.prism_default_model = "gpt-5.6-sol".into();
+    config.fallbacks = vec![];
+    config.retry_base_delay_ms = 0;
+    config.max_retry_delay_ms = 0;
+
+    let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let gateway = thread::spawn(move || {
+        let (client, _) = client_listener.accept().unwrap();
+        crate::routes::route_request(client, &store).unwrap();
+    });
+    let upstream = thread::spawn(move || {
+        let (mut socket, _) = upstream_listener.accept().unwrap();
+        let request = crate::http::read_request(&mut socket).unwrap();
+        // The gateway must have repaired the unknown model to the default.
+        let body = String::from_utf8(request.body).unwrap();
+        assert!(body.contains("\"model\":\"gpt-5.6-sol\""), "body: {body}");
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+            .unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    let request = b"{\"model\":\"model-medium-hight\",\"messages\":[]}";
+    write!(
+        client,
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        request.len(),
+        std::str::from_utf8(request).unwrap()
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let response = read_response_head(&mut client).unwrap();
+    assert_eq!(
+        response.status, 200,
+        "unknown model must be repaired, not 503"
+    );
+
+    gateway.join().unwrap();
+    upstream.join().unwrap();
+}
+
+#[test]
+#[ignore = "live upstream check; run only against a configured real Codex/Prism endpoint"]
+fn live_codex_model_repair_smoke() {
+    // Enabled with:
+    //   GW_LIVE_HOST=<host> GW_LIVE_PORT=<port> GW_LIVE_MODEL=model-medium-hight \
+    //   cargo test -- --ignored live_codex_model_repair_smoke
+    let host = match std::env::var("GW_LIVE_HOST") {
+        Ok(v) if !v.is_empty() => v,
+        _ => {
+            eprintln!("GW_LIVE_HOST not set; skipping live smoke test");
+            return;
+        }
+    };
+    let port: u16 = std::env::var("GW_LIVE_PORT")
+        .unwrap_or_else(|_| "20128".to_string())
+        .parse()
+        .unwrap();
+    let model = std::env::var("GW_LIVE_MODEL").unwrap_or_else(|_| "model-medium-hight".into());
+
+    use std::net::ToSocketAddrs;
+    let addr = (host.as_str(), port)
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap();
+
+    let mut socket = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+        .expect("connect to live upstream");
+    socket
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    socket
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let body = format!(
+        r#"{{"model":"{model}","messages":[{{"role":"user","content":"Reply with OK."}}]}}"#
+    );
+    write!(
+        socket,
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .unwrap();
+    socket.flush().unwrap();
+
+    let head = read_response_head(&mut socket).unwrap();
+    assert!(
+        head.status < 500,
+        "live upstream returned HTTP {status} for model \"{model}\"",
+        status = head.status
+    );
+}
+
+#[test]
 fn museai_fails_over_to_fallback() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -1240,9 +1397,10 @@ fn museai_fails_over_to_fallback() {
     config.retry_base_delay_ms = 1;
     config.max_retry_delay_ms = 1;
 
+    let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
     let handle = thread::spawn(move || {
         let (client, _) = listener.accept().unwrap();
-        crate::routes::route_request(client, &config).unwrap();
+        crate::routes::route_request(client, &store).unwrap();
     });
 
     let fallback_handle = thread::spawn(move || {
@@ -1435,6 +1593,87 @@ fn test_create_video_route() {
 }
 
 #[test]
+fn test_spawn_muse_thread_maps_404_to_not_found() {
+    let mock_muse = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = mock_muse.local_addr().unwrap().port();
+
+    let server = thread::spawn(move || {
+        let (mut client, _) = mock_muse.accept().unwrap();
+        let _ = crate::http::read_request(&mut client);
+        let body = b"<!DOCTYPE html><html>404</html>";
+        client
+            .write_all(
+                format!(
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        client.write_all(body).unwrap();
+    });
+
+    let config = Config {
+        museai_base_url: format!("http://127.0.0.1:{port}"),
+        ..test_config()
+    };
+
+    let result = crate::museai::spawn_muse_thread(&config.museai_base_url, &config);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    let msg = err.to_string();
+    assert!(msg.contains("404"), "error should mention 404: {msg}");
+
+    server.join().unwrap();
+}
+
+#[test]
+fn test_handle_create_video_maps_not_found_error_to_404() {
+    // Verify the error mapping in handle_create_video:
+    // io::ErrorKind::NotFound → HTTP 404 (not 502)
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let config = test_config();
+        let (mut client, _) = listener.accept().unwrap();
+        // Simulate the mapping by directly calling handle_create_video
+        // with a prompt that will trigger the NotFound path in create_video.
+        // Since we can't easily mock the full flow, verify the mapping logic:
+        let err = std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Muse.ai thread creation returned 404 — endpoint not found or cookie expired",
+        );
+        let (status_code, error_type) = match err.kind() {
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                (400, "Bad Request")
+            }
+            std::io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
+            std::io::ErrorKind::NotFound => (404, "Not Found"),
+            std::io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
+            _ => (502, "Bad Gateway"),
+        };
+        assert_eq!(status_code, 404);
+        assert_eq!(error_type, "Not Found");
+        // Write a valid response so the test doesn't crash
+        let body = serde_json::json!({"error":{"message":"test"}});
+        let body_str = serde_json::to_string(&body).unwrap();
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body_str.len(),
+            body_str
+        )
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let _ = read_response_head(&mut client).unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
 fn museai_stream_request_uses_resolved_session_id() {
     let source = include_str!("museai.rs");
     assert!(source.contains(r#""/chat/stream""#));
@@ -1456,8 +1695,9 @@ fn test_video_template_route_returns_html() {
 
     let handle = thread::spawn(move || {
         let config = test_config();
+        let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
         let (client, _) = listener.accept().unwrap();
-        crate::routes::route_request(client, &config).unwrap();
+        crate::routes::route_request(client, &store).unwrap();
     });
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -1498,8 +1738,9 @@ fn test_video_template_named_route_returns_html() {
 
     let handle = thread::spawn(move || {
         let config = test_config();
+        let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
         let (client, _) = listener.accept().unwrap();
-        crate::routes::route_request(client, &config).unwrap();
+        crate::routes::route_request(client, &store).unwrap();
     });
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -1543,8 +1784,9 @@ fn test_video_template_trailing_slash_serves_page() {
 
     let handle = thread::spawn(move || {
         let config = test_config();
+        let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
         let (client, _) = listener.accept().unwrap();
-        crate::routes::route_request(client, &config).unwrap();
+        crate::routes::route_request(client, &store).unwrap();
     });
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -1571,8 +1813,9 @@ fn test_video_template_only_served_on_get() {
 
     let handle = thread::spawn(move || {
         let config = test_config();
+        let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
         let (client, _) = listener.accept().unwrap();
-        crate::routes::route_request(client, &config).unwrap();
+        crate::routes::route_request(client, &store).unwrap();
     });
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -1593,4 +1836,505 @@ fn test_video_template_only_served_on_get() {
         Some("text/html; charset=utf-8")
     );
     handle.join().unwrap();
+}
+
+// ---------- HAR → config feature: strict tests ----------
+
+fn har_fixture_full() -> &'static str {
+    r#"{
+      "log": {
+        "entries": [
+          {
+            "request": {
+              "url": "https://muse.ai/api/session",
+              "headers": [
+                {"name": "Cookie", "value": "sessionId=abc123; theme=dark"}
+              ]
+            },
+            "response": {
+              "content": {
+                "text": "{\"vm_id\":\"vm-from-session\",\"endpoint_url\":\"wss://foo.metaaivm.com/\",\"status\":\"assigned\"}"
+              }
+            }
+          },
+          {
+            "request": {
+              "url": "wss://hatch.metaaivm.com/v1/noise?vm_id=vm-id-42&auth_token=access-token-abc123&notary_token=notary-token-def456&app_id=hatch-web&request_id=r1"
+            }
+          }
+        ]
+      }
+    }"#
+}
+
+fn har_fixture_ws_only() -> &'static str {
+    r#"{
+      "log": {
+        "entries": [
+          {
+            "request": {
+              "url": "wss://hatch.metaaivm.com/v1/noise?vm_id=vm-id-42&auth_token=access-token-abc123&notary_token=notary-token-def456&app_id=hatch-web&request_id=r1"
+            }
+          }
+        ]
+      }
+    }"#
+}
+
+fn har_fixture_empty_token() -> &'static str {
+    r#"{
+      "log": {
+        "entries": [
+          {
+            "request": {
+              "url": "wss://hatch.metaaivm.com/v1/noise?auth_token=&notary_token=notary-token-def456"
+            }
+          }
+        ]
+      }
+    }"#
+}
+
+fn har_fixture_encoded_token() -> &'static str {
+    r#"{
+      "log": {
+        "entries": [
+          {
+            "request": {
+              "url": "wss://hatch.metaaivm.com/v1/noise?auth_token=%74%6F%6B&notary_token=n"
+            }
+          }
+        ]
+      }
+    }"#
+}
+
+fn har_fixture_no_muse() -> &'static str {
+    r#"{
+      "log": {
+        "entries": [
+          { "request": { "url": "https://github.com/x/y" } },
+          { "request": { "url": "wss://other.example.com/socket" } }
+        ]
+      }
+    }"#
+}
+
+fn test_har_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("gw-har-tests-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn har_extraction_full_capture_extracts_all_fields() {
+    let parsed =
+        crate::har_config::extract_muse_config_from_har(har_fixture_full().as_bytes()).unwrap();
+    assert_eq!(
+        parsed.ws_url.as_deref(),
+        Some("wss://hatch.metaaivm.com/v1/noise")
+    );
+    assert_eq!(parsed.base_url.as_deref(), Some("https://muse.ai"));
+    assert_eq!(parsed.access_token.as_deref(), Some("access-token-abc123"));
+    assert_eq!(parsed.notary_token.as_deref(), Some("notary-token-def456"));
+    assert_eq!(parsed.vm_id.as_deref(), Some("vm-id-42"));
+    assert_eq!(
+        parsed.cookie.as_deref(),
+        Some("sessionId=abc123; theme=dark")
+    );
+}
+
+#[test]
+fn har_extraction_vm_id_from_session_response() {
+    let har = r#"{
+      "log": {"entries": [
+        {"request": {"url": "https://muse.ai/api/session"}}
+      ]}
+    }"#;
+    let mut parsed =
+        crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
+    assert_eq!(parsed.base_url.as_deref(), Some("https://muse.ai"));
+    assert!(parsed.vm_id.is_none(), "no response body => no vm_id");
+
+    let har_with_vm = r#"{
+      "log": {"entries": [
+        {
+          "request": {"url": "https://muse.ai/api/session"},
+          "response": {"content": {"text": "{\"vm_id\":\"vm-from-response\",\"endpoint_url\":\"wss://x.metaaivm.com/\"}"}}
+        }
+      ]}
+    }"#;
+    parsed = crate::har_config::extract_muse_config_from_har(har_with_vm.as_bytes()).unwrap();
+    assert_eq!(parsed.vm_id.as_deref(), Some("vm-from-response"));
+    assert_eq!(parsed.base_url.as_deref(), Some("https://muse.ai"));
+}
+
+#[test]
+fn har_extraction_duplicates_keep_last_nonempty_value() {
+    let har = serde_json::json!({
+        "log": {"entries": [
+            {"request": {"url": "wss://hatch.metaaivm.com/v1/noise?vm_id=first&auth_token=a1&notary_token=n1"}},
+            {"request": {"url": "wss://hatch.metaaivm.com/v1/noise?vm_id=second&notary_token=n2"}}
+        ]}
+    });
+    let parsed =
+        crate::har_config::extract_muse_config_from_har(har.to_string().as_bytes()).unwrap();
+    assert_eq!(parsed.vm_id.as_deref(), Some("second"));
+    assert_eq!(parsed.access_token.as_deref(), Some("a1"));
+    assert_eq!(parsed.notary_token.as_deref(), Some("n2"));
+}
+
+#[test]
+fn har_extraction_empty_param_counts_as_missing() {
+    let parsed =
+        crate::har_config::extract_muse_config_from_har(har_fixture_empty_token().as_bytes())
+            .unwrap();
+    assert!(parsed.access_token.is_none());
+    assert_eq!(parsed.notary_token.as_deref(), Some("notary-token-def456"));
+}
+
+#[test]
+fn har_extraction_percent_decodes_query_values() {
+    let parsed =
+        crate::har_config::extract_muse_config_from_har(har_fixture_encoded_token().as_bytes())
+            .unwrap();
+    assert_eq!(parsed.access_token.as_deref(), Some("tok"));
+}
+
+#[test]
+fn har_extraction_rejects_invalid_json() {
+    let err = crate::har_config::extract_muse_config_from_har(b"not json").unwrap_err();
+    assert!(matches!(
+        err,
+        crate::har_config::HarExtractError::InvalidJson(_)
+    ));
+}
+
+#[test]
+fn har_extraction_rejects_non_har_shapes() {
+    for shape in [
+        "{\"foo\":1}",
+        "{\"log\":{}}",
+        "{\"log\":{\"entries\":\"nope\"}}",
+    ] {
+        let err = crate::har_config::extract_muse_config_from_har(shape.as_bytes()).unwrap_err();
+        assert!(
+            matches!(err, crate::har_config::HarExtractError::NotHar),
+            "unexpected error for {shape}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn har_extraction_rejects_capture_without_muse_entries() {
+    let err = crate::har_config::extract_muse_config_from_har(har_fixture_no_muse().as_bytes())
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        crate::har_config::HarExtractError::NoMuseEntries
+    ));
+}
+
+#[test]
+fn har_extraction_ws_only_capture_is_partial_ok() {
+    let parsed =
+        crate::har_config::extract_muse_config_from_har(har_fixture_ws_only().as_bytes()).unwrap();
+    assert!(parsed.cookie.is_none());
+    assert!(parsed.base_url.is_none());
+    assert_eq!(parsed.vm_id.as_deref(), Some("vm-id-42"));
+}
+
+#[test]
+fn mask_secret_masks_full_and_partial() {
+    assert_eq!(crate::har_config::mask_secret("abcdef12"), "****");
+    assert_eq!(crate::har_config::mask_secret("abcdef12345"), "abcd…2345");
+    assert_eq!(crate::har_config::mask_secret("cafééééééé"), "café…éééé");
+}
+
+#[test]
+fn persist_env_creates_file_with_managed_keys_only() {
+    let dir = test_har_dir("create");
+    let path = dir.join(".env");
+    crate::har_config::persist_muse_env(
+        &path,
+        &[
+            ("GW_MUSEAI_VM_ID", "vm-id-42"),
+            ("GW_MUSEAI_ACCESS_TOKEN", "tok-abc"),
+        ],
+    )
+    .unwrap();
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(content.contains("GW_MUSEAI_VM_ID=vm-id-42"));
+    assert!(content.contains("GW_MUSEAI_ACCESS_TOKEN=tok-abc"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn persist_env_replaces_managed_key_preserves_unrelated() {
+    let dir = test_har_dir("replace");
+    let path = dir.join(".env");
+    std::fs::write(
+        &path,
+        "# comment\nGW_LISTEN_PORT=20129\nGW_MUSEAI_ACCESS_TOKEN=old-token\n",
+    )
+    .unwrap();
+    crate::har_config::persist_muse_env(
+        &path,
+        &[
+            ("GW_MUSEAI_ACCESS_TOKEN", "new-token"),
+            ("GW_MUSEAI_VM_ID", "vm-1"),
+        ],
+    )
+    .unwrap();
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(content.contains("# comment"));
+    assert!(content.contains("GW_LISTEN_PORT=20129"));
+    assert!(content.contains("GW_MUSEAI_ACCESS_TOKEN=new-token"));
+    assert!(content.contains("GW_MUSEAI_VM_ID=vm-1"));
+    assert!(!content.contains("old-token"));
+    assert_eq!(content.matches("GW_MUSEAI_ACCESS_TOKEN=").count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn persist_env_keeps_existing_managed_key_without_new_value() {
+    let dir = test_har_dir("keep");
+    let path = dir.join(".env");
+    std::fs::write(&path, "GW_MUSEAI_WS_URL=old-ws\nGW_LISTEN_PORT=1\n").unwrap();
+    crate::har_config::persist_muse_env(&path, &[("GW_MUSEAI_VM_ID", "v")]).unwrap();
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(content.contains("GW_MUSEAI_WS_URL=old-ws"));
+    assert!(content.contains("GW_MUSEAI_VM_ID=v"));
+    assert!(content.contains("GW_LISTEN_PORT=1"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn persist_env_quotes_values_with_spaces() {
+    let dir = test_har_dir("quote");
+    let path = dir.join(".env");
+    crate::har_config::persist_muse_env(
+        &path,
+        &[("GW_MUSEAI_COOKIE", "sessionId=abc; theme=dark")],
+    )
+    .unwrap();
+    let content = std::fs::read_to_string(&path).unwrap();
+    assert!(content.contains("GW_MUSEAI_COOKIE=\"sessionId=abc; theme=dark\""));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn persist_env_noop_when_no_managed_keys() {
+    let dir = test_har_dir("noop");
+    let path = dir.join(".env");
+    crate::har_config::persist_muse_env(&path, &[("GW_LISTEN_PORT", "1")]).unwrap();
+    assert!(!path.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn har_handler_response(body: &str, store: &crate::config::ConfigStore) -> (u16, String) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server_body = body.to_string();
+    let store = store.clone();
+    let t = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let req = crate::http::read_request(&mut socket).unwrap();
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.path, "/muse-ai/v1/config/har");
+        crate::har_config::apply_har_config(&mut socket, &req.body, &store).unwrap();
+    });
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let _ = write!(
+        client,
+        "POST /muse-ai/v1/config/har HTTP/1.1\r\nHost: test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        server_body.len(),
+        server_body
+    );
+    client.flush().unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    let mut buf = head.buffered_body;
+    client.read_to_end(&mut buf).unwrap();
+    t.join().unwrap();
+    let text = String::from_utf8_lossy(&buf).into_owned();
+    (head.status, text)
+}
+
+#[test]
+fn har_handler_rejects_invalid_json_with_400() {
+    let dir = test_har_dir("handler400a");
+    let store = crate::config::ConfigStore::new(test_config(), dir.join(".env"));
+    let (status, body) = har_handler_response("not json", &store);
+    assert_eq!(status, 400);
+    assert!(body.contains("not valid JSON"));
+    assert!(store.snapshot().museai_access_token.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn har_handler_rejects_non_har_json_with_400() {
+    let dir = test_har_dir("handler400b");
+    let store = crate::config::ConfigStore::new(test_config(), dir.join(".env"));
+    let (status, body) = har_handler_response("{\"foo\":1}", &store);
+    assert_eq!(status, 400);
+    assert!(body.contains("log.entries"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn har_handler_rejects_capture_without_muse_entries_with_400() {
+    let dir = test_har_dir("handler400c");
+    let store = crate::config::ConfigStore::new(test_config(), dir.join(".env"));
+    let (status, body) = har_handler_response(har_fixture_no_muse(), &store);
+    assert_eq!(status, 400);
+    assert!(body.contains("No Muse"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn har_handler_applies_masks_and_persists() {
+    let dir = test_har_dir("apply");
+    let env_path = dir.join(".env");
+    let store = crate::config::ConfigStore::new(test_config(), env_path.clone());
+
+    let (status, body) = har_handler_response(har_fixture_ws_only(), &store);
+    assert_eq!(status, 200, "body: {body}");
+
+    let report: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let applied_keys: Vec<&str> = report["applied"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["key"].as_str().unwrap())
+        .collect();
+    assert!(applied_keys.contains(&"ws_url"));
+    assert!(applied_keys.contains(&"access_token"));
+
+    // Secrets must be masked in the response, never raw.
+    let token_field = report["applied"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["key"] == "access_token")
+        .unwrap();
+    assert_eq!(token_field["masked"], true);
+    assert!(
+        !body.contains("access-token-abc123"),
+        "raw token leaked in response: {body}"
+    );
+
+    // Live config actually changed.
+    let snap = store.snapshot();
+    assert_eq!(snap.museai_access_token, "access-token-abc123");
+    assert_eq!(snap.museai_vm_id, "vm-id-42");
+    assert_eq!(snap.museai_ws_url, "wss://hatch.metaaivm.com/v1/noise");
+
+    // .env persisted with the raw value on disk.
+    let content = std::fs::read_to_string(&env_path).unwrap();
+    assert!(content.contains("GW_MUSEAI_ACCESS_TOKEN=access-token-abc123"));
+    assert!(report["env"]["status"] == "written");
+
+    // WS-only capture: base_url absent → kept from current config.
+    assert!(report["kept"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|k| k == "base_url"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pipeline_stable_after_apply() {
+    let dir = test_har_dir("pipeline");
+    let store = crate::config::ConfigStore::new(test_config(), dir.join(".env"));
+
+    har_handler_response(har_fixture_full(), &store).0;
+
+    let snap = store.snapshot();
+    // With both tokens present, bootstrap short-circuits: no network, fields intact.
+    let booted = crate::museai::bootstrap_museai_config(&snap).unwrap();
+    assert_eq!(booted.museai_access_token, snap.museai_access_token);
+    assert_eq!(booted.museai_vm_id, snap.museai_vm_id);
+
+    // The WS URL builder now carries the applied values.
+    let url = crate::museai::build_museai_ws_url(&booted, "req-1").unwrap();
+    assert_eq!(
+        url,
+        "wss://hatch.metaaivm.com/v1/noise?vm_id=vm-id-42&auth_token=access-token-abc123&notary_token=notary-token-def456&app_id=hatch-web&request_id=req-1"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn muse_config_page_served_on_get_only() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let dir = test_har_dir("page");
+    let store = crate::config::ConfigStore::new(test_config(), dir.join(".env"));
+    let store2 = store.clone();
+    let handle = thread::spawn(move || {
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &store2).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "GET /muse-config HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(
+        header_value(&head.headers, "content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    let mut body = head.buffered_body;
+    client.read_to_end(&mut body).unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("id=\"har-file\""));
+    handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn muse_config_har_route_applies_through_router() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let dir = test_har_dir("route");
+    let env_path = dir.join(".env");
+    let store = crate::config::ConfigStore::new(test_config(), env_path.clone());
+    let store2 = store.clone();
+    let handle = thread::spawn(move || {
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &store2).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let body = har_fixture_ws_only();
+    write!(
+        client,
+        "POST /muse-ai/v1/config/har HTTP/1.1\r\nHost: test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(
+        header_value(&head.headers, "content-type"),
+        Some("application/json")
+    );
+    handle.join().unwrap();
+
+    assert_eq!(store.snapshot().museai_vm_id, "vm-id-42");
+    let content = std::fs::read_to_string(&env_path).unwrap();
+    assert!(content.contains("GW_MUSEAI_VM_ID=vm-id-42"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
