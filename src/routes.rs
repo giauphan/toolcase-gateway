@@ -1,12 +1,15 @@
 use crate::config::{Config, ConfigStore};
-use crate::http::read_request;
+use crate::http::{read_request, write_error};
 use crate::omniroute::handle_omniroute_proxy;
 use crate::prism::handle_prism_chat_completion;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
 pub(crate) fn is_models_catalog_route(path: &str) -> bool {
-    path.ends_with("/v1/models") || path.ends_with("/models")
+    matches!(
+        path,
+        "/models" | "/v1/models" | "/muse-ai/models" | "/muse-ai/v1/models"
+    )
 }
 
 pub(crate) fn is_prism_completions_route(path: &str) -> bool {
@@ -100,12 +103,31 @@ pub(crate) fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::R
         return handle_cors_preflight(&mut client);
     }
 
-    // Runtime-config routes operate on the live store.
-    if request.method.eq_ignore_ascii_case("get") && clean_path == "/muse-config" {
-        return crate::video_template::handle_muse_config_page(&mut client);
+    // Runtime-config routes operate on the live store and never fall through to
+    // the generic OmniRoute proxy.
+    if clean_path == "/muse-config" {
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::video_template::handle_muse_config_page(&mut client)
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "muse-config only supports GET",
+            )
+        };
     }
-    if request.method.eq_ignore_ascii_case("post") && clean_path == "/muse-ai/v1/config/har" {
-        return crate::har_config::apply_har_config(&mut client, &request.body, store);
+    if clean_path == "/muse-ai/v1/config/har" {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::har_config::apply_har_config(&mut client, &request.body, store)
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "Muse HAR configuration only supports POST",
+            )
+        };
     }
 
     let snapshot = store.snapshot();
@@ -124,35 +146,89 @@ fn route_request_impl(
         .unwrap_or("")
         .trim_end_matches('/');
 
-    if request.method.eq_ignore_ascii_case("get") && is_models_catalog_route(clean_path) {
-        return handle_models_catalog(client, clean_path, config);
+    if is_models_catalog_route(clean_path) {
+        return if request.method.eq_ignore_ascii_case("get") {
+            handle_models_catalog(client, clean_path, config)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "model catalogs only support GET",
+            )
+        };
     }
 
     if is_prism_completions_route(clean_path) {
-        return handle_prism_chat_completion(client, &request.body, config, &request.headers);
+        return if request.method.eq_ignore_ascii_case("post") {
+            handle_prism_chat_completion(client, &request.body, config, &request.headers)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Prism chat completions only support POST",
+            )
+        };
+    }
+    if clean_path == "/prism-openai" || clean_path.starts_with("/prism-openai/") {
+        return write_error(client, 404, "Not Found", "unknown Prism route");
     }
 
     if clean_path == "/muse-ai/v1" {
-        return crate::museai::handle_museai_v1(client, &request.body, config);
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::museai::handle_museai_v1(client, &request.body, config)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Muse chat completions only support POST",
+            )
+        };
     }
 
-    if clean_path == "/muse-ai/v1/create-video" && request.method.eq_ignore_ascii_case("post") {
-        return crate::museai::handle_create_video(client, &request.body, config);
+    if clean_path == "/muse-ai/v1/create-video" {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::museai::handle_create_video(client, &request.body, config)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Muse video creation only supports POST",
+            )
+        };
     }
 
-    // Thread cleanup endpoint
-    if clean_path.starts_with("/muse-ai/v1/threads/")
-        && request.method.eq_ignore_ascii_case("delete")
-    {
-        let thread_id = clean_path.split('/').next_back().unwrap_or("");
-        return crate::museai::handle_museai_thread_cleanup(client, thread_id, config);
+    if clean_path.starts_with("/muse-ai/v1/threads/") {
+        return if request.method.eq_ignore_ascii_case("delete") {
+            let thread_id = clean_path.split('/').next_back().unwrap_or("");
+            crate::museai::handle_museai_thread_cleanup(client, thread_id, config)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Muse thread cleanup only supports DELETE",
+            )
+        };
+    }
+    if clean_path == "/muse-ai" || clean_path.starts_with("/muse-ai/") {
+        return write_error(client, 404, "Not Found", "unknown Muse route");
     }
 
-    // Video template UI page (also serve on /video-template/<name>)
-    if request.method.eq_ignore_ascii_case("get")
-        && (clean_path == "/video-template" || clean_path.starts_with("/video-template/"))
-    {
-        return crate::video_template::handle_video_template_page(client);
+    if clean_path == "/video-template" || clean_path.starts_with("/video-template/") {
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::video_template::handle_video_template_page(client)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "video templates only support GET",
+            )
+        };
     }
 
     handle_omniroute_proxy(client, request, config)

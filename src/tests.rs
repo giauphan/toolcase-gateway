@@ -4,7 +4,7 @@ use crate::http::{
     read_response_head, Request,
 };
 use crate::omniroute::{open_upstream, RETRYABLE};
-use crate::rewrite::{escape_json_string, replace_model, rewrite_tool_names};
+use crate::rewrite::{escape_json_string, json_string_value, replace_model, rewrite_tool_names};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
@@ -169,8 +169,9 @@ fn muse_websocket_exchanges_binary_frames() {
 #[test]
 fn keeps_413_out_of_retry_statuses() {
     assert!(!RETRYABLE.contains(&413));
-    assert!(RETRYABLE.contains(&429));
-    assert!(RETRYABLE.contains(&500));
+    for status in [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524] {
+        assert!(RETRYABLE.contains(&status));
+    }
 }
 
 #[test]
@@ -659,6 +660,59 @@ fn test_museai_v1_mock_proxy_flow() {
 
     muse_handle.join().unwrap();
     gw_handle.join().unwrap();
+}
+
+fn routed_status(method: &str, path: &str) -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let store = crate::config::ConfigStore::new(test_config(), std::path::PathBuf::from(".env"));
+    let handle = thread::spawn(move || {
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &store).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+    let status = read_response_head(&mut client).unwrap().status;
+    handle.join().unwrap();
+    status
+}
+
+#[test]
+fn reserved_feature_routes_never_fall_through_to_omniroute() {
+    assert_eq!(
+        routed_status("GET", "/prism-openai/v1/chat/completions"),
+        405
+    );
+    assert_eq!(routed_status("GET", "/prism-openai/unknown"), 404);
+    assert_eq!(routed_status("GET", "/muse-ai/unknown"), 404);
+    assert_eq!(routed_status("POST", "/muse-config"), 405);
+    assert_eq!(routed_status("POST", "/video-template"), 405);
+}
+
+#[test]
+fn model_catalog_routes_have_exact_owners() {
+    for path in [
+        "/models",
+        "/v1/models",
+        "/muse-ai/models",
+        "/muse-ai/v1/models",
+    ] {
+        assert!(crate::routes::is_models_catalog_route(path));
+    }
+    for path in [
+        "/other/models",
+        "/other/v1/models",
+        "/prism-openai/v1/models",
+        "/muse-ai/other/models",
+    ] {
+        assert!(!crate::routes::is_models_catalog_route(path));
+    }
 }
 
 #[test]
@@ -1232,6 +1286,76 @@ fn exhausted_models_report_final_model_and_status() {
 }
 
 #[test]
+fn unauthorized_upstream_fails_over_to_next_model() {
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+    let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_host = "127.0.0.1".into();
+    config.target_port = upstream_port;
+    config.prism_default_model = "primary-model".into();
+    config.fallbacks = vec!["fallback-model".into()];
+    config.retry_base_delay_ms = 0;
+    config.max_retry_delay_ms = 0;
+
+    let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let gateway = thread::spawn(move || {
+        let (client, _) = client_listener.accept().unwrap();
+        crate::routes::route_request(client, &store).unwrap();
+    });
+    let upstream = thread::spawn(move || {
+        let (mut first, _) = upstream_listener.accept().unwrap();
+        let first_request = crate::http::read_request(&mut first).unwrap();
+        assert_eq!(
+            json_string_value(std::str::from_utf8(&first_request.body).unwrap(), "model"),
+            Some("primary-model".into())
+        );
+        first
+            .write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+
+        let (mut second, _) = upstream_listener.accept().unwrap();
+        let second_request = crate::http::read_request(&mut second).unwrap();
+        assert_eq!(
+            json_string_value(std::str::from_utf8(&second_request.body).unwrap(), "model"),
+            Some("fallback-model".into())
+        );
+        let body = b"{\"id\":\"fallback-response\"}";
+        write!(
+            second,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        second.write_all(body).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    let request = b"{\"model\":\"primary-model\",\"messages\":[]}";
+    write!(
+        client,
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        request.len(),
+        std::str::from_utf8(request).unwrap()
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let response = read_response_head(&mut client).unwrap();
+    assert_eq!(response.status, 200);
+    let mut body = response.buffered_body;
+    client.read_to_end(&mut body).unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("fallback-response"));
+
+    gateway.join().unwrap();
+    upstream.join().unwrap();
+}
+
+#[test]
 fn candidate_models_repairs_unknown_model_to_configured_default() {
     use crate::omniroute::candidate_models;
 
@@ -1636,7 +1760,6 @@ fn test_handle_create_video_maps_not_found_error_to_404() {
     let port = listener.local_addr().unwrap().port();
 
     let handle = thread::spawn(move || {
-        let config = test_config();
         let (mut client, _) = listener.accept().unwrap();
         // Simulate the mapping by directly calling handle_create_video
         // with a prompt that will trigger the NotFound path in create_video.
@@ -1819,8 +1942,8 @@ fn test_video_template_only_served_on_get() {
     });
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    // POST must NOT match the GET-only page route; it falls through to the proxy,
-    // which fails (no upstream) and must not return the HTML page.
+    // POST belongs to the video-template namespace and must be rejected locally,
+    // never forwarded through the generic OmniRoute proxy.
     write!(
         client,
         "POST /video-template HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -1829,8 +1952,7 @@ fn test_video_template_only_served_on_get() {
     client.flush().unwrap();
 
     let head = read_response_head(&mut client).unwrap();
-    // Page route is GET-only; POST must not serve the HTML page.
-    assert_ne!(head.status, 200);
+    assert_eq!(head.status, 405);
     assert_ne!(
         header_value(&head.headers, "content-type"),
         Some("text/html; charset=utf-8")
@@ -1952,8 +2074,7 @@ fn har_extraction_vm_id_from_session_response() {
         {"request": {"url": "https://muse.ai/api/session"}}
       ]}
     }"#;
-    let mut parsed =
-        crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
+    let mut parsed = crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
     assert_eq!(parsed.base_url.as_deref(), Some("https://muse.ai"));
     assert!(parsed.vm_id.is_none(), "no response body => no vm_id");
 
@@ -1968,6 +2089,20 @@ fn har_extraction_vm_id_from_session_response() {
     parsed = crate::har_config::extract_muse_config_from_har(har_with_vm.as_bytes()).unwrap();
     assert_eq!(parsed.vm_id.as_deref(), Some("vm-from-response"));
     assert_eq!(parsed.base_url.as_deref(), Some("https://muse.ai"));
+}
+
+#[test]
+fn har_extraction_access_token_from_auth_check_response() {
+    let har = r#"{
+      "log": {"entries": [
+        {
+          "request": {"url": "https://muse.ai/api/auth/check"},
+          "response": {"content": {"text": "{\"access_token\":\"response-token\",\"ok\":true}"}}
+        }
+      ]}
+    }"#;
+    let parsed = crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
+    assert_eq!(parsed.access_token.as_deref(), Some("response-token"));
 }
 
 #[test]
@@ -2249,7 +2384,7 @@ fn pipeline_stable_after_apply() {
     let dir = test_har_dir("pipeline");
     let store = crate::config::ConfigStore::new(test_config(), dir.join(".env"));
 
-    har_handler_response(har_fixture_full(), &store).0;
+    har_handler_response(har_fixture_full(), &store);
 
     let snap = store.snapshot();
     // With both tokens present, bootstrap short-circuits: no network, fields intact.

@@ -18,7 +18,7 @@ const HOP_BY_HOP: [&str; 8] = [
     "upgrade",
 ];
 
-pub(crate) const RETRYABLE: [u16; 7] = [408, 429, 500, 502, 503, 504, 524];
+pub(crate) const RETRYABLE: [u16; 11] = [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524];
 static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn parse_retry_after(headers: &[(String, String)]) -> Option<Duration> {
@@ -195,6 +195,10 @@ pub(crate) fn handle_omniroute_proxy(
                     client,
                     head.status,
                     match head.status {
+                        400 => "Bad Request",
+                        401 => "Unauthorized",
+                        402 => "Payment Required",
+                        403 => "Forbidden",
                         408 => "Request Timeout",
                         429 => "Too Many Requests",
                         503 => "Service Unavailable",
@@ -265,6 +269,10 @@ pub(crate) fn handle_omniroute_proxy(
                     client,
                     502,
                     match last_status {
+                        Some(400) => "Bad Request",
+                        Some(401) => "Unauthorized",
+                        Some(402) => "Payment Required",
+                        Some(403) => "Forbidden",
                         Some(408) => "Request Timeout",
                         Some(429) => "Too Many Requests",
                         Some(503) => "Service Unavailable",
@@ -286,6 +294,10 @@ pub(crate) fn handle_omniroute_proxy(
         client,
         last_status.unwrap_or(502),
         match last_status {
+            Some(400) => "Bad Request",
+            Some(401) => "Unauthorized",
+            Some(402) => "Payment Required",
+            Some(403) => "Forbidden",
             Some(408) => "Request Timeout",
             Some(429) => "Too Many Requests",
             Some(503) => "Service Unavailable",

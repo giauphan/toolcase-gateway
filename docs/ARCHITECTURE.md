@@ -3,6 +3,29 @@
 `toolcase-gateway` is a single-file, std-only HTTP/1.1 reverse proxy. One thread
 per connection, no async runtime, no dependencies.
 
+## Route ownership
+
+The listener hosts several independent feature surfaces. Dispatch is exclusive:
+a request claimed by a feature namespace is handled or rejected by that feature
+and never falls through to the generic OmniRoute proxy.
+
+| Route | Owner | Methods |
+| --- | --- | --- |
+| `/models`, `/v1/models` | OmniRoute catalog | `GET` |
+| `/prism-openai/v1/chat/completions` | Prism | `POST` |
+| `/muse-ai/models`, `/muse-ai/v1/models` | Muse catalog | `GET` |
+| `/muse-ai/v1` | Muse chat | `POST` |
+| `/muse-ai/v1/create-video` | Muse video | `POST` |
+| `/muse-ai/v1/threads/<id>` | Muse cleanup | `DELETE` |
+| `/muse-ai/v1/config/har` | Muse configuration | `POST` |
+| `/muse-config` | Muse configuration UI | `GET` |
+| `/video-template[/<name>]` | Video template UI | `GET` |
+| All unclaimed paths | OmniRoute proxy | forwarded method |
+
+Unknown paths under `/prism-openai` and `/muse-ai` return `404`. A known
+feature route with the wrong method returns `405`. This prevents feature typos
+or method errors from being sent to the configured OmniRoute upstream.
+
 ## Request lifecycle
 
 ```mermaid

@@ -114,6 +114,9 @@ pub fn extract_muse_config_from_har(bytes: &[u8]) -> Result<MuseHarConfig, HarEx
         if let Some(rest) = parse_rest_muse_entry(url, entry) {
             out.base_url = Some(rest.base_url);
             out.cookie = rest.cookie;
+            if rest.access_token.is_some() {
+                out.access_token = rest.access_token;
+            }
             if rest.vm_id.is_some() {
                 out.vm_id = rest.vm_id;
             }
@@ -198,6 +201,7 @@ fn parse_ws_muse_entry(url: &str) -> Option<WsEntry> {
 struct RestEntry {
     base_url: String,
     cookie: Option<String>,
+    access_token: Option<String>,
     vm_id: Option<String>,
 }
 
@@ -224,22 +228,29 @@ fn parse_rest_muse_entry(url: &str, entry: &serde_json::Value) -> Option<RestEnt
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
         });
-    let vm_id = entry
+    let response_body = entry
         .get("response")
         .and_then(|r| r.get("content"))
         .and_then(|c| c.get("text"))
         .and_then(|t| t.as_str())
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .and_then(|body| {
-            body.get("vm_id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .filter(|s| !s.is_empty())
-        });
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+    let access_token = response_body
+        .as_ref()
+        .and_then(|body| body.get("access_token"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
+    let vm_id = response_body
+        .as_ref()
+        .and_then(|body| body.get("vm_id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
     let base_url = format!("{scheme}://{host}");
     Some(RestEntry {
         base_url,
         cookie,
+        access_token,
         vm_id,
     })
 }
