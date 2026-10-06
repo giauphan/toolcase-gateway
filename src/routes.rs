@@ -1,7 +1,6 @@
 use crate::config::{Config, ConfigStore};
 use crate::http::{read_request, write_error};
 use crate::omniroute::handle_omniroute_proxy;
-use crate::prism::handle_prism_chat_completion;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
@@ -10,10 +9,6 @@ pub(crate) fn is_models_catalog_route(path: &str) -> bool {
         path,
         "/models" | "/v1/models" | "/muse-ai/models" | "/muse-ai/v1/models"
     )
-}
-
-pub(crate) fn is_prism_completions_route(path: &str) -> bool {
-    path == "/prism-openai/v1/chat/completions"
 }
 
 pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
@@ -40,18 +35,17 @@ pub(crate) fn handle_models_catalog(
                 .to_string(),
         );
     } else {
-        // Detail the configured OmniRoute pipeline: the default upstream model,
-        // every configured fallback, and the local Muse provider.
+        // Detail the configured OmniRoute pipeline: the default upstream model
+        // and every configured fallback.
         let mut base_models: Vec<String> = Vec::new();
-        if !config.prism_default_model.trim().is_empty() {
-            base_models.push(config.prism_default_model.trim().to_string());
+        if !config.default_model.trim().is_empty() {
+            base_models.push(config.default_model.trim().to_string());
         }
         for fallback in &config.fallbacks {
             if !fallback.trim().is_empty() {
                 base_models.push(fallback.trim().to_string());
             }
         }
-        base_models.push("muse".to_string());
         base_models.sort();
         base_models.dedup();
 
@@ -157,22 +151,6 @@ fn route_request_impl(
                 "model catalogs only support GET",
             )
         };
-    }
-
-    if is_prism_completions_route(clean_path) {
-        return if request.method.eq_ignore_ascii_case("post") {
-            handle_prism_chat_completion(client, &request.body, config, &request.headers)
-        } else {
-            write_error(
-                client,
-                405,
-                "Method Not Allowed",
-                "Prism chat completions only support POST",
-            )
-        };
-    }
-    if clean_path == "/prism-openai" || clean_path.starts_with("/prism-openai/") {
-        return write_error(client, 404, "Not Found", "unknown Prism route");
     }
 
     if clean_path == "/muse-ai/v1" {

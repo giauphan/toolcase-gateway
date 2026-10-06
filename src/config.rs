@@ -18,11 +18,23 @@ pub(crate) fn env_or_duration_ms(key: &str, fallback: u64) -> u64 {
 }
 
 pub(crate) fn resolve_env_file() -> PathBuf {
-    env::var("GW_ENV_FILE")
+    let configured = env::var("GW_ENV_FILE")
         .ok()
         .filter(|v| !v.trim().is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".env"))
+        .unwrap_or_else(|| PathBuf::from(".env"));
+    absolute_env_file(
+        configured,
+        env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    )
+}
+
+pub(crate) fn absolute_env_file(configured: PathBuf, current_dir: PathBuf) -> PathBuf {
+    if configured.is_absolute() {
+        configured
+    } else {
+        current_dir.join(configured)
+    }
 }
 
 #[derive(Clone)]
@@ -33,13 +45,7 @@ pub(crate) struct Config {
     pub(crate) io_timeout: Option<Duration>,
     pub(crate) retry_base_delay_ms: u64,
     pub(crate) max_retry_delay_ms: u64,
-    pub(crate) prism_base_url: String,
-    pub(crate) prism_project_id: String,
-    pub(crate) prism_cookie: String,
-    pub(crate) prism_sandbox_token: String,
-    pub(crate) prism_user_id: String,
-    pub(crate) prism_default_model: String,
-    pub(crate) prism_system_prompt: String,
+    pub(crate) default_model: String,
     pub(crate) museai_base_url: String,
     pub(crate) museai_cookie: String,
     pub(crate) museai_ws_url: String,

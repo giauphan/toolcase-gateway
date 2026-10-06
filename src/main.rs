@@ -16,7 +16,6 @@ mod museai_noise;
 mod museai_protocol;
 mod museai_transport;
 mod omniroute;
-mod prism;
 mod rewrite;
 mod routes;
 mod video_template;
@@ -49,16 +48,7 @@ fn main() -> io::Result<()> {
         io_timeout: (timeout_secs > 0).then(|| Duration::from_secs(timeout_secs)),
         retry_base_delay_ms: env_or_duration_ms("GW_RETRY_BASE_DELAY_MS", 100),
         max_retry_delay_ms: env_or_duration_ms("GW_MAX_RETRY_DELAY_MS", 5000),
-        prism_base_url: env_or("GW_PRISM_BASE_URL", "https://prism.openai.com"),
-        prism_project_id: env_or("GW_PRISM_PROJECT_ID", "0f6fa2ad-f391-4d28-9770-e3d6d511f80c"),
-        prism_cookie: env_or("GW_PRISM_COOKIE", ""),
-        prism_sandbox_token: env_or("GW_PRISM_SANDBOX_TOKEN", ""),
-        prism_user_id: env_or("GW_PRISM_USER_ID", ""),
-        prism_default_model: env_or("GW_PRISM_DEFAULT_MODEL", "gpt-5.6-sol"),
-        prism_system_prompt: env_or(
-            "GW_PRISM_SYSTEM_PROMPT",
-            "You are ChatGPT, a large language model trained by OpenAI. Carefully follow the user's instructions. Implement the requested tasks perfectly and exactly as directed.",
-        ),
+        default_model: env_or("GW_DEFAULT_MODEL", "gpt-5.6-sol"),
         museai_base_url: env_or("GW_MUSEAI_BASE_URL", "https://muse.ai"),
         museai_cookie: env_or("GW_MUSEAI_COOKIE", ""),
         museai_ws_url: env_or("GW_MUSEAI_WS_URL", "wss://hatch.metaaivm.com/v1/noise"),

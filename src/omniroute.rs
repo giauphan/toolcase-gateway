@@ -97,7 +97,7 @@ pub(crate) fn handle_omniroute_proxy(
         &request.body,
         &config.fallbacks,
         rotation,
-        &config.prism_default_model,
+        &config.default_model,
     );
     let has_auth = header_value(&request.headers, "authorization").is_some();
     let has_x_api_key = header_value(&request.headers, "x-api-key").is_some();

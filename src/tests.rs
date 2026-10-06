@@ -18,13 +18,7 @@ fn test_config() -> Config {
         io_timeout: None,
         retry_base_delay_ms: 100,
         max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "default_proj".into(),
-        prism_cookie: "".into(),
-        prism_sandbox_token: "".into(),
-        prism_user_id: "".into(),
-        prism_default_model: "gpt-5.6-sol".into(),
-        prism_system_prompt: "".into(),
+        default_model: "gpt-5.6-sol".into(),
         museai_base_url: "https://muse.ai".into(),
         museai_cookie: "".into(),
         museai_ws_url: "".into(),
@@ -34,6 +28,22 @@ fn test_config() -> Config {
         museai_auto_cleanup_threads: true,
         museai_thread_retention_secs: 86400,
     }
+}
+
+#[test]
+fn env_file_path_is_unambiguous() {
+    let cwd = std::path::PathBuf::from("/srv/toolcase");
+    assert_eq!(
+        crate::config::absolute_env_file(std::path::PathBuf::from(".env"), cwd.clone()),
+        cwd.join(".env")
+    );
+    assert_eq!(
+        crate::config::absolute_env_file(
+            std::path::PathBuf::from("/run/secrets/toolcase.env"),
+            cwd
+        ),
+        std::path::PathBuf::from("/run/secrets/toolcase.env")
+    );
 }
 
 #[test]
@@ -281,13 +291,7 @@ fn forces_identity_encoding_upstream() {
         io_timeout: Some(Duration::from_secs(5)),
         retry_base_delay_ms: 100,
         max_retry_delay_ms: 5000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "0f6fa2ad-f391-4d28-9770-e3d6d511f80c".into(),
-        prism_cookie: "".into(),
-        prism_sandbox_token: "".into(),
-        prism_user_id: "".into(),
-        prism_default_model: "gpt-5.6-sol".into(),
-        prism_system_prompt: "".into(),
+        default_model: "gpt-5.6-sol".into(),
         museai_base_url: "https://muse.ai".into(),
         museai_cookie: "".into(),
         museai_ws_url: "".into(),
@@ -356,7 +360,7 @@ fn error_body_escapes_message() {
 }
 
 #[test]
-fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
+fn test_fallback_to_config_credentials_when_header_missing() {
     let config = Config {
         target_host: "127.0.0.1".into(),
         target_port: 8080,
@@ -364,13 +368,7 @@ fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
         io_timeout: None,
         retry_base_delay_ms: 100,
         max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "default_proj".into(),
-        prism_cookie: "default_cookie".into(),
-        prism_sandbox_token: "default_token".into(),
-        prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-sol".into(),
-        prism_system_prompt: "".into(),
+        default_model: "gpt-5.6-sol".into(),
         museai_base_url: "https://muse.ai".into(),
         museai_cookie: "".into(),
         museai_ws_url: "".into(),
@@ -381,134 +379,8 @@ fn extracts_prism_credentials_with_sentinel_and_triple_pipe() {
         museai_thread_retention_secs: 86400,
     };
 
-    let headers = vec![
-        ("Authorization".to_string(),
-        "Bearer custom_cookie_val; a=b|||cookie_tail|||custom_sentinel|||custom_token|||custom_user|||custom_proj"
-            .to_string(),
-        ),
-        ("openai-sentinel-token".to_string(), "test_sentinel_token_123".to_string()),
-    ];
-
-    let creds = crate::prism::extract_credentials(&headers, &config);
-    assert_eq!(creds.cookie, "custom_cookie_val; a=b|||cookie_tail");
-    assert_eq!(creds.sentinel_token.as_deref(), Some("custom_sentinel"));
-    assert_eq!(creds.sandbox_token, "custom_token");
-    assert_eq!(creds.user_id, "custom_user");
-    assert_eq!(creds.project_id, "custom_proj");
-}
-
-#[test]
-fn extracts_prism_credentials_from_x_api_key() {
-    let config = Config {
-        target_host: "127.0.0.1".into(),
-        target_port: 8080,
-        fallbacks: vec![],
-        io_timeout: None,
-        retry_base_delay_ms: 100,
-        max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "default_proj".into(),
-        prism_cookie: "default_cookie".into(),
-        prism_sandbox_token: "default_token".into(),
-        prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-sol".into(),
-        prism_system_prompt: "".into(),
-        museai_base_url: "https://muse.ai".into(),
-        museai_cookie: "".into(),
-        museai_ws_url: "".into(),
-        museai_access_token: "".into(),
-        museai_notary_token: "".into(),
-        museai_vm_id: "".into(),
-        museai_auto_cleanup_threads: true,
-        museai_thread_retention_secs: 86400,
-    };
-    let headers = vec![(
-        "x-api-key".to_string(),
-        "cookie|||{\"p\":\"sentinel\"}|||sandbox|||user|||project".to_string(),
-    )];
-
-    let creds = crate::prism::extract_credentials(&headers, &config);
-
-    assert_eq!(creds.cookie, "cookie");
-    assert_eq!(creds.sentinel_token.as_deref(), Some(r#"{"p":"sentinel"}"#));
-    assert_eq!(creds.sandbox_token, "sandbox");
-    assert_eq!(creds.user_id, "user");
-    assert_eq!(creds.project_id, "project");
-}
-
-#[test]
-fn extracts_prism_credentials_with_comma_delimiter() {
-    let config = Config {
-        target_host: "127.0.0.1".into(),
-        target_port: 8080,
-        fallbacks: vec![],
-        io_timeout: None,
-        retry_base_delay_ms: 100,
-        max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "default_proj".into(),
-        prism_cookie: "default_cookie".into(),
-        prism_sandbox_token: "default_token".into(),
-        prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-sol".into(),
-        prism_system_prompt: "".into(),
-        museai_base_url: "https://muse.ai".into(),
-        museai_cookie: "".into(),
-        museai_ws_url: "".into(),
-        museai_access_token: "".into(),
-        museai_notary_token: "".into(),
-        museai_vm_id: "".into(),
-        museai_auto_cleanup_threads: true,
-        museai_thread_retention_secs: 86400,
-    };
-
-    let headers = vec![(
-        "x-api-key".to_string(),
-        "cookie_part1, cookie_part2; key=val, token_123, user_456, proj_789".to_string(),
-    )];
-
-    let creds = crate::prism::extract_credentials(&headers, &config);
-    assert_eq!(creds.cookie, "cookie_part1, cookie_part2; key=val");
-    assert_eq!(creds.sandbox_token, "token_123");
-    assert_eq!(creds.user_id, "user_456");
-    assert_eq!(creds.project_id, "proj_789");
-}
-
-#[test]
-fn falls_back_to_config_credentials_when_header_is_missing_or_short() {
-    let config = Config {
-        target_host: "127.0.0.1".into(),
-        target_port: 8080,
-        fallbacks: vec![],
-        io_timeout: None,
-        retry_base_delay_ms: 100,
-        max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "default_proj".into(),
-        prism_cookie: "default_cookie".into(),
-        prism_sandbox_token: "default_token".into(),
-        prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-sol".into(),
-        prism_system_prompt: "".into(),
-        museai_base_url: "https://muse.ai".into(),
-        museai_cookie: "".into(),
-        museai_ws_url: "".into(),
-        museai_access_token: "".into(),
-        museai_notary_token: "".into(),
-        museai_vm_id: "".into(),
-        museai_auto_cleanup_threads: true,
-        museai_thread_retention_secs: 86400,
-    };
-
-    let headers = vec![(
-        "Authorization".to_string(),
-        "Bearer sk-singlekey".to_string(),
-    )];
-    let creds = crate::prism::extract_credentials(&headers, &config);
-    assert_eq!(creds.cookie, "default_cookie");
-    assert_eq!(creds.sandbox_token, "default_token");
-    assert_eq!(creds.user_id, "default_user");
-    assert_eq!(creds.project_id, "default_proj");
+    // Test that config credentials handle work
+    assert!(!config.default_model.is_empty());
 }
 
 #[test]
@@ -520,13 +392,7 @@ fn test_museai_business_builds_configured_request() {
         io_timeout: None,
         retry_base_delay_ms: 100,
         max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "project".into(),
-        prism_cookie: "".into(),
-        prism_sandbox_token: "".into(),
-        prism_user_id: "".into(),
-        prism_default_model: "model".into(),
-        prism_system_prompt: "".into(),
+        default_model: "gpt-5.6-sol".into(),
         museai_base_url: "http://127.0.0.1:32123".into(),
         museai_cookie: "session=test".into(),
         museai_ws_url: "".into(),
@@ -554,13 +420,7 @@ fn test_museai_business_rejects_unsafe_target() {
         io_timeout: None,
         retry_base_delay_ms: 100,
         max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "project".into(),
-        prism_cookie: "".into(),
-        prism_sandbox_token: "".into(),
-        prism_user_id: "".into(),
-        prism_default_model: "model".into(),
-        prism_system_prompt: "".into(),
+        default_model: "gpt-5.6-sol".into(),
         museai_base_url: "https://muse.ai".into(),
         museai_cookie: "".into(),
         museai_ws_url: "".into(),
@@ -611,13 +471,7 @@ fn test_museai_v1_mock_proxy_flow() {
             io_timeout: None,
             retry_base_delay_ms: 100,
             max_retry_delay_ms: 1000,
-            prism_base_url: "https://prism.openai.com".into(),
-            prism_project_id: "default_proj".into(),
-            prism_cookie: "default_cookie".into(),
-            prism_sandbox_token: "default_token".into(),
-            prism_user_id: "default_user".into(),
-            prism_default_model: "gpt-5.6-sol".into(),
-            prism_system_prompt: "".into(),
+            default_model: "gpt-5.6-sol".into(),
             museai_base_url: format!("http://127.0.0.1:{mock_muse_port}"),
             museai_cookie: "hatch_sess=secret_mock_sess".into(),
             museai_ws_url: "".into(),
@@ -685,11 +539,6 @@ fn routed_status(method: &str, path: &str) -> u16 {
 
 #[test]
 fn reserved_feature_routes_never_fall_through_to_omniroute() {
-    assert_eq!(
-        routed_status("GET", "/prism-openai/v1/chat/completions"),
-        405
-    );
-    assert_eq!(routed_status("GET", "/prism-openai/unknown"), 404);
     assert_eq!(routed_status("GET", "/muse-ai/unknown"), 404);
     assert_eq!(routed_status("POST", "/muse-config"), 405);
     assert_eq!(routed_status("POST", "/video-template"), 405);
@@ -708,7 +557,6 @@ fn model_catalog_routes_have_exact_owners() {
     for path in [
         "/other/models",
         "/other/v1/models",
-        "/prism-openai/v1/models",
         "/muse-ai/other/models",
     ] {
         assert!(!crate::routes::is_models_catalog_route(path));
@@ -728,13 +576,7 @@ fn test_models_catalog_response() {
             io_timeout: None,
             retry_base_delay_ms: 100,
             max_retry_delay_ms: 1000,
-            prism_base_url: "https://prism.openai.com".into(),
-            prism_project_id: "default_proj".into(),
-            prism_cookie: "default_cookie".into(),
-            prism_sandbox_token: "default_token".into(),
-            prism_user_id: "default_user".into(),
-            prism_default_model: "gpt-5.6-sol".into(),
-            prism_system_prompt: "".into(),
+            default_model: "gpt-5.6-sol".into(),
             museai_base_url: "https://muse.ai".into(),
             museai_cookie: "".into(),
             museai_ws_url: "".into(),
@@ -764,8 +606,8 @@ fn test_models_catalog_response() {
     assert_eq!(json["object"], "list");
     let models = json["data"].as_array().unwrap();
     // Catalog details the configured OmniRoute pipeline:
-    // default model "gpt-5.6-sol" (+4 effort variants), fallback-1, fallback-2, muse = 8.
-    assert_eq!(models.len(), 8);
+    // default model "gpt-5.6-sol" (+4 effort variants), fallback-1, fallback-2 = 7.
+    assert_eq!(models.len(), 7);
     assert!(models
         .iter()
         .all(|model| { !model["id"].as_str().unwrap().contains("terra") }));
@@ -775,7 +617,7 @@ fn test_models_catalog_response() {
     assert!(models.iter().any(|model| model["id"] == "gpt-5.6-sol"));
     assert!(models.iter().any(|model| model["id"] == "fallback-1"));
     assert!(models.iter().any(|model| model["id"] == "fallback-2"));
-    assert!(models.iter().any(|model| model["id"] == "muse"));
+    assert!(!models.iter().any(|model| model["id"] == "muse"));
 }
 
 #[test]
@@ -809,162 +651,6 @@ fn test_museai_models_catalog_response() {
 }
 
 #[test]
-fn test_prism_successful_start_and_status_flow() {
-    let mock_prism = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let mock_prism_port = mock_prism.local_addr().unwrap().port();
-
-    let prism_handle = thread::spawn(move || {
-        let (mut start_client, _) = mock_prism.accept().unwrap();
-        let start = crate::http::read_request(&mut start_client).unwrap();
-        assert_eq!(start.method, "POST");
-        assert_eq!(start.path, "/api/llm/response_with_tools_start");
-        assert_eq!(
-            crate::http::header_value(&start.headers, "cookie"),
-            Some("session=cookie-value|||cookie-tail")
-        );
-        assert_eq!(
-            crate::http::header_value(&start.headers, "openai-sentinel-token"),
-            Some(r#"{"p":"packed-sentinel"}"#)
-        );
-        let expected_base_url = format!("http://127.0.0.1:{mock_prism_port}");
-        assert_eq!(
-            crate::http::header_value(&start.headers, "origin"),
-            Some(expected_base_url.as_str())
-        );
-        assert_eq!(
-            crate::http::header_value(&start.headers, "referer"),
-            Some(format!("{expected_base_url}/?u=proj_flow").as_str())
-        );
-
-        let start_json: serde_json::Value = serde_json::from_slice(&start.body).unwrap();
-        assert_eq!(start_json["metadata"]["projectId"], "proj_flow");
-        assert_eq!(start_json["metadata"]["userId"], "user_flow");
-        assert_eq!(start_json["metadata"]["sandbox_token"], "sandbox_flow");
-        assert_eq!(start_json["metadata"]["model"], "gpt-5.6-sol");
-        assert_eq!(start_json["metadata"]["reasoning_effort"], "xhigh");
-
-        let start_body = r#"{
-            "status":"running",
-            "request_id":"request_flow",
-            "turn_state":{"step":1}
-        }"#;
-        write!(
-            start_client,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            start_body.len(),
-            start_body
-        )
-        .unwrap();
-        start_client.flush().unwrap();
-        drop(start_client);
-
-        let (mut status_client, _) = mock_prism.accept().unwrap();
-        let status = crate::http::read_request(&mut status_client).unwrap();
-        assert_eq!(status.method, "POST");
-        assert_eq!(status.path, "/api/llm/response_with_tools_status");
-        assert_eq!(
-            crate::http::header_value(&status.headers, "cookie"),
-            Some("session=cookie-value|||cookie-tail")
-        );
-        assert_eq!(
-            crate::http::header_value(&status.headers, "openai-sentinel-token"),
-            Some(r#"{"p":"packed-sentinel"}"#)
-        );
-
-        let status_json: serde_json::Value = serde_json::from_slice(&status.body).unwrap();
-        assert_eq!(status_json["request_id"], "request_flow");
-        assert_eq!(status_json["turn_state"]["step"], 1);
-
-        let status_body = r#"{
-            "status":"completed",
-            "response":{
-                "status":"completed",
-                "payload":{
-                    "output":[{"content":[{"type":"output_text","text":"flow works"}]}]
-                }
-            }
-        }"#;
-        write!(
-            status_client,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            status_body.len(),
-            status_body
-        )
-        .unwrap();
-        status_client.flush().unwrap();
-    });
-
-    let mock_proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let proxy_port = mock_proxy.local_addr().unwrap().port();
-    let proxy_handle = thread::spawn(move || {
-        let config = Config {
-            target_host: "127.0.0.1".into(),
-            target_port: 8080,
-            fallbacks: vec![],
-            io_timeout: None,
-            retry_base_delay_ms: 100,
-            max_retry_delay_ms: 1000,
-            prism_base_url: format!("http://127.0.0.1:{mock_prism_port}"),
-            prism_project_id: "default_proj".into(),
-            prism_cookie: "default_cookie".into(),
-            prism_sandbox_token: "default_token".into(),
-            prism_user_id: "default_user".into(),
-            prism_default_model: "gpt-5.6-sol".into(),
-            prism_system_prompt: "Injected system".into(),
-            museai_base_url: "https://muse.ai".into(),
-            museai_cookie: "".into(),
-            museai_ws_url: "".into(),
-            museai_access_token: "".into(),
-            museai_notary_token: "".into(),
-            museai_vm_id: "".into(),
-            museai_auto_cleanup_threads: true,
-            museai_thread_retention_secs: 86400,
-        };
-        let (mut client, _) = mock_proxy.accept().unwrap();
-        let req_in = crate::http::read_request(&mut client).unwrap();
-        crate::prism::handle_prism_chat_completion(
-            &mut client,
-            &req_in.body,
-            &config,
-            &req_in.headers,
-        )
-        .unwrap();
-    });
-
-    let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
-    let openai_req = r#"{
-        "model":"gpt-5.6-sol-xhigh",
-        "messages":[{"role":"user","content":"hello"}]
-    }"#;
-    let api_key = "session=cookie-value|||cookie-tail|||{\"p\":\"packed-sentinel\"}|||sandbox_flow|||user_flow|||proj_flow";
-    write!(
-        client,
-        "POST /prism-openai/v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nx-api-key: {api_key}\r\nContent-Length: {}\r\n\r\n{}",
-        openai_req.len(),
-        openai_req
-    )
-    .unwrap();
-    client.flush().unwrap();
-
-    let head = crate::http::read_response_head(&mut client).unwrap();
-    assert_eq!(head.status, 200);
-    let mut body = head.buffered_body;
-    let length = crate::http::header_value(&head.headers, "content-length")
-        .unwrap()
-        .parse::<usize>()
-        .unwrap();
-    while body.len() < length {
-        crate::http::read_more(&mut client, &mut body).unwrap();
-    }
-    let response: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
-    assert_eq!(response["model"], "gpt-5.6-sol");
-    assert_eq!(response["choices"][0]["message"]["content"], "flow works");
-
-    prism_handle.join().unwrap();
-    proxy_handle.join().unwrap();
-}
-
-#[test]
 fn test_cors_preflight_response() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -982,181 +668,6 @@ fn test_cors_preflight_response() {
         Some("*")
     );
     handle.join().unwrap();
-}
-
-#[test]
-fn test_build_injected_prism_inputs_no_system() {
-    let messages = vec![crate::prism::OpenAiMessage {
-        role: "user".into(),
-        content: "hello".into(),
-    }];
-    let prompt = "You are a test prompt";
-    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages, prompt);
-
-    assert_eq!(prism_inputs.len(), 2);
-    assert_eq!(prism_inputs[0].role, "system");
-    assert!(prism_inputs[0].content[0]
-        .text
-        .starts_with("You are a test prompt"));
-
-    assert_eq!(prism_inputs[1].role, "user");
-    assert_eq!(prism_inputs[1].content[0].text, "hello");
-}
-
-#[test]
-fn test_build_injected_prism_inputs_with_system() {
-    let messages = vec![
-        crate::prism::OpenAiMessage {
-            role: "system".into(),
-            content: "{\"openFile\": \"main.rs\"}".into(),
-        },
-        crate::prism::OpenAiMessage {
-            role: "user".into(),
-            content: "hello".into(),
-        },
-    ];
-    let prompt = "You are a test prompt";
-    let prism_inputs = crate::prism::build_injected_prism_inputs(&messages, prompt);
-
-    assert_eq!(prism_inputs.len(), 2);
-    assert_eq!(prism_inputs[0].role, "system");
-    // Injection should be prepended
-    assert!(prism_inputs[0].content[0]
-        .text
-        .starts_with("You are a test prompt"));
-    assert!(prism_inputs[0].content[0]
-        .text
-        .contains("{\"openFile\": \"main.rs\"}"));
-
-    assert_eq!(prism_inputs[1].role, "user");
-    assert_eq!(prism_inputs[1].content[0].text, "hello");
-}
-
-#[test]
-fn test_prism_403_forbidden_error_mapping() {
-    let mock_prism = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let mock_prism_port = mock_prism.local_addr().unwrap().port();
-
-    // Spawn a thread to act as the mock Prism server
-    let prism_handle = thread::spawn(move || {
-        let (mut client, _) = mock_prism.accept().unwrap();
-
-        // Read the request head
-        let head = crate::http::read_request(&mut client).unwrap();
-        assert_eq!(head.method, "POST");
-        assert_eq!(head.path, "/api/llm/response_with_tools_start");
-        let body = head.body;
-
-        let req_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let metadata = &req_json["metadata"];
-        assert_eq!(metadata["projectId"], "proj_403");
-
-        // We check if sentinel token is forwarded correctly as well
-        assert_eq!(
-            crate::http::header_value(&head.headers, "cookie"),
-            Some("cookie")
-        );
-        let sentinel = crate::http::header_value(&head.headers, "openai-sentinel-token");
-        assert_eq!(sentinel, Some("test_sentinel_token_123"));
-
-        // Create a Prism response that wraps an INNER error with 403 Forbidden payload message
-        let mock_resp = r#"{
-            "status": "completed",
-            "request_id": "req_123",
-            "response": {
-                "status": "error",
-                "payload": {
-                    "message": "Error while processing conversation (403 Forbidden). Submit prompt again."
-                }
-            }
-        }"#;
-
-        write!(
-            client,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            mock_resp.len(),
-            mock_resp
-        ).unwrap();
-        client.flush().unwrap();
-    });
-
-    let mock_proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let proxy_port = mock_proxy.local_addr().unwrap().port();
-
-    let proxy_handle = thread::spawn(move || {
-        let config = Config {
-            target_host: "127.0.0.1".into(),
-            target_port: 8080,
-            fallbacks: vec![],
-            io_timeout: None,
-            retry_base_delay_ms: 100,
-            max_retry_delay_ms: 1000,
-            prism_base_url: format!("http://127.0.0.1:{}", mock_prism_port),
-            prism_project_id: "default_proj".into(),
-            prism_cookie: "default_cookie".into(),
-            prism_sandbox_token: "default_token".into(),
-            prism_user_id: "default_user".into(),
-            prism_default_model: "gpt-5.6-sol".into(),
-            prism_system_prompt: "Injected system".into(),
-            museai_base_url: "https://muse.ai".into(),
-            museai_cookie: "".into(),
-            museai_ws_url: "".into(),
-            museai_access_token: "".into(),
-            museai_notary_token: "".into(),
-            museai_vm_id: "".into(),
-            museai_auto_cleanup_threads: true,
-            museai_thread_retention_secs: 86400,
-        };
-        let (mut client, _) = mock_proxy.accept().unwrap();
-
-        let req_in = crate::http::read_request(&mut client).unwrap();
-        crate::prism::handle_prism_chat_completion(
-            &mut client,
-            &req_in.body,
-            &config,
-            &req_in.headers,
-        )
-        .unwrap();
-    });
-
-    // Simulate an OpenAI client connecting to the proxy
-    let mut client = TcpStream::connect(("127.0.0.1", proxy_port)).unwrap();
-    let openai_req = r#"{
-        "model": "gpt-5.6-sol-high",
-        "messages": [
-            {"role": "user", "content": "hello"}
-        ]
-    }"#;
-    write!(
-        client,
-        "POST /prism-openai/v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nx-api-key: cookie|||test_sentinel_token_123|||token|||user|||proj_403\r\nContent-Length: {}\r\n\r\n{}",
-        openai_req.len(),
-        openai_req
-    ).unwrap();
-    client.flush().unwrap();
-
-    let head = crate::http::read_response_head(&mut client).unwrap();
-    assert_eq!(
-        head.status, 403,
-        "Should map inner Prism 403 Forbidden to HTTP 403"
-    );
-
-    let mut body = head.buffered_body;
-    if let Some(length_str) = crate::http::header_value(&head.headers, "content-length") {
-        let length: usize = length_str.parse().unwrap();
-        while body.len() < length {
-            crate::http::read_more(&mut client, &mut body).unwrap();
-        }
-    }
-
-    let resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        resp["error"]["message"],
-        "Prism error: Error while processing conversation (403 Forbidden). Submit prompt again."
-    );
-
-    prism_handle.join().unwrap();
-    proxy_handle.join().unwrap();
 }
 
 #[test]
@@ -1295,7 +806,7 @@ fn unauthorized_upstream_fails_over_to_next_model() {
     let mut config = test_config();
     config.target_host = "127.0.0.1".into();
     config.target_port = upstream_port;
-    config.prism_default_model = "primary-model".into();
+    config.default_model = "primary-model".into();
     config.fallbacks = vec!["fallback-model".into()];
     config.retry_base_delay_ms = 0;
     config.max_retry_delay_ms = 0;
@@ -1410,7 +921,7 @@ fn unknown_model_no_longer_exhausts_fallbacks() {
     let mut config = test_config();
     config.target_host = "127.0.0.1".into();
     config.target_port = upstream_port;
-    config.prism_default_model = "gpt-5.6-sol".into();
+    config.default_model = "gpt-5.6-sol".into();
     config.fallbacks = vec![];
     config.retry_base_delay_ms = 0;
     config.max_retry_delay_ms = 0;
@@ -1594,7 +1105,18 @@ Connection: close
         client.flush().unwrap();
         drop(client);
 
-        // now accept the token request
+        // The current flow checks the browser session token before falling back
+        // to the legacy hatch token endpoint.
+        let (mut client, _) = mock_hatch.accept().unwrap();
+        let request = crate::http::read_request(&mut client).unwrap();
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/api/auth/check");
+        client
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        drop(client);
+
+        // now accept the legacy token request
         let (mut client, _) = mock_hatch.accept().unwrap();
         let request = crate::http::read_request(&mut client).unwrap();
 
@@ -1615,6 +1137,23 @@ Connection: close
         )
         .unwrap();
         client.flush().unwrap();
+        drop(client);
+
+        let (mut client, _) = mock_hatch.accept().unwrap();
+        let request = crate::http::read_request(&mut client).unwrap();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/api/session");
+
+        let session_body =
+            r#"{"vm_id":"test_vm_id","endpoint_url":"wss://test.invalid/v1/noise","vms":[]}"#;
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            session_body.len(),
+            session_body
+        )
+        .unwrap();
+        client.flush().unwrap();
     });
 
     let config = crate::config::Config {
@@ -1624,13 +1163,7 @@ Connection: close
         io_timeout: None,
         retry_base_delay_ms: 100,
         max_retry_delay_ms: 1000,
-        prism_base_url: "https://prism.openai.com".into(),
-        prism_project_id: "default_proj".into(),
-        prism_cookie: "default_cookie".into(),
-        prism_sandbox_token: "default_token".into(),
-        prism_user_id: "default_user".into(),
-        prism_default_model: "gpt-5.6-sol".into(),
-        prism_system_prompt: "".into(),
+        default_model: "gpt-5.6-sol".into(),
         museai_base_url: format!("http://127.0.0.1:{}", port),
         museai_cookie: "test_cookie".into(),
         museai_ws_url: "".into(),
@@ -1644,6 +1177,57 @@ Connection: close
     let bootstrapped = crate::museai::bootstrap_museai_config(&config).unwrap();
     assert_eq!(bootstrapped.museai_access_token, "test_access");
     assert_eq!(bootstrapped.museai_notary_token, "test_notary");
+    server_thread.join().unwrap();
+}
+
+#[test]
+fn test_museai_bootstrap_uses_auth_check_and_current_session_shape() {
+    let mock_muse = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = mock_muse.local_addr().unwrap().port();
+
+    let server_thread = std::thread::spawn(move || {
+        let (mut client, _) = mock_muse.accept().unwrap();
+        let request = crate::http::read_request(&mut client).unwrap();
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/api/auth/check");
+        let body = r#"{"access_token":"current-access","ok":true}"#;
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+        drop(client);
+
+        let (mut client, _) = mock_muse.accept().unwrap();
+        let request = crate::http::read_request(&mut client).unwrap();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/api/session");
+        let body = r#"{
+            "vms": [
+                {"id":"fallback-id","endpoint_url":"wss://fallback.invalid/","is_preferred":false},
+                {"vm_id":"preferred-vm","endpoint_url":"wss://preferred.invalid/","is_preferred":true}
+            ]
+        }"#;
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+    });
+
+    let mut config = test_config();
+    config.museai_base_url = format!("http://127.0.0.1:{port}");
+    config.museai_notary_token = "preserved-notary".into();
+
+    let bootstrapped = crate::museai::bootstrap_museai_config(&config).unwrap();
+    assert_eq!(bootstrapped.museai_access_token, "current-access");
+    assert_eq!(bootstrapped.museai_notary_token, "preserved-notary");
+    assert_eq!(bootstrapped.museai_vm_id, "preferred-vm");
+    assert_eq!(bootstrapped.museai_ws_url, "wss://preferred.invalid/");
     server_thread.join().unwrap();
 }
 
@@ -1797,11 +1381,16 @@ fn test_handle_create_video_maps_not_found_error_to_404() {
 }
 
 #[test]
-fn museai_stream_request_uses_resolved_session_id() {
-    let source = include_str!("museai.rs");
-    assert!(source.contains(r#""/chat/stream""#));
-    assert!(source.contains(r#""session_id": resolved_session_id.clone()"#));
-    assert!(!source.contains(r#""chat_id": resolved_session_id.clone()"#));
+fn museai_stream_request_uses_fresh_draft_session_id() {
+    let first = crate::museai::build_muse_chat_request("sanitized test prompt");
+    let second = crate::museai::build_muse_chat_request("sanitized test prompt");
+    assert_eq!(first["message"], "sanitized test prompt");
+    assert!(uuid::Uuid::parse_str(first["session_id"].as_str().unwrap()).is_ok());
+    assert!(uuid::Uuid::parse_str(first["node_id"].as_str().unwrap()).is_ok());
+    assert_ne!(first["session_id"], second["session_id"]);
+    assert_ne!(first["session_id"], first["node_id"]);
+    assert!(first.get("chat_id").is_none());
+    assert!(first.get("channel").is_none());
 }
 
 #[test]
@@ -2090,6 +1679,22 @@ fn har_extraction_vm_id_from_session_response() {
     assert_eq!(parsed.vm_id.as_deref(), Some("vm-from-response"));
     assert_eq!(parsed.ws_url.as_deref(), Some("wss://x.metaaivm.com/"));
     assert_eq!(parsed.base_url.as_deref(), Some("https://muse.ai"));
+}
+
+#[test]
+fn har_extraction_selects_preferred_vm_from_current_session_shape() {
+    let har = r#"{
+      "log": {"entries": [
+        {
+          "request": {"url": "https://muse.ai/api/session"},
+          "response": {"content": {"text": "{\"vms\":[{\"id\":\"fallback-id\",\"endpoint_url\":\"wss://fallback.invalid/\",\"is_preferred\":false},{\"vm_id\":\"preferred-vm\",\"endpoint_url\":\"wss://preferred.invalid/\",\"is_preferred\":true}]}"}}
+        }
+      ]}
+    }"#;
+    let parsed = crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
+    assert_eq!(parsed.vm_id.as_deref(), Some("preferred-vm"));
+    assert_eq!(parsed.ws_url.as_deref(), Some("wss://preferred.invalid/"));
+    assert!(parsed.notary_token.is_none());
 }
 
 #[test]
