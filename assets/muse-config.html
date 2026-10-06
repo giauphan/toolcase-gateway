@@ -57,7 +57,7 @@ a{color:var(--accent)}
   </div>
 
   <div class="card report" id="report">
-    <h2>2. Applied values</h2>
+    <h2>2. Effective Muse config</h2>
     <div class="kv" id="kv"></div>
     <div style="margin-top:10px" id="kept"></div>
   </div>
@@ -105,7 +105,7 @@ a{color:var(--accent)}
   function renderReport(d){
     var kv=document.getElementById("kv");
     kv.innerHTML="";
-    (d.applied||[]).forEach(function(f){
+    (d.config||d.applied||[]).forEach(function(f){
       var k=document.createElement("div");
       k.className="k";
       var keyText=document.createTextNode(f.key);
@@ -125,14 +125,14 @@ a{color:var(--accent)}
 
     var kept=document.getElementById("kept");
     kept.innerHTML=(d.kept&&d.kept.length)
-      ? "Kept existing values for: "+d.kept.join(", ")
+      ? "Retained existing values not present in this HAR: "+d.kept.join(", ")
       : "";
 
     var env=d.env||{};
     var ok=document.getElementById("okbox");
     if(env.status==="written"){
       ok.style.display="block";
-      ok.textContent="Applied live. .env updated at "+env.path+" ("+(env.keys||[]).length+" keys).";
+      ok.textContent="Applied live. Effective Muse config persisted at "+env.path+" ("+(env.keys||[]).length+" keys).";
     } else if(env.status==="failed"){
       ok.style.display="block";
       ok.textContent="Applied live, but .env write failed: "+env.message;

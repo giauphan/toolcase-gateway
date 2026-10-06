@@ -113,9 +113,17 @@ pub fn extract_muse_config_from_har(bytes: &[u8]) -> Result<MuseHarConfig, HarEx
         }
         if let Some(rest) = parse_rest_muse_entry(url, entry) {
             out.base_url = Some(rest.base_url);
-            out.cookie = rest.cookie;
+            if rest.cookie.is_some() {
+                out.cookie = rest.cookie;
+            }
+            if rest.ws_url.is_some() {
+                out.ws_url = rest.ws_url;
+            }
             if rest.access_token.is_some() {
                 out.access_token = rest.access_token;
+            }
+            if rest.notary_token.is_some() {
+                out.notary_token = rest.notary_token;
             }
             if rest.vm_id.is_some() {
                 out.vm_id = rest.vm_id;
@@ -201,7 +209,9 @@ fn parse_ws_muse_entry(url: &str) -> Option<WsEntry> {
 struct RestEntry {
     base_url: String,
     cookie: Option<String>,
+    ws_url: Option<String>,
     access_token: Option<String>,
+    notary_token: Option<String>,
     vm_id: Option<String>,
 }
 
@@ -216,43 +226,70 @@ fn parse_rest_muse_entry(url: &str, entry: &serde_json::Value) -> Option<RestEnt
     if !is_muse {
         return None;
     }
-    let cookie = entry
-        .get("request")
+    let request = entry.get("request");
+    let cookie = request
         .and_then(|r| r.get("headers"))
         .and_then(|h| h.as_array())
         .and_then(|headers| {
             headers
                 .iter()
-                .find(|h| h.get("name").and_then(|n| n.as_str()) == Some("Cookie"))
+                .find(|h| {
+                    h.get("name")
+                        .and_then(|n| n.as_str())
+                        .is_some_and(|name| name.eq_ignore_ascii_case("cookie"))
+                })
                 .and_then(|h| h.get("value").and_then(|v| v.as_str()))
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
-        });
+        })
+        .or_else(|| request.and_then(extract_har_cookie_array));
     let response_body = entry
         .get("response")
         .and_then(|r| r.get("content"))
         .and_then(|c| c.get("text"))
         .and_then(|t| t.as_str())
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
-    let access_token = response_body
-        .as_ref()
-        .and_then(|body| body.get("access_token"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty());
-    let vm_id = response_body
-        .as_ref()
-        .and_then(|body| body.get("vm_id"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty());
+    let response_string = |key: &str| {
+        response_body
+            .as_ref()
+            .and_then(|body| body.get(key))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let ws_url = response_string("endpoint_url");
+    let access_token = response_string("access_token")
+        .or_else(|| response_string("auth_token"))
+        .or_else(|| response_string("token"));
+    let notary_token = response_string("notary_token");
+    let vm_id = response_string("vm_id");
     let base_url = format!("{scheme}://{host}");
     Some(RestEntry {
         base_url,
         cookie,
+        ws_url,
         access_token,
+        notary_token,
         vm_id,
     })
+}
+
+fn extract_har_cookie_array(request: &serde_json::Value) -> Option<String> {
+    let cookies = request.get("cookies")?.as_array()?;
+    let pairs: Vec<String> = cookies
+        .iter()
+        .filter_map(|cookie| {
+            let name = cookie.get("name")?.as_str()?.trim();
+            let value = cookie.get("value")?.as_str()?.trim();
+            if name.is_empty() || value.is_empty() {
+                None
+            } else {
+                Some(format!("{name}={value}"))
+            }
+        })
+        .collect();
+    (!pairs.is_empty()).then(|| pairs.join("; "))
 }
 
 fn split_scheme(url: &str) -> Option<(&str, &str)> {
@@ -318,6 +355,7 @@ pub fn mask_secret(value: &str) -> String {
 #[derive(Debug, Clone)]
 pub(crate) struct ApplyReport {
     pub applied: Vec<AppliedField>,
+    pub config: Vec<AppliedField>,
     pub kept: Vec<&'static str>,
     pub env: EnvReport,
 }
@@ -355,7 +393,7 @@ pub(crate) fn apply_har_config(
         }
     };
 
-    let kept = {
+    let (kept, effective) = {
         let mut guard = store.write_guard();
         let kept = extracted.keep_fields(&guard);
         if let Some(v) = &extracted.ws_url {
@@ -376,7 +414,7 @@ pub(crate) fn apply_har_config(
         if let Some(v) = &extracted.cookie {
             guard.museai_cookie = v.clone();
         }
-        kept
+        (kept, guard.clone())
     };
 
     let applied = vec![
@@ -415,40 +453,58 @@ pub(crate) fn apply_har_config(
     .flatten()
     .collect();
 
-    let env_pairs: Vec<(&str, &str)> = vec![
-        extracted
-            .ws_url
-            .as_deref()
-            .map(|s| ("GW_MUSEAI_WS_URL", s))
-            .filter(|(_, v)| !v.is_empty()),
-        extracted
-            .base_url
-            .as_deref()
-            .map(|s| ("GW_MUSEAI_BASE_URL", s))
-            .filter(|(_, v)| !v.is_empty()),
-        extracted
-            .access_token
-            .as_deref()
-            .map(|s| ("GW_MUSEAI_ACCESS_TOKEN", s))
-            .filter(|(_, v)| !v.is_empty()),
-        extracted
-            .notary_token
-            .as_deref()
-            .map(|s| ("GW_MUSEAI_NOTARY_TOKEN", s))
-            .filter(|(_, v)| !v.is_empty()),
-        extracted
-            .vm_id
-            .as_deref()
-            .map(|s| ("GW_MUSEAI_VM_ID", s))
-            .filter(|(_, v)| !v.is_empty()),
-        extracted
-            .cookie
-            .as_deref()
-            .map(|s| ("GW_MUSEAI_COOKIE", s))
-            .filter(|(_, v)| !v.is_empty()),
+    let config = vec![
+        (!effective.museai_ws_url.is_empty()).then(|| AppliedField {
+            key: "ws_url",
+            value: effective.museai_ws_url.clone(),
+            masked: false,
+        }),
+        (!effective.museai_base_url.is_empty()).then(|| AppliedField {
+            key: "base_url",
+            value: effective.museai_base_url.clone(),
+            masked: false,
+        }),
+        (!effective.museai_access_token.is_empty()).then(|| AppliedField {
+            key: "access_token",
+            value: mask_secret(&effective.museai_access_token),
+            masked: true,
+        }),
+        (!effective.museai_notary_token.is_empty()).then(|| AppliedField {
+            key: "notary_token",
+            value: mask_secret(&effective.museai_notary_token),
+            masked: true,
+        }),
+        (!effective.museai_vm_id.is_empty()).then(|| AppliedField {
+            key: "vm_id",
+            value: effective.museai_vm_id.clone(),
+            masked: false,
+        }),
+        (!effective.museai_cookie.is_empty()).then(|| AppliedField {
+            key: "cookie",
+            value: mask_secret(&effective.museai_cookie),
+            masked: true,
+        }),
     ]
     .into_iter()
     .flatten()
+    .collect();
+
+    let env_pairs: Vec<(&str, &str)> = [
+        ("GW_MUSEAI_WS_URL", effective.museai_ws_url.as_str()),
+        ("GW_MUSEAI_BASE_URL", effective.museai_base_url.as_str()),
+        (
+            "GW_MUSEAI_ACCESS_TOKEN",
+            effective.museai_access_token.as_str(),
+        ),
+        (
+            "GW_MUSEAI_NOTARY_TOKEN",
+            effective.museai_notary_token.as_str(),
+        ),
+        ("GW_MUSEAI_VM_ID", effective.museai_vm_id.as_str()),
+        ("GW_MUSEAI_COOKIE", effective.museai_cookie.as_str()),
+    ]
+    .into_iter()
+    .filter(|(_, value)| !value.is_empty())
     .collect();
 
     let env = if env_pairs.is_empty() {
@@ -467,7 +523,12 @@ pub(crate) fn apply_har_config(
         }
     };
 
-    let report = ApplyReport { applied, kept, env };
+    let report = ApplyReport {
+        applied,
+        config,
+        kept,
+        env,
+    };
     let body = serde_json::to_string(&report).unwrap_or_else(|_| "{}".to_string());
     write!(
         client,
@@ -500,8 +561,9 @@ pub(crate) fn write_json_error(
 impl serde::Serialize for ApplyReport {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut s = serializer.serialize_struct("ApplyReport", 3)?;
+        let mut s = serializer.serialize_struct("ApplyReport", 4)?;
         s.serialize_field("applied", &self.applied)?;
+        s.serialize_field("config", &self.config)?;
         s.serialize_field("kept", &self.kept)?;
         s.serialize_field("env", &self.env)?;
         s.end()

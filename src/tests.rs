@@ -2088,7 +2088,51 @@ fn har_extraction_vm_id_from_session_response() {
     }"#;
     parsed = crate::har_config::extract_muse_config_from_har(har_with_vm.as_bytes()).unwrap();
     assert_eq!(parsed.vm_id.as_deref(), Some("vm-from-response"));
+    assert_eq!(parsed.ws_url.as_deref(), Some("wss://x.metaaivm.com/"));
     assert_eq!(parsed.base_url.as_deref(), Some("https://muse.ai"));
+}
+
+#[test]
+fn har_extraction_reads_standard_cookie_arrays_and_preserves_them() {
+    let har = r#"{
+      "log": {"entries": [
+        {
+          "request": {
+            "url": "https://muse.ai/api/session",
+            "cookies": [
+              {"name": "sessionId", "value": "synthetic-session"},
+              {"name": "theme", "value": "dark"}
+            ]
+          }
+        },
+        {
+          "request": {"url": "https://muse.ai/api/auth/check", "headers": []},
+          "response": {"content": {"text": "{\"access_token\":\"synthetic-token\"}"}}
+        }
+      ]}
+    }"#;
+    let parsed = crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
+    assert_eq!(
+        parsed.cookie.as_deref(),
+        Some("sessionId=synthetic-session; theme=dark")
+    );
+    assert_eq!(parsed.access_token.as_deref(), Some("synthetic-token"));
+}
+
+#[test]
+fn har_extraction_accepts_case_insensitive_cookie_header() {
+    let har = r#"{
+      "log": {"entries": [
+        {
+          "request": {
+            "url": "https://muse.ai/api/session",
+            "headers": [{"name": "cookie", "value": "sessionId=synthetic"}]
+          }
+        }
+      ]}
+    }"#;
+    let parsed = crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
+    assert_eq!(parsed.cookie.as_deref(), Some("sessionId=synthetic"));
 }
 
 #[test]
@@ -2370,12 +2414,57 @@ fn har_handler_applies_masks_and_persists() {
     assert!(content.contains("GW_MUSEAI_ACCESS_TOKEN=access-token-abc123"));
     assert!(report["env"]["status"] == "written");
 
-    // WS-only capture: base_url absent → kept from current config.
+    // WS-only capture: base_url is retained and returned as effective config.
     assert!(report["kept"]
         .as_array()
         .unwrap()
         .iter()
         .any(|k| k == "base_url"));
+    assert!(report["config"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field["key"] == "base_url" && field["value"] == "https://muse.ai"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn har_handler_returns_and_persists_effective_config() {
+    let dir = test_har_dir("effective");
+    let env_path = dir.join(".env");
+    let mut current = test_config();
+    current.museai_ws_url = "wss://existing.metaaivm.com/v1/noise".into();
+    current.museai_vm_id = "existing-vm".into();
+    current.museai_cookie = "sessionId=existing-cookie".into();
+    let store = crate::config::ConfigStore::new(current, env_path.clone());
+    let har = r#"{
+      "log": {"entries": [
+        {
+          "request": {"url": "https://muse.ai/api/auth/check"},
+          "response": {"content": {"text": "{\"access_token\":\"new-synthetic-token\"}"}}
+        }
+      ]}
+    }"#;
+
+    let (status, body) = har_handler_response(har, &store);
+    assert_eq!(status, 200, "body: {body}");
+    assert!(!body.contains("new-synthetic-token"));
+    assert!(!body.contains("existing-cookie"));
+    let report: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let config = report["config"].as_array().unwrap();
+    for key in ["ws_url", "base_url", "access_token", "vm_id", "cookie"] {
+        assert!(
+            config.iter().any(|field| field["key"] == key),
+            "missing {key}"
+        );
+    }
+    assert_eq!(report["env"]["keys"].as_array().unwrap().len(), 5);
+
+    let persisted = std::fs::read_to_string(&env_path).unwrap();
+    assert!(persisted.contains("GW_MUSEAI_WS_URL=wss://existing.metaaivm.com/v1/noise"));
+    assert!(persisted.contains("GW_MUSEAI_ACCESS_TOKEN=new-synthetic-token"));
+    assert!(persisted.contains("GW_MUSEAI_VM_ID=existing-vm"));
+    assert!(persisted.contains("GW_MUSEAI_COOKIE=sessionId=existing-cookie"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
