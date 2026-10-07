@@ -746,7 +746,9 @@ impl MuseChatStream {
                         })
                     })
                 });
-            debug_log(&format!("Approval snapshot requires_approval={requires_approval}"));
+            debug_log(&format!(
+                "Approval snapshot requires_approval={requires_approval}"
+            ));
             if requires_approval {
                 debug_log("Scoped Muse permission approval is pending");
             }
@@ -1014,7 +1016,16 @@ pub(crate) fn request_museai_chat_completion(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-const SUPPORTED_MODELS: [&str; 8] = ["gen-3", "gen-2", "kling", "gen-4", "gen-4.5", "gen-4-turbo", "aleph-2.0", "ruby"];
+const SUPPORTED_MODELS: [&str; 8] = [
+    "gen-3",
+    "gen-2",
+    "kling",
+    "gen-4",
+    "gen-4.5",
+    "gen-4-turbo",
+    "aleph-2.0",
+    "ruby",
+];
 const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
 
 pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
@@ -1446,8 +1457,14 @@ mod museai_tests {
             "pending_approvals": [{"scope": {"thread_id": "00000000-0000-4000-8000-000000000001"},
                 "payload": {"private": "secret"}}]
         }}));
-        assert!(result.is_ok(), "approvals.snapshot should not error the stream");
-        assert!(stream.text.is_empty(), "pending approval should not add text to stream");
+        assert!(
+            result.is_ok(),
+            "approvals.snapshot should not error the stream"
+        );
+        assert!(
+            stream.text.is_empty(),
+            "pending approval should not add text to stream"
+        );
     }
 
     #[test]

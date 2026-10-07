@@ -546,94 +546,147 @@ fn reserved_feature_routes_never_fall_through_to_omniroute() {
 
 #[test]
 fn model_catalog_routes_have_exact_owners() {
-    for path in ["/models", "/v1/models"] {
-        assert!(crate::routes::is_main_models_catalog_route(path));
-    }
     for path in ["/muse-ai/models", "/muse-ai/v1/models"] {
         assert!(crate::routes::is_muse_models_catalog_route(path));
     }
     for path in ["/other/models", "/other/v1/models", "/muse-ai/other/models"] {
-        assert!(!crate::routes::is_main_models_catalog_route(path));
         assert!(!crate::routes::is_muse_models_catalog_route(path));
     }
 }
 
-#[test]
-fn test_models_catalog_response() {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let port = listener.local_addr().unwrap().port();
+fn assert_main_catalog_proxies_to_upstream(path: &str) {
+    let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    upstream_listener.set_nonblocking(true).unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+    let expected_path = path.to_string();
 
-    let handle = thread::spawn(move || {
-        let config = Config {
-            target_host: "127.0.0.1".into(),
-            target_port: 8080,
-            fallbacks: vec![],
-            io_timeout: None,
-            retry_base_delay_ms: 100,
-            max_retry_delay_ms: 1000,
-            default_model: "gpt-5.6-sol".into(),
-            museai_base_url: "https://muse.ai".into(),
-            museai_cookie: "".into(),
-            museai_ws_url: "".into(),
-            museai_access_token: "".into(),
-            museai_notary_token: "".into(),
-            museai_vm_id: "".into(),
-            museai_auto_cleanup_threads: true,
-            museai_thread_retention_secs: 86400,
+    let upstream = thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let (mut socket, _) = loop {
+            match upstream_listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("gateway did not proxy {expected_path} to upstream");
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
         };
-        let (mut client, _) = listener.accept().unwrap();
-        crate::routes::handle_models_catalog(&mut client, "/v1/models", &config).unwrap();
+        let request = crate::http::read_request(&mut socket).unwrap();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, expected_path);
+        let body = br#"{"object":"list","data":[{"id":"real-upstream-model"}]}"#;
+        write!(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        socket.write_all(body).unwrap();
     });
 
-    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    let head = read_response_head(&mut client).unwrap();
-    assert_eq!(head.status, 200);
-    let mut body = head.buffered_body;
-    let length = header_value(&head.headers, "content-length")
-        .unwrap()
-        .parse::<usize>()
-        .unwrap();
-    while body.len() < length {
-        read_more(&mut client, &mut body).unwrap();
-    }
-    handle.join().unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
-    assert_eq!(json["object"], "list");
-    let models = json["data"].as_array().unwrap();
-    // Catalog details the configured OmniRoute pipeline:
-    // default model "gpt-5.6-sol" (+4 effort variants), fallback-1, fallback-2 = 7.
-    assert_eq!(models.len(), 1);
-    assert!(models.iter().any(|model| model["id"] == "gpt-5.6-sol"));
+    let gateway_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let gateway_port = gateway_listener.local_addr().unwrap().port();
+    let mut config = test_config();
+    config.target_port = upstream_port;
+    let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let gateway = thread::spawn(move || {
+        let (client, _) = gateway_listener.accept().unwrap();
+        crate::routes::route_request(client, &store).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", gateway_port)).unwrap();
+    write!(
+        client,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let response = read_response_head(&mut client).unwrap();
+    assert_eq!(response.status, 200);
+    let body = if is_chunked(&response.headers) {
+        crate::http::read_chunked_body(&mut client, response.buffered_body).unwrap()
+    } else {
+        let mut body = response.buffered_body;
+        let length = header_value(&response.headers, "content-length")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        while body.len() < length {
+            read_more(&mut client, &mut body).unwrap();
+        }
+        body.truncate(length);
+        body
+    };
+    assert_eq!(
+        body,
+        br#"{"object":"list","data":[{"id":"real-upstream-model"}]}"#
+    );
+
+    gateway.join().unwrap();
+    upstream.join().unwrap();
 }
 
 #[test]
-fn test_museai_models_catalog_response() {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let port = listener.local_addr().unwrap().port();
+fn main_model_catalog_routes_proxy_to_upstream() {
+    for path in ["/models", "/v1/models"] {
+        assert_main_catalog_proxies_to_upstream(path);
+    }
+}
 
-    let handle = thread::spawn(move || {
-        let config = test_config();
-        let (mut client, _) = listener.accept().unwrap();
-        crate::routes::handle_models_catalog(&mut client, "/muse-ai/v1/models", &config).unwrap();
+fn assert_muse_catalog_stays_local(path: &str) {
+    let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    upstream_listener.set_nonblocking(true).unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+    let gateway_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let gateway_port = gateway_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_port = upstream_port;
+    let store = crate::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let gateway = thread::spawn(move || {
+        let (client, _) = gateway_listener.accept().unwrap();
+        crate::routes::route_request(client, &store).unwrap();
     });
 
-    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    let head = read_response_head(&mut client).unwrap();
-    assert_eq!(head.status, 200);
-    let mut body = head.buffered_body;
-    let length = header_value(&head.headers, "content-length")
+    let mut client = TcpStream::connect(("127.0.0.1", gateway_port)).unwrap();
+    write!(
+        client,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let response = read_response_head(&mut client).unwrap();
+    assert_eq!(response.status, 200);
+    let mut body = response.buffered_body;
+    let length = header_value(&response.headers, "content-length")
         .unwrap()
         .parse::<usize>()
         .unwrap();
     while body.len() < length {
         read_more(&mut client, &mut body).unwrap();
     }
-    handle.join().unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
+    body.truncate(length);
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["object"], "list");
-    let models = json["data"].as_array().unwrap();
-    assert_eq!(models.len(), 1);
-    assert!(models.iter().any(|model| model["id"] == "muse"));
+    assert_eq!(json["data"][0]["id"], "muse");
+
+    gateway.join().unwrap();
+    assert!(matches!(
+        upstream_listener.accept(),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+    ));
+}
+
+#[test]
+fn muse_model_catalog_routes_stay_local() {
+    for path in ["/muse-ai/models", "/muse-ai/v1/models"] {
+        assert_muse_catalog_stays_local(path);
+    }
 }
 
 #[test]

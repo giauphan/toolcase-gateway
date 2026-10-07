@@ -48,7 +48,7 @@ fn main() -> io::Result<()> {
         io_timeout: (timeout_secs > 0).then(|| Duration::from_secs(timeout_secs)),
         retry_base_delay_ms: env_or_duration_ms("GW_RETRY_BASE_DELAY_MS", 100),
         max_retry_delay_ms: env_or_duration_ms("GW_MAX_RETRY_DELAY_MS", 5000),
-       default_model: env_or("GW_DEFAULT_MODEL", ""),
+        default_model: env_or("GW_DEFAULT_MODEL", ""),
         museai_base_url: env_or("GW_MUSEAI_BASE_URL", "https://muse.ai"),
         museai_cookie: env_or("GW_MUSEAI_COOKIE", ""),
         museai_ws_url: env_or("GW_MUSEAI_WS_URL", "wss://hatch.metaaivm.com/v1/noise"),
