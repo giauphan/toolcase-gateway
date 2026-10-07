@@ -10,6 +10,7 @@ pub(crate) fn is_main_models_catalog_route(path: &str) -> bool {
 }
 
 /// Checks if the path is for the Muse-AI models catalog
+/// Checks if the path is for the Muse-AI models catalog
 pub(crate) fn is_muse_models_catalog_route(path: &str) -> bool {
     matches!(path, "/muse-ai/models" | "/muse-ai/v1/models")
 }
@@ -25,46 +26,30 @@ pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
     client.flush()
 }
 
-pub(crate) fn handle_models_catalog(
-    client: &mut TcpStream,
-    clean_path: &str,
-    config: &Config,
-) -> io::Result<()> {
+/// Handles the models catalog for the main API
+fn handle_main_models_catalog(client: &mut TcpStream, config: &Config) -> io::Result<()> {
     let mut model_entries = Vec::new();
 
-    if clean_path.starts_with("/muse-ai") {
-        // Removed hardcoded Prism model entry
-    } else {
-        // Detail the configured OmniRoute pipeline: the default upstream model
-        // and every configured fallback.
-        let mut base_models: Vec<String> = Vec::new();
-        if !config.default_model.trim().is_empty() {
-            base_models.push(config.default_model.trim().to_string());
+    // Detail the configured OmniRoute pipeline: the default upstream model
+    // and every configured fallback.
+    let mut base_models: Vec<String> = Vec::new();
+    if !config.default_model.trim().is_empty() {
+        base_models.push(config.default_model.trim().to_string());
+    }
+    for fallback in &config.fallbacks {
+        if !fallback.trim().is_empty() {
+            base_models.push(fallback.trim().to_string());
         }
-        for fallback in &config.fallbacks {
-            if !fallback.trim().is_empty() {
-                base_models.push(fallback.trim().to_string());
-            }
-        }
-        base_models.sort();
-        base_models.dedup();
+    }
+    base_models.sort();
+    base_models.dedup();
 
-        let efforts = ["low", "medium", "high", "xhigh"];
-
-        for bm in &base_models {
-            model_entries.push(format!(
-                r#"{{"id":"{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
-                bm
-            ));
-            if bm.starts_with("gpt-5.6-") {
-                for effort in efforts {
-                    model_entries.push(format!(
-                        r#"{{"id":"{}-{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
-                        bm, effort
-                    ));
-                }
-            }
-        }
+    // Generate model entries for each base model
+    for bm in &base_models {
+        model_entries.push(format!(
+            r#"{{"id":"{}","object":"model","created":1700000000,"owned_by":"system"}}"#,
+            bm
+        ));
     }
 
     let body = format!(
@@ -72,16 +57,47 @@ pub(crate) fn handle_models_catalog(
         model_entries.join(",")
     );
     let response = format!(
-        "HTTP/1.1 200 OK\r\n\
-        Content-Type: application/json\r\n\
-        Access-Control-Allow-Origin: *\r\n\
-        Content-Length: {}\r\n\
-        Connection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
     client.write_all(response.as_bytes())?;
     client.flush()
+}
+
+/// Handles the models catalog for the Muse-AI service
+fn handle_muse_models_catalog(client: &mut TcpStream) -> io::Result<()> {
+    let mut model_entries = Vec::new();
+
+    // For now, return an empty list of models
+    // TODO: Implement proper Muse-AI models handling when ready
+    let body = format!(
+        r#"{{"object":"list","data":[{}]}}"#,
+        model_entries.join(",")
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    client.write_all(response.as_bytes())?;
+    client.flush()
+}
+
+pub(crate) fn handle_models_catalog(
+    client: &mut TcpStream,
+    clean_path: &str,
+    config: &Config,
+) -> io::Result<()> {
+    // Route to the appropriate handler based on the path pattern
+    if is_main_models_catalog_route(clean_path) {
+        handle_main_models_catalog(client, config)
+    } else if is_muse_models_catalog_route(clean_path) {
+        handle_muse_models_catalog(client)
+    } else {
+        // Fallback to main models catalog if no specific handler found
+        handle_main_models_catalog(client, config)
+    }
 }
 
 pub(crate) fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<()> {

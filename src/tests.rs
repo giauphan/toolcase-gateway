@@ -554,11 +554,7 @@ fn model_catalog_routes_have_exact_owners() {
     ] {
         assert!(crate::routes::is_models_catalog_route(path));
     }
-    for path in [
-        "/other/models",
-        "/other/v1/models",
-        "/muse-ai/other/models",
-    ] {
+    for path in ["/other/models", "/other/v1/models", "/muse-ai/other/models"] {
         assert!(!crate::routes::is_models_catalog_route(path));
     }
 }
