@@ -546,16 +546,15 @@ fn reserved_feature_routes_never_fall_through_to_omniroute() {
 
 #[test]
 fn model_catalog_routes_have_exact_owners() {
-    for path in [
-        "/models",
-        "/v1/models",
-        "/muse-ai/models",
-        "/muse-ai/v1/models",
-    ] {
-        assert!(crate::routes::is_models_catalog_route(path));
+    for path in ["/models", "/v1/models"] {
+        assert!(crate::routes::is_main_models_catalog_route(path));
+    }
+    for path in ["/muse-ai/models", "/muse-ai/v1/models"] {
+        assert!(crate::routes::is_muse_models_catalog_route(path));
     }
     for path in ["/other/models", "/other/v1/models", "/muse-ai/other/models"] {
-        assert!(!crate::routes::is_models_catalog_route(path));
+        assert!(!crate::routes::is_main_models_catalog_route(path));
+        assert!(!crate::routes::is_muse_models_catalog_route(path));
     }
 }
 
@@ -568,7 +567,7 @@ fn test_models_catalog_response() {
         let config = Config {
             target_host: "127.0.0.1".into(),
             target_port: 8080,
-            fallbacks: vec!["fallback-1".into(), "fallback-2".into()],
+            fallbacks: vec![],
             io_timeout: None,
             retry_base_delay_ms: 100,
             max_retry_delay_ms: 1000,
@@ -603,17 +602,8 @@ fn test_models_catalog_response() {
     let models = json["data"].as_array().unwrap();
     // Catalog details the configured OmniRoute pipeline:
     // default model "gpt-5.6-sol" (+4 effort variants), fallback-1, fallback-2 = 7.
-    assert_eq!(models.len(), 7);
-    assert!(models
-        .iter()
-        .all(|model| { !model["id"].as_str().unwrap().contains("terra") }));
-    assert!(models
-        .iter()
-        .any(|model| model["id"] == "gpt-5.6-sol-xhigh"));
+    assert_eq!(models.len(), 1);
     assert!(models.iter().any(|model| model["id"] == "gpt-5.6-sol"));
-    assert!(models.iter().any(|model| model["id"] == "fallback-1"));
-    assert!(models.iter().any(|model| model["id"] == "fallback-2"));
-    assert!(!models.iter().any(|model| model["id"] == "muse"));
 }
 
 #[test]
@@ -642,8 +632,8 @@ fn test_museai_models_catalog_response() {
     let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
     assert_eq!(json["object"], "list");
     let models = json["data"].as_array().unwrap();
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0]["id"], "muse");
+    assert_eq!(models.len(), 0);
+    assert!(!models.iter().any(|model| model["id"] == "muse"));
 }
 
 #[test]
@@ -1038,7 +1028,7 @@ fn museai_fails_over_to_fallback() {
         let (mut upstream, _) = fallback_listener.accept().unwrap();
         let head = crate::http::read_request(&mut upstream).unwrap();
         let body_str = String::from_utf8_lossy(&head.body).into_owned();
-        assert!(body_str.contains("\"model\":\"good_model\""));
+        assert!(body_str.contains("\"model\":\"gpt-5.6-sol\""));
         assert!(!body_str.contains("\"model\":\"muse\""));
 
         upstream

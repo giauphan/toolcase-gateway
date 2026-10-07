@@ -67,7 +67,7 @@ fn handle_main_models_catalog(client: &mut TcpStream, config: &Config) -> io::Re
 
 /// Handles the models catalog for the Muse-AI service
 fn handle_muse_models_catalog(client: &mut TcpStream) -> io::Result<()> {
-    let mut model_entries = Vec::new();
+    let model_entries: Vec<String> = Vec::new();
 
     // For now, return an empty list of models
     // TODO: Implement proper Muse-AI models handling when ready
