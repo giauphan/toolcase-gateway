@@ -545,12 +545,23 @@ fn reserved_feature_routes_never_fall_through_to_omniroute() {
 }
 
 #[test]
-fn model_catalog_routes_have_exact_owners() {
+fn model_catalog_routes_have_exact_platform_owners() {
     for path in ["/muse-ai/models", "/muse-ai/v1/models"] {
-        assert!(crate::routes::is_muse_models_catalog_route(path));
+        assert_eq!(
+            crate::routes::catalog_route(path),
+            Some(crate::routes::CatalogPlatform::Muse)
+        );
     }
-    for path in ["/other/models", "/other/v1/models", "/muse-ai/other/models"] {
-        assert!(!crate::routes::is_muse_models_catalog_route(path));
+    for path in [
+        "/models",
+        "/v1/models",
+        "/models/extra",
+        "/muse-ai/models/extra",
+        "/other/models",
+        "/other/v1/models",
+        "/muse-ai/other/models",
+    ] {
+        assert_eq!(crate::routes::catalog_route(path), None);
     }
 }
 

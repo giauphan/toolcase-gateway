@@ -4,9 +4,16 @@ use crate::omniroute::handle_omniroute_proxy;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
-/// Checks if the path is for the Muse-AI models catalog
-pub(crate) fn is_muse_models_catalog_route(path: &str) -> bool {
-    matches!(path, "/muse-ai/models" | "/muse-ai/v1/models")
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CatalogPlatform {
+    Muse,
+}
+
+pub(crate) fn catalog_route(path: &str) -> Option<CatalogPlatform> {
+    match path {
+        "/muse-ai/models" | "/muse-ai/v1/models" => Some(CatalogPlatform::Muse),
+        _ => None,
+    }
 }
 
 pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
@@ -32,11 +39,12 @@ fn handle_muse_models_catalog(client: &mut TcpStream) -> io::Result<()> {
     client.flush()
 }
 
-pub(crate) fn handle_models_catalog(client: &mut TcpStream, clean_path: &str) -> io::Result<()> {
-    if is_muse_models_catalog_route(clean_path) {
-        handle_muse_models_catalog(client)
-    } else {
-        write_error(client, 404, "Not Found", "unknown model catalog")
+pub(crate) fn handle_models_catalog(
+    client: &mut TcpStream,
+    platform: CatalogPlatform,
+) -> io::Result<()> {
+    match platform {
+        CatalogPlatform::Muse => handle_muse_models_catalog(client),
     }
 }
 
@@ -96,9 +104,9 @@ fn route_request_impl(
         .unwrap_or("")
         .trim_end_matches('/');
 
-    if is_muse_models_catalog_route(clean_path) {
+    if let Some(platform) = catalog_route(clean_path) {
         return if request.method.eq_ignore_ascii_case("get") {
-            handle_models_catalog(client, clean_path)
+            handle_models_catalog(client, platform)
         } else {
             write_error(
                 client,
