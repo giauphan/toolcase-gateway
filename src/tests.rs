@@ -632,8 +632,8 @@ fn test_museai_models_catalog_response() {
     let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
     assert_eq!(json["object"], "list");
     let models = json["data"].as_array().unwrap();
-    assert_eq!(models.len(), 0);
-    assert!(!models.iter().any(|model| model["id"] == "muse"));
+    assert_eq!(models.len(), 1);
+    assert!(models.iter().any(|model| model["id"] == "muse"));
 }
 
 #[test]

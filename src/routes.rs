@@ -10,7 +10,6 @@ pub(crate) fn is_main_models_catalog_route(path: &str) -> bool {
 }
 
 /// Checks if the path is for the Muse-AI models catalog
-/// Checks if the path is for the Muse-AI models catalog
 pub(crate) fn is_muse_models_catalog_route(path: &str) -> bool {
     matches!(path, "/muse-ai/models" | "/muse-ai/v1/models")
 }
@@ -67,14 +66,7 @@ fn handle_main_models_catalog(client: &mut TcpStream, config: &Config) -> io::Re
 
 /// Handles the models catalog for the Muse-AI service
 fn handle_muse_models_catalog(client: &mut TcpStream) -> io::Result<()> {
-    let model_entries: Vec<String> = Vec::new();
-
-    // For now, return an empty list of models
-    // TODO: Implement proper Muse-AI models handling when ready
-    let body = format!(
-        r#"{{"object":"list","data":[{}]}}"#,
-        model_entries.join(",")
-    );
+    let body = r#"{"object":"list","data":[{"id":"muse","object":"model","created":1700000000,"owned_by":"system"}]}"#;
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
@@ -156,8 +148,7 @@ fn route_request_impl(
         .unwrap_or("")
         .trim_end_matches('/');
 
-    if is_main_models_catalog_route(clean_path) {
-        // Updated to use new function name
+    if is_main_models_catalog_route(clean_path) || is_muse_models_catalog_route(clean_path) {
         return if request.method.eq_ignore_ascii_case("get") {
             handle_models_catalog(client, clean_path, config)
         } else {
