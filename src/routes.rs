@@ -4,11 +4,14 @@ use crate::omniroute::handle_omniroute_proxy;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
-pub(crate) fn is_models_catalog_route(path: &str) -> bool {
-    matches!(
-        path,
-        "/models" | "/v1/models" | "/muse-ai/models" | "/muse-ai/v1/models"
-    )
+/// Checks if the path is for the main API models catalog
+pub(crate) fn is_main_models_catalog_route(path: &str) -> bool {
+    matches!(path, "/models" | "/v1/models")
+}
+
+/// Checks if the path is for the Muse-AI models catalog
+pub(crate) fn is_muse_models_catalog_route(path: &str) -> bool {
+    matches!(path, "/muse-ai/models" | "/muse-ai/v1/models")
 }
 
 pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
@@ -30,10 +33,7 @@ pub(crate) fn handle_models_catalog(
     let mut model_entries = Vec::new();
 
     if clean_path.starts_with("/muse-ai") {
-        model_entries.push(
-            r#"{"id":"muse","object":"model","created":1700000000,"owned_by":"system"}"#
-                .to_string(),
-        );
+        // Removed hardcoded Prism model entry
     } else {
         // Detail the configured OmniRoute pipeline: the default upstream model
         // and every configured fallback.

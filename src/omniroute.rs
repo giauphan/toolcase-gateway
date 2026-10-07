@@ -360,12 +360,8 @@ pub(crate) fn candidate_models(
     let mut candidates = Vec::new();
     if let Ok(text) = std::str::from_utf8(body) {
         if let Some(model) = json_string_value(text, "model") {
-            let normalized = if model.eq_ignore_ascii_case("muse") {
-                // The local Muse provider is a routing key, not an upstream model.
-                "muse".to_string()
-            } else {
-                normalize_model_id(&model, default_model)
-            };
+            // Normalize model ID without Prism-specific handling
+            let normalized = normalize_model_id(&model, default_model);
             candidates.push(normalized);
         }
     }
