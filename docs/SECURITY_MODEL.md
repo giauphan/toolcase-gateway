@@ -98,6 +98,53 @@ Mitigation: zero third-party dependencies. `Cargo.lock` contains only this
 package. `#![forbid(unsafe_code)]` is enforced at both the crate level and in
 `Cargo.toml` lints, so no `unsafe` block can be introduced.
 
+### Muse live generation and capture handling
+
+Muse capture files are private, untrusted input. The opt-in capture tests send
+cookies only to the fixed `https://muse.ai` authentication/session endpoints,
+use a limited browser-header allowlist, disable HTTP redirects, and refresh the
+access token. Site cookies are not forwarded to the separate Noise VM host.
+Captured thread actions are not replayed: HTTP 2xx alone does not prove thread
+creation, and the observed action returned UI bootstrap data instead.
+
+Fresh chat requests use a new draft identity and validate the returned isolated
+thread acknowledgement. The gateway subscribes to that acknowledged session,
+parses bounded newline-delimited JSON across frame boundaries, and excludes
+user echoes and explicitly different sessions from assistant output. Pending
+approvals are matched to the requested session; an applicable Muse permission
+prompt returns `PermissionDenied`. The gateway never automatically approves it.
+An acknowledgement, partial text, timeout, or reset is not successful completion.
+
+After WebSocket connection, Noise reads and writes share a 180-second operation
+deadline. Live commands also require an external timeout to bound connection
+setup. Live failures suppress private response content and credential-bearing
+URLs; debug output reports allowlisted event categories rather than raw frames.
+
+Normal tests do not contact Muse. Run individual live tests explicitly:
+
+```sh
+# Read-only authentication/session verification:
+MUSE_LIVE_TEST=1 cargo test test_live_muse_auth_from_har_capture -- --nocapture
+# Generates a new video request and can consume credits:
+MUSE_LIVE_TEST=1 cargo test test_live_create_video_from_har_capture -- --nocapture
+# Read-only subscription to the session previously created by the generation test:
+MUSE_LIVE_RESUME_OWNED=1 cargo test test_live_muse_owned_session_events -- --nocapture
+```
+
+Use a command-runner timeout of 210 seconds for each command. Do not set the
+live opt-in globally when running the entire test suite. The generation test
+stores its acknowledged session in `target/muse-live-owned-session.json` and
+refuses to generate again while that file exists. The read-only follow-up does
+not create another task, approve permissions, or delete threads. Review any
+permission prompt in Muse itself. Archive the owned-session file privately
+before deliberately starting a different generation.
+
+On Unix, successful live video results are created exclusively with mode `0600`
+at `target/muse-video-result.json`; only that path is printed. These tests do not
+overwrite existing artifacts. Non-Unix platforms fail closed for private result
+storage until owner-only ACL support is implemented. A failed live test must not
+be reported as video generation verified.
+
 ## Non-goals
 
 - TLS termination. Run the gateway on loopback and let the upstream client handle

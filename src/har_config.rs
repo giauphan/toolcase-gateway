@@ -258,12 +258,32 @@ fn parse_rest_muse_entry(url: &str, entry: &serde_json::Value) -> Option<RestEnt
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
-    let ws_url = response_string("endpoint_url");
+    let selected_vm = response_body
+        .as_ref()
+        .and_then(|body| body.get("vms"))
+        .and_then(|value| value.as_array())
+        .and_then(|vms| {
+            vms.iter()
+                .find(|vm| vm.get("is_preferred").and_then(|value| value.as_bool()) == Some(true))
+                .or_else(|| vms.iter().find(|vm| vm.get("endpoint_url").is_some()))
+                .or_else(|| vms.first())
+        });
+    let selected_vm_string = |key: &str| {
+        selected_vm
+            .and_then(|vm| vm.get(key))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let ws_url = response_string("endpoint_url").or_else(|| selected_vm_string("endpoint_url"));
     let access_token = response_string("access_token")
         .or_else(|| response_string("auth_token"))
         .or_else(|| response_string("token"));
     let notary_token = response_string("notary_token");
-    let vm_id = response_string("vm_id");
+    let vm_id = response_string("vm_id")
+        .or_else(|| selected_vm_string("vm_id"))
+        .or_else(|| selected_vm_string("id"));
     let base_url = format!("{scheme}://{host}");
     Some(RestEntry {
         base_url,

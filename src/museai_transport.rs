@@ -3,7 +3,7 @@ use crate::museai_noise::MuseNoiseSession;
 use crate::museai_protocol::Header;
 use std::io;
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
@@ -14,6 +14,7 @@ const MAX_MUSE_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
 #[allow(dead_code)]
 pub(crate) struct MuseWebSocket {
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    deadline: Instant,
 }
 
 #[allow(dead_code)]
@@ -54,7 +55,8 @@ impl MuseWebSocket {
                     .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
             );
         }
-        let (mut socket, _) = connect(request).map_err(io::Error::other)?;
+        let (mut socket, _) =
+            connect(request).map_err(|_| io::Error::other("Muse WebSocket connection failed"))?;
         match socket.get_mut() {
             tungstenite::stream::MaybeTlsStream::Plain(tcp) => {
                 tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
@@ -65,10 +67,31 @@ impl MuseWebSocket {
             }
             _ => {}
         }
-        Ok(Self { socket })
+        Ok(Self {
+            socket,
+            deadline: Instant::now() + Duration::from_secs(180),
+        })
+    }
+
+    fn apply_deadline(&mut self) -> io::Result<()> {
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::TimedOut, "Muse operation deadline exceeded")
+            })?;
+        let tcp = match self.socket.get_mut() {
+            MaybeTlsStream::Plain(tcp) => tcp,
+            MaybeTlsStream::Rustls(tls) => tls.get_mut(),
+            _ => return Err(io::Error::other("Unsupported Muse TLS transport")),
+        };
+        tcp.set_read_timeout(Some(remaining))?;
+        tcp.set_write_timeout(Some(remaining))
     }
 
     pub(crate) fn send_binary(&mut self, message: &[u8]) -> io::Result<()> {
+        self.apply_deadline()?;
         println!(
             "[museai_transport] Sending binary frame (length: {})",
             message.len()
@@ -86,7 +109,14 @@ impl MuseWebSocket {
 
     pub(crate) fn read_binary(&mut self) -> io::Result<Vec<u8>> {
         loop {
-            match self.socket.read().map_err(io::Error::other)? {
+            self.apply_deadline()?;
+            match self.socket.read().map_err(|error| {
+                let kind = match error {
+                    tungstenite::Error::Io(error) => error.kind(),
+                    _ => io::ErrorKind::Other,
+                };
+                io::Error::new(kind, "Muse WebSocket read failed")
+            })? {
                 Message::Binary(message) if message.len() <= MAX_MUSE_WS_FRAME_BYTES => {
                     return Ok(message)
                 }
@@ -203,11 +233,23 @@ pub(crate) fn send_museai_request(
         is_json = true;
     }
 
+    let is_auth_check = url.ends_with("/api/auth/check") && method.eq_ignore_ascii_case("post");
+
     let response_res = if method.eq_ignore_ascii_case("get") {
         let mut b = ureq::get(url)
             .header("Accept", "application/json")
             .header("Origin", base)
-            .header("Referer", &format!("{base}/"));
+            .header("Referer", &format!("{base}/"))
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36")
+            .header("sec-ch-ua", r#""Chromium";v="154", "Brave";v="154", "Not A(Brand";v="99""#)
+            .header("sec-ch-ua-mobile", "?0")
+            .header("sec-ch-ua-platform", r#""Windows""#)
+            .header("sec-fetch-dest", "empty")
+            .header("sec-fetch-mode", "cors")
+            .header("sec-fetch-site", "same-origin")
+            .header("sec-gpc", "1")
+            .header("cache-control", "no-cache")
+            .header("pragma", "no-cache");
         if !config.museai_cookie.is_empty() {
             b = b.header("Cookie", &config.museai_cookie);
         }
@@ -216,9 +258,22 @@ pub(crate) fn send_museai_request(
         let mut b = ureq::post(url)
             .header("Accept", "application/json")
             .header("Origin", base)
-            .header("Referer", &format!("{base}/"));
+            .header("Referer", &format!("{base}/"))
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36")
+            .header("sec-ch-ua", r#""Chromium";v="154", "Brave";v="154", "Not A(Brand";v="99""#)
+            .header("sec-ch-ua-mobile", "?0")
+            .header("sec-ch-ua-platform", r#""Windows""#)
+            .header("sec-fetch-dest", "empty")
+            .header("sec-fetch-mode", "cors")
+            .header("sec-fetch-site", "same-origin")
+            .header("sec-gpc", "1")
+            .header("cache-control", "no-cache")
+            .header("pragma", "no-cache");
         if !config.museai_cookie.is_empty() {
             b = b.header("Cookie", &config.museai_cookie);
+        }
+        if is_auth_check {
+            b = b.header("next-action", "009276f6a217bd1a06954e5ac591c5cbd42c0afca5");
         }
         if is_json {
             b = b.header("Content-Type", "application/json");

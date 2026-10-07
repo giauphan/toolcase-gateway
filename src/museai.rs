@@ -938,27 +938,16 @@ pub(crate) fn request_museai_chat_completion(
     // on stream 2 carrying the generated video URL. Continue reading for up to
     // 300 seconds to collect it (as noted in live observations, ~300s).
     let mut video_url: Option<String> = None;
-    if active_stream_id == 2 {
+    {
         let deadline = std::time::Instant::now() + Duration::from_secs(300);
-        while std::time::Instant::now() < deadline {
+        while std::time::Instant::now() < deadline && video_url.is_none() {
             match socket.read_encrypted_service_frame(&mut session) {
-                Ok(frame) if frame.stream_id == 2 => {
-                    let (bytes, ended) = match frame.kind {
-                        ServiceFrameKind::Response { status, body, end_body, .. } => {
-                            debug_log(&format!("Subscribe response status={status}"));
-                            if !(200..300).contains(&status) {
-                                debug_log(&format!("Subscribe response non-2xx: {status}"));
-                                break;
-                            }
-                            (body, end_body)
-                        }
-                        ServiceFrameKind::BodyChunk { data, end_body } => (data, end_body),
-                        ServiceFrameKind::Reset { code, .. } => {
-                            debug_log(&format!("Subscribe reset code={code}"));
-                            break;
-                        }
+                Ok(frame) => {
+                    let bytes: Vec<u8> = match frame.kind {
+                        ServiceFrameKind::Response { body, .. } => body,
+                        ServiceFrameKind::BodyChunk { data, .. } => data,
+                        ServiceFrameKind::Reset { .. } => break,
                     };
-                    // Check if this frame contains a video URL in delta.presentation
                     if video_url.is_none() {
                         if let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) {
                             if record["event"] == "delta.presentation" {
@@ -966,17 +955,12 @@ pub(crate) fn request_museai_chat_completion(
                                     if !url.is_empty() {
                                         debug_log(&format!("Video URL found: {url}"));
                                         video_url = Some(url.to_string());
-                                        break;
                                     }
                                 }
                             }
                         }
                     }
-                    if ended {
-                        break;
-                    }
                 }
-                Ok(_) => continue,
                 Err(e) => {
                     debug_log(&format!("Video URL read error: {e}"));
                     break;
