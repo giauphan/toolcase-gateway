@@ -140,7 +140,8 @@ fn route_request_impl(
         .unwrap_or("")
         .trim_end_matches('/');
 
-    if is_models_catalog_route(clean_path) {
+    if is_main_models_catalog_route(clean_path) {
+        // Updated to use new function name
         return if request.method.eq_ignore_ascii_case("get") {
             handle_models_catalog(client, clean_path, config)
         } else {
