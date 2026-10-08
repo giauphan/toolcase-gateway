@@ -167,22 +167,14 @@ struct WsEntry {
 
 fn parse_ws_muse_entry(url: &str) -> Option<WsEntry> {
     let (scheme, rest) = split_scheme(url)?;
-    if !matches!(scheme, "wss" | "ws") {
-        // Not a WebSocket URL — let the REST-entry parser handle it.
+    if scheme != "wss" {
         return None;
     }
     let (authority_path, query) = match rest.find('?') {
         Some(i) => (&rest[..i], &rest[i + 1..]),
         None => (rest, ""),
     };
-    let host = authority_path.split('/').next().unwrap_or("");
-    let path = authority_path
-        .find('/')
-        .map(|i| &authority_path[i..])
-        .unwrap_or("");
-    // Heuristic: a Muse Noise WS endpoint lives on metaaivm.com (or any path containing /noise)
-    let is_muse = host.contains("metaaivm.com") || path.contains("/noise");
-    if !is_muse {
+    if !is_allowed_muse_ws_authority(authority_path) {
         return None;
     }
     let params = parse_query(query);
@@ -213,6 +205,28 @@ struct RestEntry {
     access_token: Option<String>,
     notary_token: Option<String>,
     vm_id: Option<String>,
+}
+
+fn is_allowed_muse_ws_authority(authority_path: &str) -> bool {
+    let host = authority_path
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("");
+    host == "metaaivm.com" || host.ends_with(".metaaivm.com")
+}
+
+fn is_allowed_muse_ws_url(url: &str) -> bool {
+    let Some((scheme, rest)) = split_scheme(url) else {
+        return false;
+    };
+    if scheme != "wss" {
+        return false;
+    }
+    let authority_path = rest.split('?').next().unwrap_or(rest);
+    is_allowed_muse_ws_authority(authority_path)
 }
 
 fn parse_rest_muse_entry(url: &str, entry: &serde_json::Value) -> Option<RestEntry> {
@@ -276,7 +290,9 @@ fn parse_rest_muse_entry(url: &str, entry: &serde_json::Value) -> Option<RestEnt
             .filter(|value| !value.is_empty())
             .map(str::to_string)
     };
-    let ws_url = response_string("endpoint_url").or_else(|| selected_vm_string("endpoint_url"));
+    let ws_url = response_string("endpoint_url")
+        .or_else(|| selected_vm_string("endpoint_url"))
+        .filter(|value| is_allowed_muse_ws_url(value));
     let access_token = response_string("access_token")
         .or_else(|| response_string("auth_token"))
         .or_else(|| response_string("token"));
@@ -362,6 +378,15 @@ fn sanitize_value(s: &str) -> String {
     s.chars().filter(|c| !c.is_ascii_control()).collect()
 }
 
+fn safe_ws_url(value: &str) -> String {
+    let base = value.split('?').next().unwrap_or(value);
+    if value.contains('?') {
+        format!("{base}?[credentials masked]")
+    } else {
+        base.to_string()
+    }
+}
+
 pub fn mask_secret(value: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
     if chars.len() <= 8 {
@@ -392,6 +417,53 @@ pub(crate) enum EnvReport {
     Written { path: String, keys: Vec<String> },
     SkippedNoFields,
     Failed { path: String, message: String },
+}
+
+pub(crate) fn write_current_config(client: &mut TcpStream, config: &Config) -> io::Result<()> {
+    let fields = vec![
+        (!config.museai_ws_url.is_empty()).then(|| AppliedField {
+            key: "ws_url",
+            value: safe_ws_url(&config.museai_ws_url),
+            masked: config.museai_ws_url.contains('?'),
+        }),
+        (!config.museai_base_url.is_empty()).then(|| AppliedField {
+            key: "base_url",
+            value: config.museai_base_url.clone(),
+            masked: false,
+        }),
+        (!config.museai_access_token.is_empty()).then(|| AppliedField {
+            key: "access_token",
+            value: mask_secret(&config.museai_access_token),
+            masked: true,
+        }),
+        (!config.museai_notary_token.is_empty()).then(|| AppliedField {
+            key: "notary_token",
+            value: mask_secret(&config.museai_notary_token),
+            masked: true,
+        }),
+        (!config.museai_vm_id.is_empty()).then(|| AppliedField {
+            key: "vm_id",
+            value: config.museai_vm_id.clone(),
+            masked: false,
+        }),
+        (!config.museai_cookie.is_empty()).then(|| AppliedField {
+            key: "cookie",
+            value: mask_secret(&config.museai_cookie),
+            masked: true,
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let body = serde_json::json!({"source": "current", "config": fields});
+    let body = serde_json::to_string(&body).unwrap_or_else(|_| "{}".to_string());
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )?;
+    client.flush()
 }
 
 pub(crate) fn apply_har_config(
@@ -440,8 +512,8 @@ pub(crate) fn apply_har_config(
     let applied = vec![
         extracted.ws_url.as_ref().map(|v| AppliedField {
             key: "ws_url",
-            value: v.clone(),
-            masked: false,
+            value: safe_ws_url(v),
+            masked: v.contains('?'),
         }),
         extracted.base_url.as_ref().map(|v| AppliedField {
             key: "base_url",
@@ -476,8 +548,8 @@ pub(crate) fn apply_har_config(
     let config = vec![
         (!effective.museai_ws_url.is_empty()).then(|| AppliedField {
             key: "ws_url",
-            value: effective.museai_ws_url.clone(),
-            masked: false,
+            value: safe_ws_url(&effective.museai_ws_url),
+            masked: effective.museai_ws_url.contains('?'),
         }),
         (!effective.museai_base_url.is_empty()).then(|| AppliedField {
             key: "base_url",

@@ -793,6 +793,23 @@ fn museai_noise_url_rejects_missing_auth_token() {
 }
 
 #[test]
+fn museai_noise_url_rejects_untrusted_configured_hosts() {
+    for ws_url in [
+        "wss://attacker.example/v1/noise",
+        "wss://attacker.example/metaaivm.com/v1/noise",
+        "wss://metaaivm.com.evil.example/v1/noise",
+        "https://hatch.metaaivm.com/v1/noise",
+    ] {
+        let mut config = test_config();
+        config.museai_ws_url = ws_url.into();
+        config.museai_access_token = "secret-token".into();
+
+        let error = crate::museai::build_museai_ws_url(&config, "request-id").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{ws_url}");
+    }
+}
+
+#[test]
 fn exhausted_models_report_final_model_and_status() {
     let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let client_port = client_listener.local_addr().unwrap().port();
@@ -1256,8 +1273,8 @@ fn test_museai_bootstrap_uses_auth_check_and_current_session_shape() {
         assert_eq!(request.path, "/api/session");
         let body = r#"{
             "vms": [
-                {"id":"fallback-id","endpoint_url":"wss://fallback.invalid/","is_preferred":false},
-                {"vm_id":"preferred-vm","endpoint_url":"wss://preferred.invalid/","is_preferred":true}
+                {"id":"fallback-id","endpoint_url":"wss://fallback.metaaivm.com/","is_preferred":false},
+                {"vm_id":"preferred-vm","endpoint_url":"wss://preferred.metaaivm.com/","is_preferred":true}
             ]
         }"#;
         write!(
@@ -1277,7 +1294,7 @@ fn test_museai_bootstrap_uses_auth_check_and_current_session_shape() {
     assert_eq!(bootstrapped.museai_access_token, "current-access");
     assert_eq!(bootstrapped.museai_notary_token, "preserved-notary");
     assert_eq!(bootstrapped.museai_vm_id, "preferred-vm");
-    assert_eq!(bootstrapped.museai_ws_url, "wss://preferred.invalid/");
+    assert_eq!(bootstrapped.museai_ws_url, "wss://preferred.metaaivm.com/");
     server_thread.join().unwrap();
 }
 
@@ -1387,6 +1404,18 @@ fn test_spawn_muse_thread_maps_404_to_not_found() {
 }
 
 #[test]
+fn test_muse_video_approval_required_maps_to_conflict() {
+    let err = std::io::Error::other(crate::museai::MuseApprovalRequired(
+        "Scoped Muse permission approval is pending".to_string(),
+    ));
+
+    assert!(err
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<crate::museai::MuseApprovalRequired>())
+        .is_some());
+}
+
+#[test]
 fn test_handle_create_video_maps_not_found_error_to_404() {
     // Verify the error mapping in handle_create_video:
     // io::ErrorKind::NotFound → HTTP 404 (not 502)
@@ -1445,9 +1474,9 @@ fn museai_stream_request_uses_fresh_draft_session_id() {
 
 #[test]
 fn test_create_video_duration_support() {
-    let source = include_str!("museai.rs");
-    assert!(source.contains(r#"Duration: {duration} seconds"#));
-    assert!(source.contains(r#""duration": duration"#));
+    let prompt = crate::museai::build_video_prompt("muse-video", "a fox skating", "16:9", 5);
+    assert!(prompt.contains("Requested duration: 5 seconds"));
+    assert!(prompt.contains("Requested aspect ratio: 16:9"));
 }
 
 #[test]
@@ -1707,6 +1736,48 @@ fn har_extraction_full_capture_extracts_all_fields() {
 }
 
 #[test]
+fn har_extraction_rejects_untrusted_rest_derived_websocket_urls() {
+    for endpoint_url in [
+        "wss://attacker.example/v1/noise",
+        "wss://metaaivm.com.evil.example/v1/noise",
+        "ws://hatch.metaaivm.com/v1/noise",
+        "https://hatch.metaaivm.com/v1/noise",
+    ] {
+        let har = serde_json::json!({
+            "log": {"entries": [{
+                "request": {"url": "https://muse.ai/api/session"},
+                "response": {"content": {"text": format!("{{\"vm_id\":\"vm-from-response\",\"endpoint_url\":\"{endpoint_url}\"}}")}}
+            }]}
+        });
+        let parsed =
+            crate::har_config::extract_muse_config_from_har(har.to_string().as_bytes()).unwrap();
+        assert_eq!(
+            parsed.vm_id.as_deref(),
+            Some("vm-from-response"),
+            "{endpoint_url}"
+        );
+        assert_eq!(parsed.ws_url, None, "{endpoint_url}");
+    }
+}
+
+#[test]
+fn har_extraction_rejects_untrusted_noise_websocket_hosts() {
+    for url in [
+        "wss://attacker.example/v1/noise?auth_token=secret",
+        "wss://metaaivm.com.evil.example/v1/noise?auth_token=secret",
+        "ws://hatch.metaaivm.com/v1/noise?auth_token=secret",
+    ] {
+        let har = serde_json::json!({"log": {"entries": [{"request": {"url": url}}]}});
+        let error = crate::har_config::extract_muse_config_from_har(har.to_string().as_bytes())
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::har_config::HarExtractError::NoMuseEntries
+        ));
+    }
+}
+
+#[test]
 fn har_extraction_vm_id_from_session_response() {
     let har = r#"{
       "log": {"entries": [
@@ -1737,13 +1808,16 @@ fn har_extraction_selects_preferred_vm_from_current_session_shape() {
       "log": {"entries": [
         {
           "request": {"url": "https://muse.ai/api/session"},
-          "response": {"content": {"text": "{\"vms\":[{\"id\":\"fallback-id\",\"endpoint_url\":\"wss://fallback.invalid/\",\"is_preferred\":false},{\"vm_id\":\"preferred-vm\",\"endpoint_url\":\"wss://preferred.invalid/\",\"is_preferred\":true}]}"}}
+          "response": {"content": {"text": "{\"vms\":[{\"id\":\"fallback-id\",\"endpoint_url\":\"wss://fallback.invalid/\",\"is_preferred\":false},{\"vm_id\":\"preferred-vm\",\"endpoint_url\":\"wss://preferred.metaaivm.com/\",\"is_preferred\":true}]}"}}
         }
       ]}
     }"#;
     let parsed = crate::har_config::extract_muse_config_from_har(har.as_bytes()).unwrap();
     assert_eq!(parsed.vm_id.as_deref(), Some("preferred-vm"));
-    assert_eq!(parsed.ws_url.as_deref(), Some("wss://preferred.invalid/"));
+    assert_eq!(
+        parsed.ws_url.as_deref(),
+        Some("wss://preferred.metaaivm.com/")
+    );
     assert!(parsed.notary_token.is_none());
 }
 
@@ -2176,6 +2250,50 @@ fn muse_config_page_served_on_get_only() {
     client.read_to_end(&mut body).unwrap();
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("id=\"har-file\""));
+    handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn muse_config_read_route_returns_masked_effective_config() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let dir = test_har_dir("read");
+    let mut config = test_config();
+    config.museai_vm_id = "test-vm".into();
+    config.museai_access_token = "secret-access-token-123".into();
+    let store = crate::config::ConfigStore::new(config, dir.join(".env"));
+    let store2 = store.clone();
+    let handle = thread::spawn(move || {
+        let (client, _) = listener.accept().unwrap();
+        crate::routes::route_request(client, &store2).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "GET /muse-ai/v1/config HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(
+        header_value(&head.headers, "content-type"),
+        Some("application/json")
+    );
+    let mut body = head.buffered_body;
+    client.read_to_end(&mut body).unwrap();
+    let body = String::from_utf8_lossy(&body).to_string();
+
+    assert!(body.contains("\"source\":\"current\""));
+    assert!(body.contains("\"key\":\"vm_id\""));
+    assert!(body.contains("\"value\":\"test-vm\""));
+    assert!(body.contains("\"masked\":true"));
+    assert!(body.contains("\"key\":\"access_token\""));
+    assert!(!body.contains("secret-access"));
     handle.join().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }

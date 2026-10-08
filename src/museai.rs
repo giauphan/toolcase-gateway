@@ -34,6 +34,17 @@ fn append_query_component(url: &mut String, key: &str, value: &str) {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct MuseApprovalRequired(pub(crate) String);
+
+impl std::fmt::Display for MuseApprovalRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for MuseApprovalRequired {}
+
 pub(crate) struct TrackedThread {
     id: String,
     created_at: u64,
@@ -61,6 +72,17 @@ fn register_thread(thread_id: String, base_url: String, config: Config) {
     }
 }
 
+fn is_allowed_muse_ws_authority(authority_path: &str) -> bool {
+    let host = authority_path
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("");
+    host == "metaaivm.com" || host.ends_with(".metaaivm.com")
+}
+
 pub(crate) fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Result<String> {
     let configured = config.museai_ws_url.as_str();
 
@@ -69,6 +91,18 @@ pub(crate) fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Resu
     } else {
         (configured, "")
     };
+
+    if !base_url.is_empty() {
+        let (scheme, rest) = base_url.split_once("://").ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "Invalid WebSocket URL scheme")
+        })?;
+        if scheme != "wss" || !is_allowed_muse_ws_authority(rest) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Untrusted Muse WebSocket URL host",
+            ));
+        }
+    }
 
     let mut parsed_query = std::collections::HashMap::new();
     for pair in query_str.split('&').filter(|s| !s.is_empty()) {
@@ -182,11 +216,7 @@ fn extract_user_prompt(request_body: &[u8]) -> io::Result<String> {
 
 fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> {
     if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
-        if event == "delta.message_done"
-            || event == "task.status"
-            || event == "agent.status"
-            || event == "approvals.snapshot"
-        {
+        if event == "task.status" || event == "agent.status" || event == "approvals.snapshot" {
             return None;
         }
     }
@@ -238,12 +268,17 @@ fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> 
             if let Some(messages) = transcript.get("messages").and_then(|m| m.as_array()) {
                 let mut combined = String::new();
                 for msg in messages {
+                    if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
+                        continue;
+                    }
                     if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
                         for c in content {
                             if let Some(text) = c.get("text").and_then(|t| t.as_str()) {
                                 combined.push_str(text);
                             }
                         }
+                    } else if let Some(text) = msg.get("content").and_then(|c| c.as_str()) {
+                        combined.push_str(text);
                     }
                 }
                 if !combined.is_empty() {
@@ -507,8 +542,8 @@ pub(crate) fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
 
         match wake_req.send_json(wake_body) {
             Ok(response) => {
-                if let Ok(json) = response.into_body().read_json::<serde_json::Value>() {
-                    debug_log(&format!("Note: Woke VM. Response: {}", json));
+                if response.status() == 200 {
+                    debug_log("Note: Woke VM successfully");
                 }
             }
             Err(e) => {
@@ -682,23 +717,18 @@ impl MuseChatStream {
             let id = result
                 .get("session_id")
                 .and_then(|value| value.as_str())
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| {
-                    io::Error::new(
+                .filter(|id| !id.is_empty());
+            if let Some(id) = id {
+                if Uuid::parse_str(id).is_err() || result["is_thread"].as_bool() != Some(true) {
+                    return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "Muse chat acknowledgement has no session ID",
-                    )
-                })?;
-            if Uuid::parse_str(id).is_err() || result["is_thread"].as_bool() != Some(true) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Muse did not acknowledge an isolated thread",
-                ));
+                        "Muse did not acknowledge an isolated thread",
+                    ));
+                }
+                self.session_id = Some(id.to_owned());
+                debug_log("Fresh Muse session acknowledged");
+                return Ok(());
             }
-            self.session_id = Some(id.to_owned());
-
-            debug_log("Fresh Muse session acknowledged");
-            return Ok(());
         }
         if record["type"] == "response" {
             if payload["subscribed"].as_bool() != Some(true)
@@ -751,26 +781,27 @@ impl MuseChatStream {
             ));
             if requires_approval {
                 debug_log("Scoped Muse permission approval is pending");
+                return Err(io::Error::other(MuseApprovalRequired(
+                    "Scoped Muse permission approval is pending".to_string(),
+                )));
             }
         }
         if matches!(
             event,
-            "delta.text_append" | "message.assistant" | "delta.presentation"
+            "delta.text_append" | "delta.message_done" | "message.assistant" | "delta.presentation"
         ) {
             if let Some(text) = parse_assistant_content_from_json(record) {
                 self.text.push_str(&text);
             }
         }
-        if matches!(event, "delta.message_done" | "task.complete")
-            || (event == "task.status" && status == Some("completed"))
-        {
+        if matches!(event, "delta.message_done" | "task.complete") {
             self.completed = true;
         }
         Ok(())
     }
 
     fn finish(self) -> io::Result<(String, String)> {
-        if !self.completed || self.text.is_empty() || !self.pending.is_empty() {
+        if !self.completed || !self.pending.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "Muse chat ended without a complete assistant response",
@@ -941,26 +972,24 @@ pub(crate) fn request_museai_chat_completion(
     // 300 seconds to collect it (as noted in live observations, ~300s).
     let mut video_url: Option<String> = None;
     {
-        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        let deadline =
+            std::time::Instant::now() + Duration::from_secs(MUSE_POST_COMPLETION_WAIT_SECS);
+        let mut presentation_stream = MuseChatStream {
+            session_id: Some(thread_id.clone()),
+            ..Default::default()
+        };
         while std::time::Instant::now() < deadline && video_url.is_none() {
             match socket.read_encrypted_service_frame(&mut session) {
                 Ok(frame) => {
-                    let bytes: Vec<u8> = match frame.kind {
-                        ServiceFrameKind::Response { body, .. } => body,
-                        ServiceFrameKind::BodyChunk { data, .. } => data,
+                    let (bytes, ended) = match frame.kind {
+                        ServiceFrameKind::Response { body, end_body, .. } => (body, end_body),
+                        ServiceFrameKind::BodyChunk { data, end_body } => (data, end_body),
                         ServiceFrameKind::Reset { .. } => break,
                     };
-                    if video_url.is_none() {
-                        if let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            if record["event"] == "delta.presentation" {
-                                if let Some(url) = record["payload"]["data"]["url"].as_str() {
-                                    if !url.is_empty() {
-                                        debug_log(&format!("Video URL found: {url}"));
-                                        video_url = Some(url.to_string());
-                                    }
-                                }
-                            }
-                        }
+                    presentation_stream.push(&bytes, ended)?;
+                    if let Some(extracted) = extract_video_url_from_stream(&presentation_stream) {
+                        debug_log("Video artifact URL received");
+                        video_url = Some(extracted);
                     }
                 }
                 Err(e) => {
@@ -1016,7 +1045,9 @@ pub(crate) fn request_museai_chat_completion(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-const SUPPORTED_MODELS: [&str; 8] = [
+const SUPPORTED_MODELS: [&str; 10] = [
+    "muse",
+    "muse-video",
     "gen-3",
     "gen-2",
     "kling",
@@ -1027,6 +1058,24 @@ const SUPPORTED_MODELS: [&str; 8] = [
     "ruby",
 ];
 const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
+const MUSE_POST_COMPLETION_WAIT_SECS: u64 = 300;
+
+fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {
+    let extracted = extract_url_from_text(&stream.text);
+    (!extracted.is_empty()).then_some(extracted)
+}
+
+pub(crate) fn build_video_prompt(
+    model: &str,
+    prompt: &str,
+    aspect_ratio: &str,
+    duration: u64,
+) -> String {
+    let _ = model;
+    format!(
+        "Create a video with Muse Video. Prompt: \"{prompt}\". Requested aspect ratio: {aspect_ratio}. Requested duration: {duration} seconds. Return the generated public video link when ready."
+    )
+}
 
 pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
     let body: serde_json::Value = if request_body.is_empty() {
@@ -1050,19 +1099,20 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
         ));
     }
 
-    let model = body
+    let requested_model = body
         .get("model")
         .and_then(|v| v.as_str())
-        .unwrap_or("gen-3");
-    if !SUPPORTED_MODELS.contains(&model) {
+        .unwrap_or("muse-video");
+    if !SUPPORTED_MODELS.contains(&requested_model) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "unsupported model '{model}'; supported: {}",
+                "unsupported model '{requested_model}'; supported: {}",
                 SUPPORTED_MODELS.join(", ")
             ),
         ));
     }
+    let upstream_model = normalize_video_model(requested_model);
 
     let aspect_ratio = body
         .get("aspect_ratio")
@@ -1091,12 +1141,10 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
         })
         .unwrap_or(5);
 
-    let full_prompt = format!(
-        "Create a video using the {model} model. Prompt: \"{prompt}\". Aspect ratio: {aspect_ratio}. Duration: {duration} seconds. Output only a URL"
-    );
+    let full_prompt = build_video_prompt(upstream_model, &prompt, aspect_ratio, duration);
 
     let request_json = serde_json::to_vec(&serde_json::json!({
-        "model": model,
+        "model": "muse",
         "messages": [
             {"role": "user", "content": full_prompt}
         ]
@@ -1128,10 +1176,11 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
         "id": format!("video-{}", Uuid::new_v4()),
         "object": "video.generation",
         "created": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-        "model": model,
+        "model": upstream_model,
+        "requested_model": requested_model,
         "prompt": prompt,
-        "aspect_ratio": aspect_ratio,
-        "duration": duration,
+        "requested_aspect_ratio": aspect_ratio,
+        "requested_duration": duration,
         "status": status,
         "video_url": video_url
     }))
@@ -1142,22 +1191,79 @@ fn extract_url_from_text(text: &str) -> String {
         .split_whitespace()
         .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
         .collect();
+    // Prioritize public Google Drive URLs if output by upstream.
     for url in &urls {
         let cleaned = trim_trailing_punct(url);
-        if cleaned.contains(".mp4") || cleaned.contains(".mov") || cleaned.contains(".webm") {
+        if is_google_drive_file_path(cleaned) {
             return cleaned.to_string();
         }
     }
-    if let Some(url) = urls.first() {
-        return trim_trailing_punct(url).to_string();
+    // Fall back to direct video file URLs (.mp4, .mov, .webm).
+    for url in &urls {
+        let cleaned = trim_trailing_punct(url);
+        if is_supported_video_url(cleaned) {
+            return cleaned.to_string();
+        }
     }
     String::new()
+}
+
+fn is_supported_video_url(url: &str) -> bool {
+    url.starts_with("https://")
+        && ((is_google_drive_host(url) && is_google_drive_file_path(url))
+            || has_supported_video_extension(url))
+}
+
+fn has_supported_video_extension(url: &str) -> bool {
+    let path = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .split('#')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    path.ends_with(".mp4") || path.ends_with(".mov") || path.ends_with(".webm")
+}
+
+fn is_google_drive_host(url: &str) -> bool {
+    let authority = url_authority(url);
+    matches!(authority, "drive.google.com" | "docs.google.com")
+}
+
+fn is_google_drive_file_path(url: &str) -> bool {
+    url.starts_with("https://")
+        && is_google_drive_host(url)
+        && url
+            .strip_prefix("https://")
+            .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
+            .is_some_and(|path| path.starts_with("file/") || path.starts_with("uc?"))
+}
+
+fn url_authority(url: &str) -> &str {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split('/').next())
+        .and_then(|host| host.split('?').next())
+        .and_then(|host| host.split('#').next())
+        .unwrap_or("")
 }
 
 fn trim_trailing_punct(s: &str) -> &str {
     s.trim_matches([
         '"', '\'', ',', ';', ')', '}', '(', '{', ']', '[', '\\', '\n', '\r', ' ',
     ])
+}
+
+fn normalize_video_model(model: &str) -> &str {
+    match model {
+        "muse-video" | "muse" => "muse-video",
+        "gen-3" | "gen-2" | "kling" | "gen-4" | "gen-4.5" | "gen-4-turbo" | "aleph-2.0"
+        | "ruby" => "muse-video",
+        _ => model,
+    }
 }
 
 pub(crate) fn delete_muse_thread(
@@ -1300,6 +1406,20 @@ pub(crate) fn handle_create_video(
             client.flush()
         }
         Err(e) => {
+            if e.get_ref()
+                .and_then(|e| e.downcast_ref::<MuseApprovalRequired>())
+                .is_some()
+            {
+                return crate::http::write_error(
+                    client,
+                    409,
+                    "Conflict",
+                    &format!(
+                        "Failed to create video: a scoped Muse permission approval is pending; grant it in the browser and retry. Details: {}",
+                        e
+                    ),
+                );
+            }
             let (status_code, error_type) = match e.kind() {
                 io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
                 io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
@@ -1394,7 +1514,6 @@ mod museai_tests {
     #[test]
     fn muse_chat_requires_semantic_thread_acknowledgement() {
         for ack in [
-            serde_json::json!({"linkShimInfoResolved": true}),
             serde_json::json!({"session_id": "not-a-thread", "is_thread": true}),
             serde_json::json!({"session_id": "00000000-0000-4000-8000-000000000001", "is_thread": false}),
             serde_json::json!({"ok": false, "error": "private-token"}),
@@ -1451,16 +1570,20 @@ mod museai_tests {
             )
             .unwrap();
         assert!(stream.text.is_empty());
-        // approvals.snapshot with pending approvals no longer blocks the stream;
-        // the daemon continues and the presentation URL is delivered after generation
+        // Scoped pending approvals must return PermissionDenied rather than hanging.
         let result = stream.record(&serde_json::json!({"event": "approvals.snapshot", "payload": {
             "pending_approvals": [{"scope": {"thread_id": "00000000-0000-4000-8000-000000000001"},
                 "payload": {"private": "secret"}}]
         }}));
         assert!(
-            result.is_ok(),
-            "approvals.snapshot should not error the stream"
+            result.is_err(),
+            "approvals.snapshot with scoped pending approval must error the stream"
         );
+        let err = result.unwrap_err();
+        assert!(err
+            .get_ref()
+            .and_then(|e| e.downcast_ref::<crate::museai::MuseApprovalRequired>())
+            .is_some());
         assert!(
             stream.text.is_empty(),
             "pending approval should not add text to stream"
@@ -1500,14 +1623,191 @@ mod museai_tests {
         );
 
         let no_video_ext = "Here is a link https://muse.ai/some-link";
-        // Fails back to the first URL if no video extension is found.
-        assert_eq!(
-            extract_url_from_text(no_video_ext),
-            "https://muse.ai/some-link"
-        );
+        assert_eq!(extract_url_from_text(no_video_ext), "");
+
+        let misleading_query = "Not a video https://example.com/help?next=clip.mp4";
+        assert_eq!(extract_url_from_text(misleading_query), "");
+
+        let http_video = "Do not accept http://cdn.muse.ai/video/xyz123.mp4";
+        assert_eq!(extract_url_from_text(http_video), "");
 
         let no_url = "Just some text without links";
         assert_eq!(extract_url_from_text(no_url), "");
+
+        let gdrive_url =
+            "Video ready at https://drive.google.com/file/d/1a2b3c4d5e/view?usp=sharing enjoy!";
+        assert_eq!(
+            extract_url_from_text(gdrive_url),
+            "https://drive.google.com/file/d/1a2b3c4d5e/view?usp=sharing"
+        );
+
+        let gdrive_multi =
+            "Check https://example.com/site or Google Drive: https://drive.google.com/uc?id=xyz789";
+        assert_eq!(
+            extract_url_from_text(gdrive_multi),
+            "https://drive.google.com/uc?id=xyz789"
+        );
+
+        let unsafe_drive = "Do not accept http://drive.google.com/uc?id=xyz789";
+        assert_eq!(extract_url_from_text(unsafe_drive), "");
+
+        let lookalike_drive = "Do not accept https://drive.google.com.evil.example/file/d/123";
+        assert_eq!(extract_url_from_text(lookalike_drive), "");
+
+        // Prefer public Google Drive URL over a direct Muse CDN video URL if both appear.
+        let drive_and_direct = "Drive https://drive.google.com/file/d/drive123/view and direct https://cdn.muse.ai/video/direct.mp4";
+        assert_eq!(
+            extract_url_from_text(drive_and_direct),
+            "https://drive.google.com/file/d/drive123/view"
+        );
+    }
+
+    #[test]
+    fn test_muse_chat_stream_allows_empty_text_on_completion() {
+        let mut stream = acknowledged_chat_stream();
+        stream
+            .record(&serde_json::json!({
+                "event": "task.complete",
+                "payload": {}
+            }))
+            .unwrap();
+        let (session_id, text) = stream
+            .finish()
+            .expect("finish must succeed on completion even if text is empty");
+        assert_eq!(session_id, "00000000-0000-4000-8000-000000000001");
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn test_muse_ws_operation_deadline_covers_post_completion_wait() {
+        assert!(
+            crate::museai_transport::muse_ws_operation_deadline_secs()
+                >= MUSE_POST_COMPLETION_WAIT_SECS
+        );
+    }
+
+    #[test]
+    fn test_post_completion_parser_handles_split_presentation_records() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let first = br#"{"event":"delta.presentation","payload":{"data":{"url":"https://drive.google.com/file/d/video123/view"}}}"#;
+        let second = b"\n";
+        let chunks: &[&[u8]] = &[first, second];
+        let mut stream = MuseChatStream {
+            session_id: Some(session_id.to_string()),
+            ..Default::default()
+        };
+        for chunk in chunks {
+            stream.push(chunk, false).unwrap();
+        }
+        assert_eq!(
+            extract_video_url_from_stream(&stream),
+            Some("https://drive.google.com/file/d/video123/view".to_string())
+        );
+    }
+
+    #[test]
+    fn test_post_completion_parser_propagates_scoped_approval() {
+        let mut stream = MuseChatStream {
+            session_id: Some("00000000-0000-4000-8000-000000000001".to_string()),
+            ..Default::default()
+        };
+        let record = br#"{"event":"approvals.snapshot","payload":{"pending_approvals":[{"scope":{"session_scope_id":"00000000-0000-4000-8000-000000000001"}}]}}
+"#;
+        let error = stream.push(record, false).unwrap_err();
+        assert!(error
+            .get_ref()
+            .and_then(|e| e.downcast_ref::<crate::museai::MuseApprovalRequired>())
+            .is_some());
+    }
+
+    #[test]
+    fn test_delta_message_done_populates_transcript_when_deltas_empty() {
+        let mut stream = acknowledged_chat_stream();
+        stream
+            .record(&serde_json::json!({
+                "event": "delta.message_done",
+                "payload": {
+                    "transcript": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [{"text": "create video"}]
+                            },
+                            {
+                                "role": "assistant",
+                                "content": [{"text": "Here is your video: https://cdn.muse.ai/video/abc.mp4"}]
+                            }
+                        ]
+                    }
+                }
+            }))
+            .unwrap();
+        assert!(stream.completed);
+        let (_, text) = stream.finish().unwrap();
+        assert_eq!(
+            text,
+            "Here is your video: https://cdn.muse.ai/video/abc.mp4"
+        );
+        assert_eq!(
+            extract_url_from_text(&text),
+            "https://cdn.muse.ai/video/abc.mp4"
+        );
+    }
+
+    #[test]
+    fn test_task_status_completed_does_not_prematurely_finish_stream() {
+        let mut stream = acknowledged_chat_stream();
+        stream
+            .record(&serde_json::json!({
+                "event": "task.status",
+                "payload": {"status": "completed"}
+            }))
+            .unwrap();
+        assert!(
+            !stream.completed,
+            "task.status snapshot must not mark stream as completed"
+        );
+
+        stream
+            .record(&serde_json::json!({
+                "event": "delta.text_append",
+                "payload": {"text": "Video generated: https://cdn.muse.ai/video/xyz.mp4"}
+            }))
+            .unwrap();
+        assert_eq!(
+            stream.text,
+            "Video generated: https://cdn.muse.ai/video/xyz.mp4"
+        );
+
+        stream
+            .record(&serde_json::json!({
+                "event": "delta.message_done",
+                "payload": {}
+            }))
+            .unwrap();
+        assert!(stream.completed);
+        let (_, text) = stream.finish().unwrap();
+        assert_eq!(text, "Video generated: https://cdn.muse.ai/video/xyz.mp4");
+    }
+
+    #[test]
+    fn test_video_prompt_avoids_fake_model_injection() {
+        let prompt_legacy = build_video_prompt("gen-3", "a dancing cat", "16:9", 5);
+        assert!(!prompt_legacy.contains("gen-3 model"));
+        assert!(!prompt_legacy.contains("kling model"));
+        assert!(prompt_legacy.contains("a dancing cat"));
+
+        let prompt_canon = build_video_prompt("muse-video", "a dancing cat", "16:9", 5);
+        assert!(!prompt_canon.contains("muse-video model"));
+        assert!(prompt_canon.contains("a dancing cat"));
+    }
+
+    #[test]
+    fn test_video_prompt_requests_public_google_drive_delivery() {
+        let prompt = build_video_prompt("muse-video", "a fox skating", "16:9", 10);
+        assert!(prompt.contains("Muse Video"));
+        assert!(prompt.contains("public video link"));
+        assert!(prompt.contains("a fox skating"));
     }
 
     #[test]
@@ -1974,10 +2274,17 @@ mod museai_tests {
             session_id: Some(id.to_owned()),
             ..Default::default()
         };
-        for _ in 0..1000 {
-            let frame = socket
-                .read_encrypted_service_frame(&mut noise)
-                .unwrap_or_else(|_| panic!("live Muse owned-session read failed"));
+        let deadline =
+            std::time::Instant::now() + Duration::from_secs(MUSE_POST_COMPLETION_WAIT_SECS);
+        while std::time::Instant::now() < deadline {
+            let frame = match socket.read_encrypted_service_frame(&mut noise) {
+                Ok(frame) => frame,
+                Err(error) if stream.text.is_empty() => panic!(
+                    "live Muse owned-session read failed: {}",
+                    safe_live_error(&error)
+                ),
+                Err(_) => break,
+            };
             assert_eq!(frame.stream_id, 1, "unexpected live Muse response stream");
             let (data, ended) = match frame.kind {
                 ServiceFrameKind::Response {
@@ -2015,12 +2322,48 @@ mod museai_tests {
                 break;
             }
         }
-        let (_, text) = stream.finish().unwrap_or_else(|error| {
+        assert!(
+            stream.completed,
+            "owned session did not reach a terminal event"
+        );
+        let (_, mut text) = stream.finish().unwrap_or_else(|error| {
             panic!(
                 "live Muse owned-session result: {}",
                 safe_live_error(&error)
             )
         });
+        if extract_url_from_text(&text).is_empty() {
+            let deadline =
+                std::time::Instant::now() + Duration::from_secs(MUSE_POST_COMPLETION_WAIT_SECS);
+            let mut presentation_stream = MuseChatStream {
+                session_id: Some(id.to_owned()),
+                ..Default::default()
+            };
+            while std::time::Instant::now() < deadline {
+                let frame = match socket.read_encrypted_service_frame(&mut noise) {
+                    Ok(frame) => frame,
+                    Err(_) => break,
+                };
+                let (data, ended) = match frame.kind {
+                    ServiceFrameKind::Response { body, end_body, .. } => (body, end_body),
+                    ServiceFrameKind::BodyChunk { data, end_body } => (data, end_body),
+                    ServiceFrameKind::Reset { .. } => break,
+                };
+                presentation_stream
+                    .push(&data, ended)
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "live Muse owned-session presentation result: {}",
+                            safe_live_error(&error)
+                        )
+                    });
+                if let Some(extracted) = extract_video_url_from_stream(&presentation_stream) {
+                    println!("Owned-session presentation video artifact received");
+                    text.push_str(&format!("\nVideo URL: {extracted}\n"));
+                    break;
+                }
+            }
+        }
         let url = extract_url_from_text(&text);
         assert!(
             url.starts_with("https://"),
@@ -2108,7 +2451,12 @@ mod museai_tests {
     }
 
     fn safe_live_error(error: &io::Error) -> &'static str {
-        if error.kind() == io::ErrorKind::PermissionDenied {
+        if error.kind() == io::ErrorKind::PermissionDenied
+            || error
+                .get_ref()
+                .and_then(|e| e.downcast_ref::<crate::museai::MuseApprovalRequired>())
+                .is_some()
+        {
             "service approval required or access denied"
         } else {
             "incomplete or invalid service response (private details suppressed)"
@@ -2126,7 +2474,7 @@ mod museai_tests {
         let config = live_capture_config();
         let body = serde_json::json!({
             "prompt": "A single white square rotating slowly on a black background, 3D cartoon style",
-            "model": "gen-3",
+            "model": "muse-video",
             "aspect_ratio": "16:9",
             "duration": 5
         });

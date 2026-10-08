@@ -91,9 +91,9 @@ The gateway provides a distinct wrapper endpoint for upstream video generation u
 
 ### Request Parameters (JSON)
 - `prompt` (string, **required**): The descriptive text describing the video to generate. Must not be empty.
-- `model` (string, optional): Target video model. Supported values: `gen-3` (default), `gen-2`, `kling`.
-- `aspect_ratio` (string, optional): Desired aspect ratio. Supported values: `16:9` (default), `9:16`, `1:1`, `5:4`, `4:3`.
-- `duration` (number or string, optional): Generation duration in seconds (e.g., `5`, `10`, `30`, `60`, `90`, `120`). Defaults to `5`.
+- `model` (string, optional): Target video model engine. Supported canonical value: `muse-video` (default). Compatibility aliases: `gen-3`, `gen-2`, `kling`, `gen-4`, `gen-4.5`, `gen-4-turbo`, `aleph-2.0`, `ruby` (mapped internally to Muse Video).
+- `aspect_ratio` (string, optional): Desired aspect ratio request. Supported values: `16:9` (default), `9:16`, `1:1`, `5:4`, `4:3`.
+- `duration` (number or string, optional): Desired generation duration in seconds (e.g., `5`, `10`, `30`, `60`). Defaults to `5`.
 
 ### Response Schema
 Success returns `200 OK` with the following structure:
@@ -102,24 +102,21 @@ Success returns `200 OK` with the following structure:
   "id": "video-a1b2c3d4...",
   "object": "video.generation",
   "created": 1700000000,
-  "model": "gen-3",
+  "model": "muse-video",
+  "requested_model": "gen-3",
   "prompt": "flying over glowing neon mountains at night",
-  "aspect_ratio": "16:9",
-  "duration": 5,
+  "requested_aspect_ratio": "16:9",
+  "requested_duration": 5,
   "status": "completed",
   "video_url": "https://cdn.muse.ai/video/xyz123.mp4"
 }
 ```
-*Note*: If the video generation requires more time and no immediate artifact URL is extracted during the response stream, `status` will be `pending` instead of `completed`, and `video_url` will be empty.
+*Note*: The gateway dispatches the request to Muse's built-in video capability and asks for a direct video URL or a public HTTPS Google Drive delivery link. Requested aspect ratio and duration are passed to Muse as generation targets. If no supported artifact URL is extracted during the bounded response stream, `status` will be `pending` and `video_url` will be empty.
 
 ### Error Handling
 - `400 Bad Request`: Missing prompt, empty string provided, or unsupported parameter given (e.g., passing `4:5` as `aspect_ratio` or `unsupported-model`).
 - `401 Unauthorized`: Muse.ai session (`cookie`, `access_token`, etc.) is missing or expired.
 - `502 Bad Gateway`: Upstream protocol connection over Noise WS failed or thread orchestration failed.
 
-### Architecture: Thread Isolation & Tracking
-For robust upstream generation, `create-video` leverages explicit thread isolation logic:
-1. **Thread Spin-Up**: The handler triggers a `POST /thread/new` HTTP request with `x-nextjs-data: true` to the upstream server and captures the generated thread ID.
-2. **Channel Subscription**: It uses the Noise WebSocket to subscribe to the isolated `thread:<thread_id>` instead of the default `main` channel.
-3. **Payload Construction**: The prompt, model, and aspect ratio are concatenated into standard LLM messaging sequences and dispatched securely to trigger generation without alerting or polluting the primary connection context.
-4. **URL Extraction**: Streaming text output from the assistant model is inspected continuously to securely resolve media URLs (`.mp4`, `.mov`, `.webm`).
+### Architecture: Muse Session & Artifact Tracking
+`create-video` opens a fresh Muse chat session over Noise WebSocket, sends the video request as text, then subscribes to that session for assistant and delayed presentation events. A `task.status` snapshot alone does not end the stream. The gateway extracts supported HTTPS media URLs from returned text or presentation data; it does not select a third-party provider or verify rendered video duration or aspect ratio.

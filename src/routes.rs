@@ -75,6 +75,19 @@ pub(crate) fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::R
             )
         };
     }
+    if clean_path == "/muse-ai/v1/config" {
+        return if request.method.eq_ignore_ascii_case("get") {
+            let snapshot = store.snapshot();
+            crate::har_config::write_current_config(&mut client, &snapshot)
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "Muse configuration route only supports GET",
+            )
+        };
+    }
     if clean_path == "/muse-ai/v1/config/har" {
         return if request.method.eq_ignore_ascii_case("post") {
             crate::har_config::apply_har_config(&mut client, &request.body, store)

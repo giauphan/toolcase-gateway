@@ -43,7 +43,7 @@ a{color:var(--accent)}
 <body>
 <div class="wrap">
   <h1>Muse Config — HAR import</h1>
-  <p class="sub">Upload a DevTools HAR capture (<b>muse-ai.har</b>) to extract and apply Muse WebSocket config. Values apply live and persist to <code>.env</code>.</p>
+  <p class="sub">Current effective Muse config loads automatically. Upload a DevTools HAR capture (<b>muse-ai.har</b>) to replace or complete it; values apply live and persist to <code>.env</code>.</p>
 
   <div class="card">
     <h2>1. HAR file</h2>
@@ -170,6 +170,27 @@ a{color:var(--accent)}
     }
     document.getElementById("report").classList.add("show");
   }
+
+  function fetchCurrentConfig(){
+    setStatus("Loading current config…","busy");
+    fetch("/muse-ai/v1/config")
+      .then(function(r){
+        return r.json().then(function(d){ return {ok:r.ok, data:d}; });
+      })
+      .then(function(res){
+        if(res.ok && res.data && res.data.config && res.data.config.length > 0){
+          renderReport(res.data);
+          setStatus("Loaded.","ok");
+        } else if(res.ok){
+          setStatus("No Muse config saved yet.","");
+        } else {
+          setStatus("Could not load current config.","err");
+        }
+      })
+      .catch(function(){setStatus("Could not load current config.","err");});
+  }
+
+  fetchCurrentConfig();
 
   btn.addEventListener("click",function(){
     clearBoxes();

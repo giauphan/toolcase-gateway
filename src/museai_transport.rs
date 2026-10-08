@@ -11,10 +11,17 @@ use tungstenite::{connect, Message, WebSocket};
 
 const MAX_MUSE_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
+pub(crate) const MUSE_WS_OPERATION_DEADLINE_SECS: u64 = 360;
+
 #[allow(dead_code)]
 pub(crate) struct MuseWebSocket {
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
     deadline: Instant,
+}
+
+#[allow(dead_code)]
+pub(crate) fn muse_ws_operation_deadline_secs() -> u64 {
+    MUSE_WS_OPERATION_DEADLINE_SECS
 }
 
 #[allow(dead_code)]
@@ -69,7 +76,7 @@ impl MuseWebSocket {
         }
         Ok(Self {
             socket,
-            deadline: Instant::now() + Duration::from_secs(180),
+            deadline: Instant::now() + Duration::from_secs(MUSE_WS_OPERATION_DEADLINE_SECS),
         })
     }
 

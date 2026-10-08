@@ -100,7 +100,7 @@ package. `#![forbid(unsafe_code)]` is enforced at both the crate level and in
 
 ### Muse live generation and capture handling
 
-Muse capture files are private, untrusted input. The opt-in capture tests send
+Muse capture files are private, untrusted input. The configuration UI at `/muse-config` and `GET /muse-ai/v1/config` return currently effective non-secret settings and masked indicators for secrets (`access_token`, `notary_token`, `cookie`). Unmasked credentials, raw HAR contents, or signed connection URLs are never exposed in read responses. Live HAR imports via `POST /muse-ai/v1/config/har` update memory immediately and persist unmasked pairs to disk with mode `0600`. The opt-in capture tests send
 cookies only to the fixed `https://muse.ai` authentication/session endpoints,
 use a limited browser-header allowlist, disable HTTP redirects, and refresh the
 access token. Site cookies are not forwarded to the separate Noise VM host.
@@ -112,13 +112,17 @@ thread acknowledgement. The gateway subscribes to that acknowledged session,
 parses bounded newline-delimited JSON across frame boundaries, and excludes
 user echoes and explicitly different sessions from assistant output. Pending
 approvals are matched to the requested session; an applicable Muse permission
-prompt returns `PermissionDenied`. The gateway never automatically approves it.
-An acknowledgement, partial text, timeout, or reset is not successful completion.
+prompt fails fast as HTTP 409 Conflict (`MuseApprovalRequired`) on
+`POST /muse-ai/v1/create-video`. The gateway never automatically approves it.
+An acknowledgement, partial text, timeout, or reset is not successful
+completion.
 
-After WebSocket connection, Noise reads and writes share a 180-second operation
-deadline. Live commands also require an external timeout to bound connection
-setup. Live failures suppress private response content and credential-bearing
-URLs; debug output reports allowlisted event categories rather than raw frames.
+After WebSocket connection, Noise reads and writes share a 360-second operation
+deadline, of which the final 300 seconds are reserved for a bounded wait for a
+delayed `delta.presentation` video artifact. Live commands also require an
+external timeout to bound connection setup. Live failures suppress private
+response content and credential-bearing URLs; debug output reports allowlisted
+event categories rather than raw frames.
 
 Normal tests do not contact Muse. Run individual live tests explicitly:
 
@@ -131,8 +135,9 @@ MUSE_LIVE_TEST=1 cargo test test_live_create_video_from_har_capture -- --nocaptu
 MUSE_LIVE_RESUME_OWNED=1 cargo test test_live_muse_owned_session_events -- --nocapture
 ```
 
-Use a command-runner timeout of 210 seconds for each command. Do not set the
-live opt-in globally when running the entire test suite. The generation test
+Use a command-runner timeout of 420 seconds for generation or owned-session
+commands and 210 seconds for authentication-only checks. Do not set the live
+opt-in globally when running the entire test suite. The generation test
 stores its acknowledged session in `target/muse-live-owned-session.json` and
 refuses to generate again while that file exists. The read-only follow-up does
 not create another task, approve permissions, or delete threads. Review any

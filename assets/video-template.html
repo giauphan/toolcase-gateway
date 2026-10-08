@@ -91,15 +91,9 @@ pre{margin:0}
     <div class="row">
       <label>Model</label>
       <div class="pill" id="model">
-        <span class="chip on" data-v="gen-3">gen-3</span>
-        <span class="chip" data-v="gen-2">gen-2</span>
-        <span class="chip" data-v="kling">kling</span>
-        <span class="chip" data-v="gen-4">Gen-4</span>
-        <span class="chip" data-v="gen-4.5">Gen-4.5</span>
-        <span class="chip" data-v="gen-4-turbo">Gen-4 Turbo</span>
-        <span class="chip" data-v="aleph-2.0">Aleph 2.0</span>
-        <span class="chip" data-v="ruby">Ruby</span>
+        <span class="chip on" data-v="muse-video">Muse Video</span>
       </div>
+      <p style="color:var(--muted);margin:6px 0 0;font-size:13px">Muse uses its built-in video model. Duration and aspect ratio are requests, not guaranteed output settings.</p>
     </div>
 
     <div class="row">
@@ -139,7 +133,7 @@ pre{margin:0}
 (function(){
   "use strict";
 
-  var state={aspect:"9:16",model:"gen-3"};
+  var state={aspect:"9:16",model:"muse-video"};
 
   function derived(id, topic){
     topic=topic.trim();

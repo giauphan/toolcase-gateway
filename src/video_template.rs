@@ -38,6 +38,13 @@ mod template_tests {
     }
 
     #[test]
+    fn muse_config_fetches_masked_current_config() {
+        let html = include_str!("../assets/muse-config.html");
+        assert!(html.contains("fetch(\"/muse-ai/v1/config\""));
+        assert!(html.contains("Loading current config"));
+    }
+
+    #[test]
     fn muse_config_explains_masking_and_safe_copying() {
         let html = include_str!("../assets/muse-config.html");
         assert!(html.contains("GW_MUSEAI_ACCESS_TOKEN"));
