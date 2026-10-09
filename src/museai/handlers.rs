@@ -37,8 +37,13 @@ pub(crate) fn handle_museai_v1(
                 401 => "Unauthorized",
                 403 => "Forbidden",
                 404 => "Not Found",
+                408 => "Request Timeout",
+                429 => "Too Many Requests",
                 500 => "Internal Server Error",
-                _ => "OK",
+                502 => "Bad Gateway",
+                503 => "Service Unavailable",
+                504 => "Gateway Timeout",
+                _ => "Internal Server Error",
             };
 
             let out = format!(

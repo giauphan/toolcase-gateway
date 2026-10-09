@@ -71,11 +71,7 @@ pub(crate) fn delete_muse_thread(
         }
         Err(e) => {
             debug_log(&format!("Note: Failed to clean up thread {thread_id}: {e}"));
-            if let ureq::Error::StatusCode(404) = e {
-                Ok(())
-            } else {
-                Ok(())
-            }
+            Ok(())
         }
     }
 }
