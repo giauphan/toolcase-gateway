@@ -4,6 +4,8 @@
 
 Decompose the monolithic `src/museai.rs` module into focused, cohesive modules to reduce maintenance friction, respect repository line-count maintainability guidelines, and improve isolation between distinct runtime flows while keeping external and internal behavior identical.
 
+(Status: Task 1-4 extraction boundaries complete; remaining work in Task 5.)
+
 ## Input
 
 - `src/museai.rs` — monolithic integration file covering WebSocket setup, config bootstrap, chat streams, video generation, thread lifecycle, and HTTP handlers.
