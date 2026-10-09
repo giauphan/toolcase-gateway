@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
 use crate::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
