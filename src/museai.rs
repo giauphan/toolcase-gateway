@@ -1,5 +1,8 @@
 use crate::config::Config;
 pub(crate) use crate::museai_chat::request_museai_chat_completion;
+pub(crate) use crate::museai_handlers::{
+    handle_create_video, handle_museai_thread_cleanup, handle_museai_v1, write_chat_completion,
+};
 #[cfg(test)]
 pub(crate) use crate::museai_chat::{
     build_muse_chat_request, explicit_video_refusal, extract_video_url_from_stream, MuseChatStream,
@@ -7,19 +10,22 @@ pub(crate) use crate::museai_chat::{
 };
 #[cfg(test)]
 pub(crate) use crate::museai_session::{bootstrap_museai_config, build_museai_ws_url};
-use crate::museai_transport::send_museai_request;
-use std::io::{self, Write};
-use std::net::TcpStream;
-use std::sync::{Mutex, OnceLock};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
+#[cfg(test)]
+pub(crate) use crate::museai_video::{
+    build_video_prompt, build_video_result, create_video, is_supported_video_url,
+    normalize_video_model,
+};
+pub(crate) use crate::museai_threads::{
+    delete_muse_thread, register_thread, start_cleanup_worker,
+};
+#[cfg(test)]
+pub(crate) use crate::museai_threads::{
+    cleanup_tracked_threads_once, tracked_threads,
+};
+#[cfg(test)]
+pub(crate) use crate::museai_video::extract_url_from_text;
 
-fn debug_log(msg: &str) {
-    if std::env::var("MUSEAI_DEBUG").is_ok() {
-        eprintln!("[museai] {msg}");
-    }
-}
+use std::io;
 
 #[derive(Debug)]
 pub(crate) struct MuseApprovalRequired(pub(crate) String);
@@ -31,33 +37,6 @@ impl std::fmt::Display for MuseApprovalRequired {
 }
 
 impl std::error::Error for MuseApprovalRequired {}
-
-pub(crate) struct TrackedThread {
-    id: String,
-    created_at: u64,
-    base_url: String,
-    config: Config,
-}
-
-fn tracked_threads() -> &'static Mutex<Vec<TrackedThread>> {
-    static TRACKED_THREADS: OnceLock<Mutex<Vec<TrackedThread>>> = OnceLock::new();
-    TRACKED_THREADS.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-pub(crate) fn register_thread(thread_id: String, base_url: String, config: Config) {
-    let created_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    if let Ok(mut threads) = tracked_threads().lock() {
-        threads.push(TrackedThread {
-            id: thread_id,
-            created_at,
-            base_url,
-            config,
-        });
-    }
-}
 
 // Retained for legacy HTTP-action fixture coverage, not the production chat flow.
 #[cfg(test)]
@@ -141,456 +120,6 @@ fn extract_new_thread_id(rsc_text: &str) -> String {
     String::new()
 }
 
-const SUPPORTED_MODELS: [&str; 10] = [
-    "muse",
-    "muse-video",
-    "gen-3",
-    "gen-2",
-    "kling",
-    "gen-4",
-    "gen-4.5",
-    "gen-4-turbo",
-    "aleph-2.0",
-    "ruby",
-];
-const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
-
-pub(crate) fn build_video_prompt(
-    model: &str,
-    prompt: &str,
-    aspect_ratio: &str,
-    duration: u64,
-) -> String {
-    let _ = (model, aspect_ratio, duration);
-    format!(
-        "Create a video from this description if video generation is available: \"{prompt}\". Return a public Google Drive link when ready."
-    )
-}
-
-pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
-    let body: serde_json::Value = if request_body.is_empty() {
-        serde_json::json!({})
-    } else {
-        serde_json::from_slice(request_body).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid JSON: {e}"))
-        })?
-    };
-
-    let prompt = body
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing 'prompt' field"))?
-        .trim()
-        .to_string();
-    if prompt.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "prompt must not be empty",
-        ));
-    }
-
-    let requested_model = body
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("muse-video");
-    if !SUPPORTED_MODELS.contains(&requested_model) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "unsupported model '{requested_model}'; supported: {}",
-                SUPPORTED_MODELS.join(", ")
-            ),
-        ));
-    }
-    let upstream_model = normalize_video_model(requested_model);
-
-    let aspect_ratio = body
-        .get("aspect_ratio")
-        .and_then(|v| v.as_str())
-        .unwrap_or("16:9");
-    if !SUPPORTED_ASPECT_RATIOS.contains(&aspect_ratio) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "unsupported aspect_ratio '{aspect_ratio}'; supported: {}",
-                SUPPORTED_ASPECT_RATIOS.join(", ")
-            ),
-        ));
-    }
-
-    let duration: u64 = body
-        .get("duration")
-        .and_then(|v| {
-            if let Some(n) = v.as_u64() {
-                Some(n)
-            } else if let Some(s) = v.as_str() {
-                s.trim_end_matches('s').parse::<u64>().ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or(5);
-
-    let full_prompt = build_video_prompt(upstream_model, &prompt, aspect_ratio, duration);
-
-    let request_json = serde_json::to_vec(&serde_json::json!({
-        "model": "muse",
-        "messages": [
-            {"role": "user", "content": full_prompt}
-        ]
-    }))
-    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-    let completion = request_museai_chat_completion(&request_json, config, true)?;
-
-    let completion_json: serde_json::Value = serde_json::from_str(&completion)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-    let content = completion_json
-        .get("choices")
-        .and_then(|c| c.as_array())
-        .and_then(|a| a.first())
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("");
-
-    build_video_result(
-        upstream_model,
-        requested_model,
-        &prompt,
-        aspect_ratio,
-        duration,
-        content,
-    )
-}
-
-fn build_video_result(
-    model: &str,
-    requested_model: &str,
-    prompt: &str,
-    aspect_ratio: &str,
-    duration: u64,
-    content: &str,
-) -> io::Result<serde_json::Value> {
-    let video_url = extract_url_from_text(content);
-    if video_url.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Muse video generation completed without a supported public HTTPS artifact",
-        ));
-    }
-
-    Ok(serde_json::json!({
-        "id": format!("video-{}", Uuid::new_v4()),
-        "object": "video.generation",
-        "created": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-        "model": model,
-        "requested_model": requested_model,
-        "prompt": prompt,
-        "requested_aspect_ratio": aspect_ratio,
-        "requested_duration": duration,
-        "status": "completed",
-        "video_url": video_url
-    }))
-}
-
-pub(crate) fn extract_url_from_text(text: &str) -> String {
-    let urls: Vec<&str> = text
-        .split_whitespace()
-        .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
-        .collect();
-    // Prioritize public Google Drive URLs if output by upstream.
-    for url in &urls {
-        let cleaned = trim_trailing_punct(url);
-        if is_google_drive_file_path(cleaned) {
-            return cleaned.to_string();
-        }
-    }
-    // Fall back to direct video file URLs (.mp4, .mov, .webm).
-    for url in &urls {
-        let cleaned = trim_trailing_punct(url);
-        if is_supported_video_url(cleaned) {
-            return cleaned.to_string();
-        }
-    }
-    String::new()
-}
-
-fn is_supported_video_url(url: &str) -> bool {
-    url.starts_with("https://")
-        && ((is_google_drive_host(url) && is_google_drive_file_path(url))
-            || has_supported_video_extension(url))
-}
-
-fn has_supported_video_extension(url: &str) -> bool {
-    let path = url
-        .strip_prefix("https://")
-        .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .split('#')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    path.ends_with(".mp4") || path.ends_with(".mov") || path.ends_with(".webm")
-}
-
-fn is_google_drive_host(url: &str) -> bool {
-    let authority = url_authority(url);
-    matches!(authority, "drive.google.com" | "docs.google.com")
-}
-
-fn is_google_drive_file_path(url: &str) -> bool {
-    url.starts_with("https://")
-        && is_google_drive_host(url)
-        && url
-            .strip_prefix("https://")
-            .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
-            .is_some_and(|path| path.starts_with("file/") || path.starts_with("uc?"))
-}
-
-fn url_authority(url: &str) -> &str {
-    url.strip_prefix("https://")
-        .and_then(|rest| rest.split('/').next())
-        .and_then(|host| host.split('?').next())
-        .and_then(|host| host.split('#').next())
-        .unwrap_or("")
-}
-
-fn trim_trailing_punct(s: &str) -> &str {
-    s.trim_matches([
-        '"', '\'', ',', ';', ')', '}', '(', '{', ']', '[', '\\', '\n', '\r', ' ',
-    ])
-}
-
-fn normalize_video_model(model: &str) -> &str {
-    match model {
-        "muse-video" | "muse" => "muse-video",
-        "gen-3" | "gen-2" | "kling" | "gen-4" | "gen-4.5" | "gen-4-turbo" | "aleph-2.0"
-        | "ruby" => "muse-video",
-        _ => model,
-    }
-}
-
-pub(crate) fn delete_muse_thread(
-    base_url: &str,
-    thread_id: &str,
-    config: &Config,
-) -> io::Result<()> {
-    if thread_id.is_empty() {
-        return Ok(());
-    }
-
-    let delete_thread_url = format!("{base_url}/api/thread/{thread_id}");
-    let mut req = ureq::delete(&delete_thread_url)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .header("Origin", base_url)
-        .header("Referer", &format!("{base_url}/"))
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
-        .header("sec-ch-ua", r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#)
-        .header("sec-ch-ua-mobile", "?0")
-        .header("sec-ch-ua-platform", r#""Windows""#)
-        .header("sec-fetch-dest", "empty")
-        .header("sec-fetch-mode", "cors")
-        .header("sec-fetch-site", "same-origin");
-
-    if !config.museai_cookie.is_empty() {
-        req = req.header("Cookie", &config.museai_cookie);
-    }
-
-    match req.call() {
-        Ok(_) => {
-            debug_log(&format!("Successfully cleaned up thread: {thread_id}"));
-            Ok(())
-        }
-        Err(e) => {
-            debug_log(&format!("Note: Failed to clean up thread {thread_id}: {e}"));
-            if let ureq::Error::StatusCode(404) = e {
-                Ok(())
-            } else {
-                Ok(())
-            }
-        }
-    }
-}
-
-pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Result<()> {
-    write!(
-        client,
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        response.len(),
-        response
-    )?;
-    client.flush()
-}
-
-pub(crate) fn cleanup_tracked_threads_once() -> usize {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let mut to_delete = Vec::new();
-    if let Ok(mut threads) = tracked_threads().lock() {
-        let mut i = 0;
-        while i < threads.len() {
-            if now >= threads[i].created_at + threads[i].config.museai_thread_retention_secs {
-                to_delete.push(threads.remove(i));
-            } else {
-                i += 1;
-            }
-        }
-    }
-
-    let deleted_count = to_delete.len();
-    for thread in to_delete {
-        let _ = delete_muse_thread(&thread.base_url, &thread.id, &thread.config);
-    }
-    deleted_count
-}
-
-pub(crate) fn start_cleanup_worker() {
-    thread::spawn(|| loop {
-        thread::sleep(Duration::from_secs(300));
-        cleanup_tracked_threads_once();
-    });
-}
-
-pub(crate) fn handle_museai_thread_cleanup(
-    client: &mut TcpStream,
-    thread_id: &str,
-    config: &Config,
-) -> io::Result<()> {
-    let base_url = if config.museai_base_url.is_empty() {
-        "https://muse.ai"
-    } else {
-        config.museai_base_url.as_str()
-    };
-
-    match delete_muse_thread(base_url, thread_id, config) {
-        Ok(()) => {
-            let body = serde_json::json!({
-                "object": "thread.cleanup",
-                "thread_id": thread_id,
-                "status": "deleted"
-            });
-            let response_str = serde_json::to_string(&body)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            write!(
-                client,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                response_str.len(),
-                response_str
-            )?;
-            client.flush()
-        }
-        Err(e) => crate::http::write_error(
-            client,
-            502,
-            "Bad Gateway",
-            &format!("Failed to clean up thread: {}", e),
-        ),
-    }
-}
-
-pub(crate) fn handle_create_video(
-    client: &mut TcpStream,
-    request_body: &[u8],
-    config: &Config,
-) -> io::Result<()> {
-    match create_video(request_body, config) {
-        Ok(result) => {
-            let response_str = serde_json::to_string(&result)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            write!(
-                client,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                response_str.len(),
-                response_str
-            )?;
-            client.flush()
-        }
-        Err(e) => {
-            if e.get_ref()
-                .and_then(|e| e.downcast_ref::<MuseApprovalRequired>())
-                .is_some()
-            {
-                return crate::http::write_error(
-                    client,
-                    409,
-                    "Conflict",
-                    &format!(
-                        "Failed to create video: a scoped Muse permission approval is pending; grant it in the browser and retry. Details: {}",
-                        e
-                    ),
-                );
-            }
-            let (status_code, error_type) = match e.kind() {
-                io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
-                io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
-                io::ErrorKind::NotFound => (404, "Not Found"),
-                io::ErrorKind::Unsupported => (501, "Not Implemented"),
-                io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
-                _ => (502, "Bad Gateway"),
-            };
-            crate::http::write_error(
-                client,
-                status_code,
-                error_type,
-                &format!("Failed to create video: {}", e),
-            )
-        }
-    }
-}
-
-pub(crate) fn handle_museai_v1(
-    client: &mut TcpStream,
-    request_body: &[u8],
-    config: &Config,
-) -> io::Result<()> {
-    let (url, method, body_json) =
-        crate::museai_business::build_museai_request(request_body, config)?;
-
-    let result = send_museai_request(&url, &method, &body_json, config);
-
-    match result {
-        Ok(upstream_resp) => {
-            let status_text = match upstream_resp.status {
-                200 => "OK",
-                201 => "Created",
-                204 => "No Content",
-                400 => "Bad Request",
-                401 => "Unauthorized",
-                403 => "Forbidden",
-                404 => "Not Found",
-                500 => "Internal Server Error",
-                _ => "OK",
-            };
-
-            let out = format!(
-                "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                upstream_resp.status,
-                status_text,
-                upstream_resp.content_type,
-                upstream_resp.body.len(),
-                upstream_resp.body
-            );
-            client.write_all(out.as_bytes())?;
-            client.flush()
-        }
-        Err(err) => crate::http::write_error(
-            client,
-            502,
-            "Bad Gateway",
-            &format!("Failed to proxy to Muse.ai: {}", err),
-        ),
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod museai_tests {
     use super::*;
@@ -598,6 +127,10 @@ pub(crate) mod museai_tests {
     use crate::museai_protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
     use crate::museai_session::apply_muse_session_metadata;
     use crate::museai_transport::MuseWebSocket;
+    use std::io::Write;
+    use std::net::TcpStream;
+    use std::time::Duration;
+    use uuid::Uuid;
 
     fn acknowledged_chat_stream() -> MuseChatStream {
         let mut stream = MuseChatStream::default();
@@ -1397,8 +930,6 @@ pub(crate) mod museai_tests {
             .filter(|token| !token.is_empty())
             .expect("live Muse authentication returned no token")
             .to_owned();
-        // Verified from the original capture and live first-party session flow;
-        // a later browser capture may omit this read-only request.
         let session = agent
             .get("https://muse.ai/api/session")
             .header("Cookie", &cookie)
