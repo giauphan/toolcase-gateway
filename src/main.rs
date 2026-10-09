@@ -14,6 +14,7 @@ mod museai;
 mod museai_business;
 mod museai_noise;
 mod museai_protocol;
+mod museai_session;
 mod museai_transport;
 mod omniroute;
 mod rewrite;

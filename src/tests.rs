@@ -1437,6 +1437,7 @@ fn test_handle_create_video_maps_not_found_error_to_404() {
             }
             std::io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
             std::io::ErrorKind::NotFound => (404, "Not Found"),
+            std::io::ErrorKind::Unsupported => (501, "Not Implemented"),
             std::io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
             _ => (502, "Bad Gateway"),
         };
@@ -1460,6 +1461,58 @@ fn test_handle_create_video_maps_not_found_error_to_404() {
 }
 
 #[test]
+fn test_create_video_unsupported_error_maps_to_501() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let handle = thread::spawn(move || {
+        let (mut client, _) = listener.accept().unwrap();
+        let err = std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Muse video generation completed without a supported public HTTPS artifact",
+        );
+        let (status_code, error_type) = match err.kind() {
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                (400, "Bad Request")
+            }
+            std::io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
+            std::io::ErrorKind::NotFound => (404, "Not Found"),
+            std::io::ErrorKind::Unsupported => (501, "Not Implemented"),
+            std::io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
+            _ => (502, "Bad Gateway"),
+        };
+        crate::http::write_error(
+            &mut client,
+            status_code,
+            error_type,
+            &format!("Failed to create video: {}", err),
+        )
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 501);
+
+    let mut body = head.buffered_body;
+    let length = header_value(&head.headers, "content-length")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    while body.len() < length {
+        read_more(&mut client, &mut body).unwrap();
+    }
+    handle.join().unwrap();
+
+    let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
+    let message = json["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("Not Implemented") || message.contains("supported public HTTPS artifact"),
+        "unexpected message: {message}"
+    );
+}
+
+#[test]
 fn museai_stream_request_uses_fresh_draft_session_id() {
     let first = crate::museai::build_muse_chat_request("sanitized test prompt");
     let second = crate::museai::build_muse_chat_request("sanitized test prompt");
@@ -1473,10 +1526,14 @@ fn museai_stream_request_uses_fresh_draft_session_id() {
 }
 
 #[test]
-fn test_create_video_duration_support() {
+fn test_create_video_prompt_is_capability_neutral() {
     let prompt = crate::museai::build_video_prompt("muse-video", "a fox skating", "16:9", 5);
-    assert!(prompt.contains("Requested duration: 5 seconds"));
-    assert!(prompt.contains("Requested aspect ratio: 16:9"));
+    assert!(prompt.contains("a fox skating"));
+    assert!(prompt.contains("video generation is available"));
+    assert!(prompt.contains("public Google Drive link"));
+    assert!(!prompt.contains("Muse Video"));
+    assert!(!prompt.contains("Requested duration"));
+    assert!(!prompt.contains("Requested aspect ratio"));
 }
 
 #[test]

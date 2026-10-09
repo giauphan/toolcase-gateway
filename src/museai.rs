@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::museai_noise::{MuseNoiseSession, NOISE_PATTERN_XX};
 use crate::museai_protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
+pub(crate) use crate::museai_session::{bootstrap_museai_config, build_museai_ws_url};
 use crate::museai_transport::{send_museai_request, MuseWebSocket};
 use std::io::{self, Write};
 use std::net::TcpStream;
@@ -12,25 +13,6 @@ use uuid::Uuid;
 fn debug_log(msg: &str) {
     if std::env::var("MUSEAI_DEBUG").is_ok() {
         eprintln!("[museai] {msg}");
-    }
-}
-
-fn append_query_component(url: &mut String, key: &str, value: &str) {
-    url.push(if url.contains('?') { '&' } else { '?' });
-    url.push_str(key);
-    url.push('=');
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                url.push(char::from(byte));
-            }
-            _ => {
-                const HEX: &[u8; 16] = b"0123456789ABCDEF";
-                url.push('%');
-                url.push(char::from(HEX[(byte >> 4) as usize]));
-                url.push(char::from(HEX[(byte & 0x0f) as usize]));
-            }
-        }
     }
 }
 
@@ -70,110 +52,6 @@ fn register_thread(thread_id: String, base_url: String, config: Config) {
             config,
         });
     }
-}
-
-fn is_allowed_muse_ws_authority(authority_path: &str) -> bool {
-    let host = authority_path
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("");
-    host == "metaaivm.com" || host.ends_with(".metaaivm.com")
-}
-
-pub(crate) fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Result<String> {
-    let configured = config.museai_ws_url.as_str();
-
-    let (base_url, query_str) = if let Some(idx) = configured.find('?') {
-        (&configured[..idx], &configured[idx + 1..])
-    } else {
-        (configured, "")
-    };
-
-    if !base_url.is_empty() {
-        let (scheme, rest) = base_url.split_once("://").ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "Invalid WebSocket URL scheme")
-        })?;
-        if scheme != "wss" || !is_allowed_muse_ws_authority(rest) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Untrusted Muse WebSocket URL host",
-            ));
-        }
-    }
-
-    let mut parsed_query = std::collections::HashMap::new();
-    for pair in query_str.split('&').filter(|s| !s.is_empty()) {
-        let mut parts = pair.splitn(2, '=');
-        if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
-            parsed_query.insert(k.to_string(), v.to_string());
-        }
-    }
-
-    let shared = base_url.contains("metaaivm.com") && !base_url.contains("hatch.metaaivm.com");
-    let mut url = if shared || base_url.is_empty() {
-        "wss://hatch.metaaivm.com/v1/noise".to_string()
-    } else {
-        base_url.to_string()
-    };
-    if url.ends_with('/') {
-        url.pop();
-    }
-    if !url.ends_with("/v1/noise") {
-        url.push_str("/v1/noise");
-    }
-
-    let vm_id = if let Some(v) = parsed_query.get("vm_id") {
-        v.to_string()
-    } else if !config.museai_vm_id.is_empty() && config.museai_vm_id != "." {
-        config.museai_vm_id.as_str().to_string()
-    } else if shared {
-        base_url
-            .split("://")
-            .nth(1)
-            .unwrap_or("")
-            .split('.')
-            .next()
-            .unwrap_or(".")
-            .to_string()
-    } else {
-        ".".to_string()
-    };
-
-    let auth_token = if let Some(v) = parsed_query.get("auth_token") {
-        v.to_string()
-    } else {
-        config.museai_access_token.clone()
-    };
-    if auth_token.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Muse.ai WebSocket configuration is missing auth_token",
-        ));
-    }
-
-    let notary_token = if let Some(v) = parsed_query.get("notary_token") {
-        v.to_string()
-    } else {
-        config.museai_notary_token.clone()
-    };
-
-    let app_id = parsed_query
-        .get("app_id")
-        .map(|s| s.as_str())
-        .unwrap_or("hatch-web");
-
-    append_query_component(&mut url, "vm_id", &vm_id);
-    append_query_component(&mut url, "auth_token", &auth_token);
-    if !notary_token.is_empty() {
-        append_query_component(&mut url, "notary_token", &notary_token);
-    }
-    append_query_component(&mut url, "app_id", app_id);
-    append_query_component(&mut url, "request_id", request_id);
-
-    Ok(url)
 }
 
 fn extract_user_prompt(request_body: &[u8]) -> io::Result<String> {
@@ -243,7 +121,12 @@ fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> 
 
     if let Some(payload) = val.get("payload") {
         if let Some(data) = payload.get("data") {
-            if let Some(url) = data.get("url").and_then(|u| u.as_str()) {
+            let url = data.get("url").and_then(|u| u.as_str()).or_else(|| {
+                data.get("data")
+                    .and_then(|nested| nested.get("url"))
+                    .and_then(|u| u.as_str())
+            });
+            if let Some(url) = url {
                 if !url.is_empty() {
                     return Some(format!("\nVideo URL: {url}\n"));
                 }
@@ -397,250 +280,6 @@ fn extract_new_thread_id(rsc_text: &str) -> String {
         return remaining[..end].to_string();
     }
     String::new()
-}
-
-fn apply_muse_session_metadata(config: &mut Config, session: &serde_json::Value) {
-    let selected_vm = session
-        .get("vms")
-        .and_then(|value| value.as_array())
-        .and_then(|vms| {
-            vms.iter()
-                .find(|vm| vm.get("is_preferred").and_then(|value| value.as_bool()) == Some(true))
-                .or_else(|| vms.iter().find(|vm| vm.get("endpoint_url").is_some()))
-                .or_else(|| vms.first())
-        });
-
-    if config.museai_vm_id.is_empty() {
-        config.museai_vm_id = session
-            .get("vm_id")
-            .and_then(|value| value.as_str())
-            .or_else(|| {
-                selected_vm.and_then(|vm| {
-                    vm.get("vm_id")
-                        .or_else(|| vm.get("id"))
-                        .and_then(|value| value.as_str())
-                })
-            })
-            .unwrap_or_default()
-            .to_owned();
-    }
-    if config.museai_ws_url.is_empty() {
-        config.museai_ws_url = session
-            .get("endpoint_url")
-            .and_then(|value| value.as_str())
-            .or_else(|| {
-                selected_vm.and_then(|vm| vm.get("endpoint_url").and_then(|value| value.as_str()))
-            })
-            .unwrap_or_default()
-            .to_owned();
-    }
-    if config.museai_access_token.is_empty() {
-        config.museai_access_token = session
-            .get("auth_token")
-            .or_else(|| session.get("access_token"))
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_owned();
-    }
-}
-
-pub(crate) fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
-    if !config.museai_access_token.is_empty() {
-        return Ok(config.clone());
-    }
-
-    let base_url = if config.museai_base_url.is_empty() {
-        "https://muse.ai"
-    } else {
-        config.museai_base_url.trim_end_matches('/')
-    };
-
-    let vm_address = if config.museai_ws_url.is_empty() {
-        "wss://hatch.metaaivm.com/v1/noise".to_string()
-    } else {
-        let configured = config.museai_ws_url.clone();
-        if let Some(idx) = configured.find('?') {
-            configured[..idx].to_string()
-        } else {
-            configured
-        }
-    };
-
-    let mut body = serde_json::Map::new();
-    body.insert(
-        "vmAddress".to_string(),
-        serde_json::Value::String(vm_address),
-    );
-
-    let shared_vm = if config.museai_ws_url.is_empty() {
-        if config.museai_base_url.contains("metaaivm.com")
-            && !config.museai_base_url.contains("hatch.metaaivm.com")
-        {
-            config
-                .museai_base_url
-                .split("://")
-                .nth(1)
-                .unwrap_or("")
-                .split('.')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        } else {
-            "".to_string()
-        }
-    } else {
-        if config.museai_ws_url.contains("metaaivm.com")
-            && !config.museai_ws_url.contains("hatch.metaaivm.com")
-        {
-            config
-                .museai_ws_url
-                .split("://")
-                .nth(1)
-                .unwrap_or("")
-                .split('.')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        } else {
-            "".to_string()
-        }
-    };
-
-    let active_vm_id = if !config.museai_vm_id.is_empty() && config.museai_vm_id != "." {
-        config.museai_vm_id.clone()
-    } else {
-        shared_vm
-    };
-
-    if !active_vm_id.is_empty() {
-        body.insert(
-            "vmName".to_string(),
-            serde_json::Value::String(active_vm_id.clone()),
-        );
-
-        let wake_body = serde_json::json!({
-            "vm_id": active_vm_id.clone(),
-            "retry_count": 0,
-            "connect_attempt_id": uuid::Uuid::new_v4().to_string()
-        });
-        let mut wake_req = ureq::post(&format!("{base_url}/api/hatch/vm/wake"))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .header("Origin", base_url)
-            .header("Referer", &format!("{base_url}/"))
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
-            .header("sec-ch-ua", r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#)
-            .header("sec-ch-ua-mobile", "?0")
-            .header("sec-ch-ua-platform", r#""Windows""#)
-            .header("sec-fetch-dest", "empty")
-            .header("sec-fetch-mode", "cors")
-            .header("sec-fetch-site", "same-origin");
-
-        if !config.museai_cookie.is_empty() {
-            wake_req = wake_req.header("Cookie", &config.museai_cookie);
-        }
-
-        match wake_req.send_json(wake_body) {
-            Ok(response) => {
-                if response.status() == 200 {
-                    debug_log("Note: Woke VM successfully");
-                }
-            }
-            Err(e) => {
-                debug_log(&format!("Note: Failed to wake VM. Error: {}", e));
-            }
-        }
-    }
-
-    let mut request = ureq::post(&format!("{base_url}/api/hatch/token"))
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .header("Origin", base_url)
-        .header("Referer", &format!("{base_url}/"))
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
-        .header("sec-ch-ua", r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#)
-        .header("sec-ch-ua-mobile", "?0")
-        .header("sec-ch-ua-platform", r#""Windows""#)
-        .header("sec-fetch-dest", "empty")
-        .header("sec-fetch-mode", "cors")
-        .header("sec-fetch-site", "same-origin");
-
-    if !config.museai_cookie.is_empty() {
-        request = request.header("Cookie", &config.museai_cookie);
-    }
-
-    let mut bootstrapped = config.clone();
-
-    let mut auth_request = ureq::post(&format!("{base_url}/api/auth/check"))
-        .header("Accept", "application/json")
-        .header("Origin", base_url)
-        .header("Referer", &format!("{base_url}/"))
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36")
-        .header("sec-ch-ua", r#""Chromium";v="154", "Brave";v="154", "Not A(Brand";v="99""#)
-        .header("sec-ch-ua-mobile", "?0")
-        .header("sec-ch-ua-platform", r#""Windows""#)
-        .header("sec-fetch-dest", "empty")
-        .header("sec-fetch-mode", "cors")
-        .header("sec-fetch-site", "same-origin")
-        .header("sec-gpc", "1")
-        .header("cache-control", "no-cache")
-        .header("pragma", "no-cache")
-        .header("next-action", "009276f6a217bd1a06954e5ac591c5cbd42c0afca5");
-    if !config.museai_cookie.is_empty() {
-        auth_request = auth_request.header("Cookie", &config.museai_cookie);
-    }
-    match auth_request.send_empty() {
-        Ok(response) => {
-            if let Ok(auth) = response.into_body().read_json::<serde_json::Value>() {
-                if let Some(token) = auth.get("access_token").and_then(|value| value.as_str()) {
-                    bootstrapped.museai_access_token = token.to_owned();
-                }
-            }
-        }
-        Err(error) => debug_log(&format!("Note: POST /api/auth/check failed: {error}")),
-    }
-
-    if bootstrapped.museai_access_token.is_empty() {
-        match request.send_json(serde_json::Value::Object(body)) {
-            Ok(response) => {
-                if let Ok(session) = response.into_body().read_json::<serde_json::Value>() {
-                    if let Some(token) = session.get("token").and_then(|v| v.as_str()) {
-                        bootstrapped.museai_access_token = token.to_owned();
-                    }
-                    if let Some(notary) = session.get("notary_token").and_then(|v| v.as_str()) {
-                        bootstrapped.museai_notary_token = notary.to_owned();
-                    }
-                }
-            }
-            Err(e) => {
-                debug_log(&format!("Note: POST /api/hatch/token failed: {e}"));
-            }
-        }
-    }
-
-    let mut request = ureq::get(&format!("{base_url}/api/session"))
-        .header("Accept", "application/json")
-        .header("Origin", base_url)
-        .header("Referer", &format!("{base_url}/"));
-    if !config.museai_cookie.is_empty() {
-        request = request.header("Cookie", &config.museai_cookie);
-    }
-    let response = request
-        .call()
-        .map_err(|error| io::Error::other(format!("Muse.ai session bootstrap failed: {error}")))?;
-    let session: serde_json::Value = response
-        .into_body()
-        .read_json()
-        .map_err(|error| io::Error::other(format!("Muse.ai session response invalid: {error}")))?;
-
-    apply_muse_session_metadata(&mut bootstrapped, &session);
-    if bootstrapped.museai_access_token.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "Muse.ai authentication did not return an access token",
-        ));
-    }
-    Ok(bootstrapped)
 }
 
 #[derive(Default)]
@@ -833,6 +472,7 @@ pub(crate) fn build_muse_chat_request(prompt: &str) -> serde_json::Value {
 pub(crate) fn request_museai_chat_completion(
     request_body: &[u8],
     config: &Config,
+    wait_for_video_artifact: bool,
 ) -> io::Result<String> {
     let prompt = extract_user_prompt(request_body)?;
     let config = bootstrap_museai_config(config)?;
@@ -970,7 +610,13 @@ pub(crate) fn request_museai_chat_completion(
     // After task.complete, the daemon may still push delta.presentation events
     // on stream 2 carrying the generated video URL. Continue reading for up to
     // 300 seconds to collect it (as noted in live observations, ~300s).
-    let mut video_url: Option<String> = None;
+    let mut video_url: Option<String> = {
+        let extracted = extract_url_from_text(&full_assistant_text);
+        (!extracted.is_empty()).then_some(extracted)
+    };
+    if wait_for_video_artifact
+        && video_url.is_none()
+        && !explicit_video_refusal(&full_assistant_text)
     {
         let deadline =
             std::time::Instant::now() + Duration::from_secs(MUSE_POST_COMPLETION_WAIT_SECS);
@@ -1065,15 +711,34 @@ fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {
     (!extracted.is_empty()).then_some(extracted)
 }
 
+fn explicit_video_refusal(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    let mentions_video_action = text.contains("video generation")
+        || text.contains("generate a video")
+        || text.contains("generate video")
+        || text.contains("generate videos")
+        || text.contains("create a video")
+        || text.contains("create video")
+        || text.contains("create videos");
+    let mentions_inability = text.contains("unavailable")
+        || text.contains("cannot")
+        || text.contains("can't")
+        || text.contains("not available")
+        || text.contains("unable")
+        || text.contains("don't have")
+        || text.contains("do not have");
+    mentions_video_action && mentions_inability
+}
+
 pub(crate) fn build_video_prompt(
     model: &str,
     prompt: &str,
     aspect_ratio: &str,
     duration: u64,
 ) -> String {
-    let _ = model;
+    let _ = (model, aspect_ratio, duration);
     format!(
-        "Create a video with Muse Video. Prompt: \"{prompt}\". Requested aspect ratio: {aspect_ratio}. Requested duration: {duration} seconds. Return the generated public video link when ready."
+        "Create a video from this description if video generation is available: \"{prompt}\". Return a public Google Drive link when ready."
     )
 }
 
@@ -1151,7 +816,7 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
     }))
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    let completion = request_museai_chat_completion(&request_json, config)?;
+    let completion = request_museai_chat_completion(&request_json, config, true)?;
 
     let completion_json: serde_json::Value = serde_json::from_str(&completion)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -1165,23 +830,42 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
         .and_then(|c| c.as_str())
         .unwrap_or("");
 
+    build_video_result(
+        upstream_model,
+        requested_model,
+        &prompt,
+        aspect_ratio,
+        duration,
+        content,
+    )
+}
+
+fn build_video_result(
+    model: &str,
+    requested_model: &str,
+    prompt: &str,
+    aspect_ratio: &str,
+    duration: u64,
+    content: &str,
+) -> io::Result<serde_json::Value> {
     let video_url = extract_url_from_text(content);
-    let status = if video_url.is_empty() {
-        "pending".to_string()
-    } else {
-        "completed".to_string()
-    };
+    if video_url.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Muse video generation completed without a supported public HTTPS artifact",
+        ));
+    }
 
     Ok(serde_json::json!({
         "id": format!("video-{}", Uuid::new_v4()),
         "object": "video.generation",
         "created": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-        "model": upstream_model,
+        "model": model,
         "requested_model": requested_model,
         "prompt": prompt,
         "requested_aspect_ratio": aspect_ratio,
         "requested_duration": duration,
-        "status": status,
+        "status": "completed",
         "video_url": video_url
     }))
 }
@@ -1424,6 +1108,7 @@ pub(crate) fn handle_create_video(
                 io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
                 io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
                 io::ErrorKind::NotFound => (404, "Not Found"),
+                io::ErrorKind::Unsupported => (501, "Not Implemented"),
                 io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
                 _ => (502, "Bad Gateway"),
             };
@@ -1484,6 +1169,7 @@ pub(crate) fn handle_museai_v1(
 #[cfg(test)]
 mod museai_tests {
     use super::*;
+    use crate::museai_session::apply_muse_session_metadata;
 
     fn acknowledged_chat_stream() -> MuseChatStream {
         let mut stream = MuseChatStream::default();
@@ -1755,6 +1441,62 @@ mod museai_tests {
     }
 
     #[test]
+    fn test_status_completed_before_presentation_without_text() {
+        let mut stream = acknowledged_chat_stream();
+        stream
+            .record(&serde_json::json!({
+                "event": "task.status",
+                "payload": {"status": "completed"}
+            }))
+            .unwrap();
+        assert!(!stream.completed);
+
+        stream
+            .record(&serde_json::json!({
+                "event": "delta.presentation",
+                "payload": {
+                    "data": {
+                        "data": {
+                            "url": "https://drive.google.com/file/d/123/view"
+                        }
+                    }
+                }
+            }))
+            .unwrap();
+        assert_eq!(
+            stream.text,
+            "\nVideo URL: https://drive.google.com/file/d/123/view\n"
+        );
+
+        stream
+            .record(&serde_json::json!({
+                "event": "delta.message_done",
+                "payload": {}
+            }))
+            .unwrap();
+        assert!(stream.completed);
+        let (_, text) = stream.finish().unwrap();
+        assert_eq!(
+            text,
+            "\nVideo URL: https://drive.google.com/file/d/123/view\n"
+        );
+        let result = build_video_result(
+            "muse-video",
+            "muse-video",
+            "a rotating square",
+            "16:9",
+            5,
+            &text,
+        )
+        .unwrap();
+        assert_eq!(result["status"], "completed");
+        assert_eq!(
+            result["video_url"],
+            "https://drive.google.com/file/d/123/view"
+        );
+    }
+
+    #[test]
     fn test_task_status_completed_does_not_prematurely_finish_stream() {
         let mut stream = acknowledged_chat_stream();
         stream
@@ -1791,23 +1533,68 @@ mod museai_tests {
     }
 
     #[test]
-    fn test_video_prompt_avoids_fake_model_injection() {
-        let prompt_legacy = build_video_prompt("gen-3", "a dancing cat", "16:9", 5);
-        assert!(!prompt_legacy.contains("gen-3 model"));
-        assert!(!prompt_legacy.contains("kling model"));
-        assert!(prompt_legacy.contains("a dancing cat"));
-
-        let prompt_canon = build_video_prompt("muse-video", "a dancing cat", "16:9", 5);
-        assert!(!prompt_canon.contains("muse-video model"));
-        assert!(prompt_canon.contains("a dancing cat"));
+    fn test_completed_video_response_requires_supported_artifact() {
+        let error = build_video_result(
+            "muse-video",
+            "muse-video",
+            "a dancing cat",
+            "16:9",
+            5,
+            "Video generation is unavailable in this environment.",
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
     }
 
     #[test]
-    fn test_video_prompt_requests_public_google_drive_delivery() {
-        let prompt = build_video_prompt("muse-video", "a fox skating", "16:9", 10);
-        assert!(prompt.contains("Muse Video"));
-        assert!(prompt.contains("public video link"));
-        assert!(prompt.contains("a fox skating"));
+    fn test_explicit_video_refusal_skips_delayed_artifact_wait() {
+        assert!(explicit_video_refusal(
+            "Video generation is unavailable in this environment."
+        ));
+        assert!(explicit_video_refusal("I cannot generate a video here."));
+        assert!(explicit_video_refusal("I am unable to generate videos."));
+        assert!(explicit_video_refusal("I cannot create videos right now."));
+        assert!(!explicit_video_refusal("Your video is being prepared."));
+    }
+
+    #[test]
+    fn test_normalize_video_model_aliases() {
+        assert_eq!(normalize_video_model("muse"), "muse-video");
+        assert_eq!(normalize_video_model("gen-3"), "muse-video");
+        assert_eq!(normalize_video_model("kling"), "muse-video");
+        assert_eq!(normalize_video_model("muse-video"), "muse-video");
+    }
+
+    #[test]
+    fn test_stream_explicit_cancellation_and_error_events() {
+        let mut stream_cancelled = acknowledged_chat_stream();
+        let err_cancelled = stream_cancelled
+            .record(&serde_json::json!({
+                "event": "task.status",
+                "payload": {"status": "cancelled"}
+            }))
+            .unwrap_err();
+        assert_eq!(err_cancelled.kind(), std::io::ErrorKind::Other);
+
+        let mut stream_error = acknowledged_chat_stream();
+        let err_error = stream_error
+            .record(&serde_json::json!({
+                "event": "task.status",
+                "payload": {"status": "error"}
+            }))
+            .unwrap_err();
+        assert_eq!(err_error.kind(), std::io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn test_video_prompt_avoids_unsupported_capability_claims() {
+        let prompt = build_video_prompt("gen-3", "a dancing cat", "16:9", 5);
+        for unsupported in ["gen-3", "kling", "Muse Video", "16:9", "5 seconds"] {
+            assert!(!prompt.contains(unsupported));
+        }
+        assert!(prompt.contains("a dancing cat"));
+        assert!(prompt.contains("if video generation is available"));
+        assert!(prompt.contains("public Google Drive link"));
     }
 
     #[test]
@@ -2366,8 +2153,8 @@ mod museai_tests {
         }
         let url = extract_url_from_text(&text);
         assert!(
-            url.starts_with("https://"),
-            "owned session completed without an HTTPS video result"
+            is_supported_video_url(&url),
+            "owned session completed without a supported HTTPS video result"
         );
         #[cfg(unix)]
         {
