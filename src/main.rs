@@ -12,6 +12,7 @@ mod har_config;
 mod http;
 mod museai;
 mod museai_business;
+mod museai_chat;
 mod museai_noise;
 mod museai_protocol;
 mod museai_session;

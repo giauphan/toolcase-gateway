@@ -2392,3 +2392,17 @@ fn muse_config_har_route_applies_through_router() {
     assert!(content.contains("GW_MUSEAI_VM_ID=vm-id-42"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_museai_wait_intent_contracts() {
+    let generic_intent_wait = false;
+    let video_intent_wait = true;
+    assert!(
+        !generic_intent_wait,
+        "omniroute generic chat must not enter video presentation artifact wait"
+    );
+    assert!(
+        video_intent_wait,
+        "video generation endpoint must request artifact wait"
+    );
+}

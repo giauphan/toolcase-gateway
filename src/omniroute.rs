@@ -125,7 +125,7 @@ pub(crate) fn handle_omniroute_proxy(
         );
 
         if model == "muse" {
-            match crate::museai::request_museai_chat_completion(&request.body, config) {
+            match crate::museai::request_museai_chat_completion(&request.body, config, false) {
                 Ok(response) => return crate::museai::write_chat_completion(client, &response),
                 Err(error) if !last => {
                     let delay = calculate_retry_delay(
