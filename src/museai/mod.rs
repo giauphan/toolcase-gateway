@@ -1,21 +1,31 @@
-pub(crate) use crate::museai_chat::request_museai_chat_completion;
+pub(crate) mod business;
+pub(crate) mod chat;
+pub(crate) mod handlers;
+pub(crate) mod noise;
+pub(crate) mod protocol;
+pub(crate) mod session;
+pub(crate) mod threads;
+pub(crate) mod transport;
+pub(crate) mod video;
+
+pub(crate) use chat::request_museai_chat_completion;
 #[cfg(test)]
-pub(crate) use crate::museai_chat::{
+pub(crate) use chat::{
     build_muse_chat_request, explicit_video_refusal, extract_video_url_from_stream, MuseChatStream,
     MUSE_POST_COMPLETION_WAIT_SECS,
 };
-pub(crate) use crate::museai_handlers::{
+pub(crate) use handlers::{
     handle_create_video, handle_museai_thread_cleanup, handle_museai_v1, write_chat_completion,
 };
 #[cfg(test)]
-pub(crate) use crate::museai_session::{bootstrap_museai_config, build_museai_ws_url};
+pub(crate) use session::{bootstrap_museai_config, build_museai_ws_url};
 #[cfg(test)]
-pub(crate) use crate::museai_threads::{cleanup_tracked_threads_once, tracked_threads};
-pub(crate) use crate::museai_threads::{delete_muse_thread, register_thread, start_cleanup_worker};
+pub(crate) use threads::{cleanup_tracked_threads_once, tracked_threads};
+pub(crate) use threads::{delete_muse_thread, register_thread, start_cleanup_worker};
 #[cfg(test)]
-pub(crate) use crate::museai_video::extract_url_from_text;
+pub(crate) use video::extract_url_from_text;
 #[cfg(test)]
-pub(crate) use crate::museai_video::{
+pub(crate) use video::{
     build_video_prompt, build_video_result, create_video, is_supported_video_url,
     normalize_video_model,
 };
@@ -121,10 +131,10 @@ fn extract_new_thread_id(rsc_text: &str) -> String {
 #[cfg(test)]
 pub(crate) mod museai_tests {
     use super::*;
-    use crate::museai_noise::{MuseNoiseSession, NOISE_PATTERN_XX};
-    use crate::museai_protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
-    use crate::museai_session::apply_muse_session_metadata;
-    use crate::museai_transport::MuseWebSocket;
+    use crate::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
+    use crate::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
+    use crate::museai::session::apply_muse_session_metadata;
+    use crate::museai::transport::MuseWebSocket;
     use std::io::Write;
     use std::net::TcpStream;
     use std::time::Duration;
@@ -326,7 +336,7 @@ pub(crate) mod museai_tests {
     #[test]
     fn test_muse_ws_operation_deadline_covers_post_completion_wait() {
         assert!(
-            crate::museai_transport::muse_ws_operation_deadline_secs()
+            crate::museai::transport::muse_ws_operation_deadline_secs()
                 >= MUSE_POST_COMPLETION_WAIT_SECS
         );
     }

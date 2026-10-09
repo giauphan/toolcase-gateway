@@ -136,7 +136,7 @@ impl MuseNoiseSession {
 
     pub fn perform_client_handshake(
         &mut self,
-        socket: &mut crate::museai_transport::MuseWebSocket,
+        socket: &mut crate::museai::transport::MuseWebSocket,
         notary_token: &str,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut message = vec![0u8; 65535];

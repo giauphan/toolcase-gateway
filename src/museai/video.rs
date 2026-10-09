@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::museai_chat::request_museai_chat_completion;
+use crate::museai::chat::request_museai_chat_completion;
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;

@@ -56,7 +56,7 @@ fn replaces_model_without_changing_other_fields() {
 
 #[test]
 fn noise_xx_round_trip_enters_transport_mode() {
-    use crate::museai_noise::{MuseNoiseSession, NOISE_PATTERN_XX};
+    use crate::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
     use snow::{params::NoiseParams, Builder};
 
     let params: NoiseParams = NOISE_PATTERN_XX.parse().unwrap();
@@ -103,7 +103,7 @@ fn noise_xx_round_trip_enters_transport_mode() {
 
 #[test]
 fn primary_noise_message_one_payload_has_freshness_nonce() {
-    let payload = crate::museai_noise::get_primary_message_one_payload();
+    let payload = crate::museai::noise::get_primary_message_one_payload();
     assert_eq!(payload.len(), 34);
     assert_eq!(payload[0], 0x0a);
     assert_eq!(payload[1], 0x20);
@@ -113,7 +113,7 @@ fn primary_noise_message_one_payload_has_freshness_nonce() {
 
 #[test]
 fn noise_ik_requires_responder_key_and_round_trips() {
-    use crate::museai_noise::{MuseNoiseSession, NOISE_PATTERN_IK};
+    use crate::museai::noise::{MuseNoiseSession, NOISE_PATTERN_IK};
     use snow::{params::NoiseParams, Builder};
 
     assert!(MuseNoiseSession::new_initiator(NOISE_PATTERN_IK, None).is_err());
@@ -153,7 +153,7 @@ fn noise_ik_requires_responder_key_and_round_trips() {
 
 #[test]
 fn muse_websocket_exchanges_binary_frames() {
-    use crate::museai_transport::MuseWebSocket;
+    use crate::museai::transport::MuseWebSocket;
     use tungstenite::Message;
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -405,7 +405,7 @@ fn test_museai_business_builds_configured_request() {
 
     let request = br#"{"target":"session","method":"GET"}"#;
     let (url, method, body) =
-        crate::museai_business::build_museai_request(request, &config).unwrap();
+        crate::museai::business::build_museai_request(request, &config).unwrap();
     assert_eq!(url, "http://127.0.0.1:32123/api/session");
     assert_eq!(method, "GET");
     assert!(body.is_empty());
@@ -432,7 +432,7 @@ fn test_museai_business_rejects_unsafe_target() {
     };
 
     let request = br#"{"target":"../session","method":"GET"}"#;
-    assert!(crate::museai_business::build_museai_request(request, &config).is_err());
+    assert!(crate::museai::business::build_museai_request(request, &config).is_err());
 }
 
 #[test]
@@ -722,7 +722,7 @@ fn test_cors_preflight_response() {
 
 #[test]
 fn museai_protobuf_encoding_decoding_round_trips() {
-    use crate::museai_protocol::*;
+    use crate::museai::protocol::*;
 
     let req = encode_application_request(
         "POST",
@@ -1301,7 +1301,7 @@ fn test_museai_bootstrap_uses_auth_check_and_current_session_shape() {
 #[test]
 fn test_confidential_vm_message_three_payload() {
     let notary_token = "test_notary_token_12345";
-    let payload = crate::museai_noise::encode_confidential_vm_message_three(notary_token);
+    let payload = crate::museai::noise::encode_confidential_vm_message_three(notary_token);
 
     // Tag 1 (notary_token) = 10
     assert_eq!(payload[0], 10);

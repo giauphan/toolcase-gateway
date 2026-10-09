@@ -126,19 +126,20 @@ tolerates whitespace after the colon. Non-UTF-8 bodies pass through untouched.
 
 ## Module map
 
-The MuseAI integration is organized into focused submodules following DDD principles:
+The MuseAI integration lives in `src/museai/` and is organized into focused submodules:
 
 | Module | Purpose | Lines |
 | --- | --- | --- |
-| `src/museai_session.rs` | WebSocket URL validation, session bootstrap/HTTP auth | ~375 |
-| `src/museai_chat.rs` | Chat completion streaming, MuseNoise frames, SSE parsing | ~600 |
-| `src/museai_video.rs` | Video prompt validation, artifact URL extraction, video creation | ~290 |
-| `src/museai_threads.rs` | Thread registry, background cleanup worker, thread deletion | ~150 |
-| `src/museai_transport.rs` | WebSocket transport layer, upstream HTTP proxy | ~340 |
-| `src/museai_protocol.rs` | Muse Noise Frame encoding, service frame serialization | ~386 |
-| `src/museai_noise.rs` | Noise protocol handshake, encryption/decryption | ~210 |
-| `src/museai_business.rs` | Business logic for building upstream requests | ~65 |
-| `src/museai.rs` | Facade re-exports + test module (thin wrapper) | ~160 non-test lines |
+| `src/museai/session.rs` | WebSocket URL validation, session bootstrap/HTTP auth | ~375 |
+| `src/museai/chat.rs` | Chat completion streaming, MuseNoise frames, SSE parsing | ~600 |
+| `src/museai/video.rs` | Video prompt validation, artifact URL extraction, video creation | ~290 |
+| `src/museai/threads.rs` | Thread registry, background cleanup worker, thread deletion | ~150 |
+| `src/museai/handlers.rs` | HTTP route handlers delegating to application services | ~150 |
+| `src/museai/transport.rs` | WebSocket transport layer, upstream HTTP proxy | ~340 |
+| `src/museai/protocol.rs` | Muse Noise Frame encoding, service frame serialization | ~386 |
+| `src/museai/noise.rs` | Noise protocol handshake, encryption/decryption | ~210 |
+| `src/museai/business.rs` | Business logic for building upstream requests | ~55 |
+| `src/museai/mod.rs` | Module facade, re-exports, and `#[cfg(test)]` test module | ~160 non-test lines |
 
 Routes dispatch to the facade:
 - `POST /muse-ai/v1` → `museai::handle_museai_v1` (proxy through `send_museai_request`)

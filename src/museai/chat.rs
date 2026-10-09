@@ -1,9 +1,9 @@
 use crate::config::Config;
+use crate::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
+use crate::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
+use crate::museai::session::{bootstrap_museai_config, build_museai_ws_url};
+use crate::museai::transport::MuseWebSocket;
 use crate::museai::MuseApprovalRequired;
-use crate::museai_noise::{MuseNoiseSession, NOISE_PATTERN_XX};
-use crate::museai_protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
-use crate::museai_session::{bootstrap_museai_config, build_museai_ws_url};
-use crate::museai_transport::MuseWebSocket;
 use std::io;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -348,7 +348,7 @@ pub(crate) fn build_muse_chat_request(prompt: &str) -> serde_json::Value {
 }
 
 pub(crate) fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {
-    let extracted = crate::museai_video::extract_url_from_text(&stream.text);
+    let extracted = crate::museai::video::extract_url_from_text(&stream.text);
     (!extracted.is_empty()).then_some(extracted)
 }
 
@@ -509,7 +509,7 @@ pub(crate) fn request_museai_chat_completion(
     let (thread_id, full_assistant_text) = stream.finish()?;
 
     let mut video_url: Option<String> = {
-        let extracted = crate::museai_video::extract_url_from_text(&full_assistant_text);
+        let extracted = crate::museai::video::extract_url_from_text(&full_assistant_text);
         (!extracted.is_empty()).then_some(extracted)
     };
     if wait_for_video_artifact
