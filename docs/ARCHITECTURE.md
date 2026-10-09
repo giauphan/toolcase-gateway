@@ -126,18 +126,28 @@ tolerates whitespace after the colon. Non-UTF-8 bodies pass through untouched.
 
 ## Module map
 
-Everything lives in `src/main.rs`.
+The MuseAI integration is organized into focused submodules following DDD principles:
 
-| Group | Functions |
-| --- | --- |
-| Startup | `main`, `env_or`, `Config` |
-| Connection | `serve`, `write_error` |
-| Request parsing | `read_request`, `parse_headers`, `read_until_headers`, `read_chunked_body`, `read_more` |
-| Validation | `is_token`, `is_request_target`, `is_chunked` |
-| Upstream | `open_upstream`, `read_response_head`, `request_candidates` |
-| Response | `stream_response`, `write_chunk`, `read_one_chunk` |
-| JSON | `replace_model`, `rewrite_tool_names`, `json_string_value`, `escape_json_string` |
-| Helpers | `header_value` |
+| Module | Purpose | Lines |
+| --- | --- | --- |
+| `src/museai_session.rs` | WebSocket URL validation, session bootstrap/HTTP auth | ~375 |
+| `src/museai_chat.rs` | Chat completion streaming, MuseNoise frames, SSE parsing | ~600 |
+| `src/museai_video.rs` | Video prompt validation, artifact URL extraction, video creation | ~290 |
+| `src/museai_threads.rs` | Thread registry, background cleanup worker, thread deletion | ~150 |
+| `src/museai_transport.rs` | WebSocket transport layer, upstream HTTP proxy | ~340 |
+| `src/museai_protocol.rs` | Muse Noise Frame encoding, service frame serialization | ~386 |
+| `src/museai_noise.rs` | Noise protocol handshake, encryption/decryption | ~210 |
+| `src/museai_business.rs` | Business logic for building upstream requests | ~65 |
+| `src/museai.rs` | Facade re-exports + test module (thin wrapper) | ~160 non-test lines |
+
+Routes dispatch to the facade:
+- `POST /muse-ai/v1` → `museai::handle_museai_v1` (proxy through `send_museai_request`)
+- `POST /muse-ai/v1/create-video` → `museai::handle_create_video`
+- `DELETE /muse-ai/v1/threads/<id>` → `museai::handle_museai_thread_cleanup`
+- `GET /muse-ai/v1/models` → `routes::handle_muse_models_catalog`
+
+External consumers import via `crate::museai::*` from `src/main.rs`, which re-exports all
+necessary types and functions from the subsystem modules.
 
 ## Design tradeoffs
 

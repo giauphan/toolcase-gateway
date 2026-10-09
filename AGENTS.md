@@ -60,3 +60,26 @@ Write the plan as requirements and outcomes, not as an implementation recipe:
 - New plans go in `plan/pending/`.
 - Move a plan out of `plan/pending/` (for example to `plan/done/`) only after
   the work is complete and verified.
+
+## Codebase architecture & maintainability rules
+
+### Modular separation & Domain-Driven Design (DDD)
+
+- **Domain/Business separation**: Keep core business logic separate from transport,
+  wire protocols, and HTTP serialization. Handlers and route endpoints must only
+  orchestrate and delegate to domain services.
+- **Single responsibility per module**: Group related concerns into focused modules:
+  - Transport / framing: `museai_transport.rs`, `museai_protocol.rs`, `museai_noise.rs`
+  - Domain & Application services: `museai_chat.rs`, `museai_video.rs`, `museai_business.rs`
+  - Session lifecycle & credentials: `museai_session.rs`
+  - Background work & thread maintenance: `museai_threads.rs`
+  - Public facade / re-exports: `src/museai.rs`
+- **File size ceiling**:
+  - Target: **under 450 lines** per module.
+  - Soft ceiling: **800 lines** maximum. If any source file exceeds 800 lines, it must
+    be decomposed into cohesive submodules.
+- **Backward compatibility**:
+  - Provide thin facade re-exports (`pub(crate) use`) from the primary module so that
+    crate routes, public entry points, and existing callers remain unchanged after a
+    refactor.
+

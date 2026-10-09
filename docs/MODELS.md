@@ -91,7 +91,7 @@ The gateway provides a distinct wrapper endpoint for upstream video generation u
 
 ### Request Parameters (JSON)
 - `prompt` (string, **required**): The descriptive text describing the video to generate. Must not be empty.
-- `model` (string, optional): Target video model engine. Supported canonical value: `muse-video` (default). Compatibility aliases: `gen-3`, `gen-2`, `kling`, `gen-4`, `gen-4.5`, `gen-4-turbo`, `aleph-2.0`, `ruby` (mapped internally to Muse Video).
+- `model` (string, optional): Target video model engine. Supported canonical value: `muse-video` (default). Compatibility aliases: `muse`, `gen-3`, `gen-2`, `kling`, `gen-4`, `gen-4.5`, `gen-4-turbo`, `aleph-2.0`, `ruby` (mapped internally to Muse Video).
 - `aspect_ratio` (string, optional): Desired aspect ratio request. Supported values: `16:9` (default), `9:16`, `1:1`, `5:4`, `4:3`.
 - `duration` (number or string, optional): Desired generation duration in seconds (e.g., `5`, `10`, `30`, `60`). Defaults to `5`.
 
@@ -111,11 +111,12 @@ Success returns `200 OK` with the following structure:
   "video_url": "https://cdn.muse.ai/video/xyz123.mp4"
 }
 ```
-*Note*: The gateway dispatches the request to Muse's built-in video capability and asks for a direct video URL or a public HTTPS Google Drive delivery link. Requested aspect ratio and duration are passed to Muse as generation targets. If no supported artifact URL is extracted during the bounded response stream, `status` will be `pending` and `video_url` will be empty.
+*Note*: The gateway asks Muse for video generation through chat using a capability-neutral instruction; it does not claim unsupported model, aspect-ratio, or duration controls. The instruction asks Muse to return a public Google Drive link, while the response validator accepts only supported public HTTPS Drive or direct video URLs. It returns a completed result only when an artifact URL is found. When Muse refuses or finishes without an artifact, the request fails instead of reporting a pending job that cannot be polled.
 
 ### Error Handling
 - `400 Bad Request`: Missing prompt, empty string provided, or unsupported parameter given (e.g., passing `4:5` as `aspect_ratio` or `unsupported-model`).
 - `401 Unauthorized`: Muse.ai session (`cookie`, `access_token`, etc.) is missing or expired.
+- `501 Not Implemented`: Video generation completed without a supported public HTTPS artifact (Muse returned empty).
 - `502 Bad Gateway`: Upstream protocol connection over Noise WS failed or thread orchestration failed.
 
 ### Architecture: Muse Session & Artifact Tracking
