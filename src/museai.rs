@@ -1,30 +1,28 @@
-use crate::config::Config;
 pub(crate) use crate::museai_chat::request_museai_chat_completion;
-pub(crate) use crate::museai_handlers::{
-    handle_create_video, handle_museai_thread_cleanup, handle_museai_v1, write_chat_completion,
-};
 #[cfg(test)]
 pub(crate) use crate::museai_chat::{
     build_muse_chat_request, explicit_video_refusal, extract_video_url_from_stream, MuseChatStream,
     MUSE_POST_COMPLETION_WAIT_SECS,
 };
+pub(crate) use crate::museai_handlers::{
+    handle_create_video, handle_museai_thread_cleanup, handle_museai_v1, write_chat_completion,
+};
 #[cfg(test)]
 pub(crate) use crate::museai_session::{bootstrap_museai_config, build_museai_ws_url};
+#[cfg(test)]
+pub(crate) use crate::museai_threads::{cleanup_tracked_threads_once, tracked_threads};
+pub(crate) use crate::museai_threads::{delete_muse_thread, register_thread, start_cleanup_worker};
+#[cfg(test)]
+pub(crate) use crate::museai_video::extract_url_from_text;
 #[cfg(test)]
 pub(crate) use crate::museai_video::{
     build_video_prompt, build_video_result, create_video, is_supported_video_url,
     normalize_video_model,
 };
-pub(crate) use crate::museai_threads::{
-    delete_muse_thread, register_thread, start_cleanup_worker,
-};
-#[cfg(test)]
-pub(crate) use crate::museai_threads::{
-    cleanup_tracked_threads_once, tracked_threads,
-};
-#[cfg(test)]
-pub(crate) use crate::museai_video::extract_url_from_text;
 
+#[cfg(test)]
+use crate::config::Config;
+#[cfg(test)]
 use std::io;
 
 #[derive(Debug)]
