@@ -9,7 +9,7 @@ use crate::rewrite::escape_json_string;
 const MAX_HAR_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct MuseHarConfig {
+pub struct MuseHarConfig {
     pub ws_url: Option<String>,
     pub base_url: Option<String>,
     pub access_token: Option<String>,
@@ -19,7 +19,7 @@ pub(crate) struct MuseHarConfig {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum HarExtractError {
+pub enum HarExtractError {
     InvalidJson(String),
     NotHar,
     NoMuseEntries,
@@ -398,7 +398,7 @@ pub fn mask_secret(value: &str) -> String {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ApplyReport {
+pub struct ApplyReport {
     pub applied: Vec<AppliedField>,
     pub config: Vec<AppliedField>,
     pub kept: Vec<&'static str>,
@@ -406,20 +406,20 @@ pub(crate) struct ApplyReport {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct AppliedField {
+pub struct AppliedField {
     pub key: &'static str,
     pub value: String,
     pub masked: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum EnvReport {
+pub enum EnvReport {
     Written { path: String, keys: Vec<String> },
     SkippedNoFields,
     Failed { path: String, message: String },
 }
 
-pub(crate) fn write_current_config(client: &mut TcpStream, config: &Config) -> io::Result<()> {
+pub fn write_current_config(client: &mut TcpStream, config: &Config) -> io::Result<()> {
     let fields = vec![
         (!config.museai_ws_url.is_empty()).then(|| AppliedField {
             key: "ws_url",
@@ -466,7 +466,7 @@ pub(crate) fn write_current_config(client: &mut TcpStream, config: &Config) -> i
     client.flush()
 }
 
-pub(crate) fn apply_har_config(
+pub fn apply_har_config(
     client: &mut TcpStream,
     body: &[u8],
     store: &ConfigStore,
@@ -631,7 +631,7 @@ pub(crate) fn apply_har_config(
     client.flush()
 }
 
-pub(crate) fn write_json_error(
+pub fn write_json_error(
     client: &mut TcpStream,
     status: u16,
     reason: &str,

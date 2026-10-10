@@ -2,17 +2,17 @@
 
 use std::io;
 
-pub(crate) const SERVICE_DAEMON: u64 = 0;
-pub(crate) const MAX_TRANSPORT_CHUNK_BYTES: usize = 65_489;
+pub const SERVICE_DAEMON: u64 = 0;
+pub const MAX_TRANSPORT_CHUNK_BYTES: usize = 65_489;
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct Header {
+pub struct Header {
     pub key: String,
     pub value: String,
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum ServiceFrameKind {
+pub enum ServiceFrameKind {
     Response {
         status: u32,
         headers: Vec<Header>,
@@ -30,20 +30,20 @@ pub(crate) enum ServiceFrameKind {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct ServiceFrame {
+pub struct ServiceFrame {
     pub stream_id: u64,
     pub kind: ServiceFrameKind,
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct NoiseTransportFrame {
+pub struct NoiseTransportFrame {
     pub chunk_id: i64,
     pub chunk_index: u32,
     pub total_chunks: u32,
     pub payload: Vec<u8>,
 }
 
-pub(crate) fn encode_application_request(
+pub fn encode_application_request(
     verb: &str,
     path: &str,
     headers: &[Header],
@@ -66,7 +66,7 @@ pub(crate) fn encode_application_request(
     output
 }
 
-pub(crate) fn encode_body_chunk(data: &[u8], end_body: bool) -> Vec<u8> {
+pub fn encode_body_chunk(data: &[u8], end_body: bool) -> Vec<u8> {
     let mut output = Vec::new();
     if !data.is_empty() {
         write_bytes_field(1, data, &mut output);
@@ -77,21 +77,21 @@ pub(crate) fn encode_body_chunk(data: &[u8], end_body: bool) -> Vec<u8> {
     output
 }
 
-pub(crate) fn encode_service_frame_body_chunk(stream_id: u64, chunk: &[u8]) -> Vec<u8> {
+pub fn encode_service_frame_body_chunk(stream_id: u64, chunk: &[u8]) -> Vec<u8> {
     let mut output = Vec::new();
     write_varint_field(1, stream_id, &mut output);
     write_bytes_field(4, chunk, &mut output);
     output
 }
 
-pub(crate) fn encode_service_frame_request(stream_id: u64, request: &[u8]) -> Vec<u8> {
+pub fn encode_service_frame_request(stream_id: u64, request: &[u8]) -> Vec<u8> {
     let mut output = Vec::new();
     write_varint_field(1, stream_id, &mut output);
     write_bytes_field(2, request, &mut output);
     output
 }
 
-pub(crate) fn encode_service_request(service: u64, service_frame: &[u8]) -> Vec<u8> {
+pub fn encode_service_request(service: u64, service_frame: &[u8]) -> Vec<u8> {
     let mut output = Vec::new();
     if service != SERVICE_DAEMON {
         write_varint_field(1, service, &mut output);
@@ -100,7 +100,7 @@ pub(crate) fn encode_service_request(service: u64, service_frame: &[u8]) -> Vec<
     output
 }
 
-pub(crate) fn encode_transport_frames(chunk_id: i64, payload: &[u8]) -> io::Result<Vec<Vec<u8>>> {
+pub fn encode_transport_frames(chunk_id: i64, payload: &[u8]) -> io::Result<Vec<Vec<u8>>> {
     let chunks = payload
         .chunks(MAX_TRANSPORT_CHUNK_BYTES)
         .collect::<Vec<_>>();
@@ -126,7 +126,7 @@ pub(crate) fn encode_transport_frames(chunk_id: i64, payload: &[u8]) -> io::Resu
     Ok(frames)
 }
 
-pub(crate) fn decode_transport_frame(input: &[u8]) -> io::Result<NoiseTransportFrame> {
+pub fn decode_transport_frame(input: &[u8]) -> io::Result<NoiseTransportFrame> {
     let mut reader = ProtoReader::new(input);
     let mut frame = NoiseTransportFrame {
         chunk_id: 0,
@@ -149,7 +149,7 @@ pub(crate) fn decode_transport_frame(input: &[u8]) -> io::Result<NoiseTransportF
     Ok(frame)
 }
 
-pub(crate) fn decode_service_response(input: &[u8]) -> io::Result<Vec<u8>> {
+pub fn decode_service_response(input: &[u8]) -> io::Result<Vec<u8>> {
     let mut reader = ProtoReader::new(input);
     let mut payload = None;
     while let Some((field, wire)) = reader.field()? {
@@ -161,7 +161,7 @@ pub(crate) fn decode_service_response(input: &[u8]) -> io::Result<Vec<u8>> {
     payload.ok_or_else(|| invalid_data("Muse ServiceResponse has no payload"))
 }
 
-pub(crate) fn decode_service_frame(input: &[u8]) -> io::Result<ServiceFrame> {
+pub fn decode_service_frame(input: &[u8]) -> io::Result<ServiceFrame> {
     let mut reader = ProtoReader::new(input);
     let mut stream_id = 0;
     let mut kind = None;

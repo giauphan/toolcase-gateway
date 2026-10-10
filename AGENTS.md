@@ -85,3 +85,15 @@ Write the plan as requirements and outcomes, not as an implementation recipe:
     crate routes, public entry points, and existing callers remain unchanged after a
     refactor.
 
+## System Design & Architectural Guidance
+
+- **Architecture Reference**: Consult `claude/claude.md` for the system design, subsystem pipelines, and file size governance rules.
+- **Strict File-Size Ceilings**:
+  - Target: **under 450 lines** per module.
+  - Soft ceiling: **800 lines** maximum. Files exceeding 800 lines (e.g. `src/museai/chat.rs` at 930 lines, `src/har_config.rs` at 797 lines, `src/tests.rs` at 3,002 lines) must be decomposed into cohesive submodules.
+- **Core Invariants**:
+  - Zero-async (`std::net` and `std::thread` only; no `tokio` or `async-std`).
+  - Fail-closed route dispatching in `src/routes.rs`.
+  - Subsystem facade encapsulation (`pub(crate) use` in `mod.rs`).
+
+

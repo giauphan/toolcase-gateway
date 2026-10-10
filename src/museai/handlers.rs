@@ -5,7 +5,7 @@ use crate::museai::MuseApprovalRequired;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
-pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Result<()> {
+pub fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Result<()> {
     client.write_all(
         format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -17,7 +17,7 @@ pub(crate) fn write_chat_completion(client: &mut TcpStream, response: &str) -> i
     client.flush()
 }
 
-pub(crate) fn handle_museai_v1(
+pub fn handle_museai_v1(
     client: &mut TcpStream,
     request_body: &[u8],
     config: &Config,
@@ -66,7 +66,7 @@ pub(crate) fn handle_museai_v1(
     }
 }
 
-pub(crate) fn handle_create_video(
+pub fn handle_create_video(
     client: &mut TcpStream,
     request_body: &[u8],
     config: &Config,
@@ -118,7 +118,7 @@ pub(crate) fn handle_create_video(
     }
 }
 
-pub(crate) fn handle_museai_thread_cleanup(
+pub fn handle_museai_thread_cleanup(
     client: &mut TcpStream,
     thread_id: &str,
     config: &Config,

@@ -16,21 +16,21 @@ const HOP_BY_HOP: [&str; 8] = [
 ];
 use std::net::TcpStream;
 
-pub(crate) struct Request {
-    pub(crate) method: String,
-    pub(crate) path: String,
-    pub(crate) headers: Vec<(String, String)>,
-    pub(crate) body: Vec<u8>,
+pub struct Request {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
 }
 
-pub(crate) struct ResponseHead {
-    pub(crate) status: u16,
-    pub(crate) reason: String,
-    pub(crate) headers: Vec<(String, String)>,
-    pub(crate) buffered_body: Vec<u8>,
+pub struct ResponseHead {
+    pub status: u16,
+    pub reason: String,
+    pub headers: Vec<(String, String)>,
+    pub buffered_body: Vec<u8>,
 }
 
-pub(crate) fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
+pub fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
     let raw = read_until_headers(stream, MAX_HEAD_BYTES)?;
     let split = raw
         .windows(4)
@@ -92,7 +92,7 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
     })
 }
 
-pub(crate) fn parse_headers<'a>(
+pub fn parse_headers<'a>(
     lines: impl Iterator<Item = &'a str>,
 ) -> io::Result<Vec<(String, String)>> {
     let mut headers = Vec::new();
@@ -110,7 +110,7 @@ pub(crate) fn parse_headers<'a>(
     Ok(headers)
 }
 
-pub(crate) fn is_chunked(headers: &[(String, String)]) -> bool {
+pub fn is_chunked(headers: &[(String, String)]) -> bool {
     headers
         .iter()
         .filter(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
@@ -120,14 +120,14 @@ pub(crate) fn is_chunked(headers: &[(String, String)]) -> bool {
         })
 }
 
-pub(crate) fn is_token(value: &str) -> bool {
+pub fn is_token(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
 }
 
-pub(crate) fn is_request_target(value: &str) -> bool {
+pub fn is_request_target(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 8192
         && value
@@ -135,7 +135,7 @@ pub(crate) fn is_request_target(value: &str) -> bool {
             .all(|b| b.is_ascii_graphic() && b != b'\\' && b != b'"')
 }
 
-pub(crate) fn read_until_headers(stream: &mut TcpStream, limit: usize) -> io::Result<Vec<u8>> {
+pub fn read_until_headers(stream: &mut TcpStream, limit: usize) -> io::Result<Vec<u8>> {
     let mut data = Vec::with_capacity(4096);
     let mut chunk = [0; 8192];
     loop {
@@ -154,10 +154,7 @@ pub(crate) fn read_until_headers(stream: &mut TcpStream, limit: usize) -> io::Re
     Ok(data)
 }
 
-pub(crate) fn read_chunked_body(
-    stream: &mut TcpStream,
-    mut buffered: Vec<u8>,
-) -> io::Result<Vec<u8>> {
+pub fn read_chunked_body(stream: &mut TcpStream, mut buffered: Vec<u8>) -> io::Result<Vec<u8>> {
     let mut body = Vec::new();
     loop {
         while !buffered.windows(2).any(|w| w == b"\r\n") {
@@ -189,7 +186,7 @@ pub(crate) fn read_chunked_body(
     Ok(body)
 }
 
-pub(crate) fn read_more(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> io::Result<()> {
+pub fn read_more(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> io::Result<()> {
     let mut chunk = [0; 8192];
     let count = stream.read(&mut chunk)?;
     if count == 0 {
@@ -202,7 +199,7 @@ pub(crate) fn read_more(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> io::Res
     Ok(())
 }
 
-pub(crate) fn read_response_head(stream: &mut TcpStream) -> io::Result<ResponseHead> {
+pub fn read_response_head(stream: &mut TcpStream) -> io::Result<ResponseHead> {
     let raw = read_until_headers(stream, MAX_HEAD_BYTES)?;
     let split = raw
         .windows(4)
@@ -233,7 +230,7 @@ pub(crate) fn read_response_head(stream: &mut TcpStream) -> io::Result<ResponseH
     })
 }
 
-pub(crate) fn stream_response(
+pub fn stream_response(
     client: &mut TcpStream,
     upstream: &mut TcpStream,
     head: ResponseHead,
@@ -298,11 +295,7 @@ pub(crate) fn stream_response(
     client.write_all(b"0\r\n\r\n")
 }
 
-pub(crate) fn write_chunk(
-    client: &mut TcpStream,
-    body: &[u8],
-    request_body: &[u8],
-) -> io::Result<()> {
+pub fn write_chunk(client: &mut TcpStream, body: &[u8], request_body: &[u8]) -> io::Result<()> {
     if body.is_empty() {
         return Ok(());
     }
@@ -312,7 +305,7 @@ pub(crate) fn write_chunk(
     client.write_all(b"\r\n")
 }
 
-pub(crate) fn read_one_chunk(
+pub fn read_one_chunk(
     stream: &mut TcpStream,
     buffered: &mut Vec<u8>,
 ) -> io::Result<Option<Vec<u8>>> {
@@ -341,14 +334,14 @@ pub(crate) fn read_one_chunk(
     Ok(Some(body))
 }
 
-pub(crate) fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
         .map(|(_, value)| value.as_str())
 }
 
-pub(crate) fn write_error(
+pub fn write_error(
     client: &mut TcpStream,
     status: u16,
     reason: &str,

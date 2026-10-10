@@ -4,7 +4,7 @@ use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-pub(crate) const SUPPORTED_MODELS: [&str; 10] = [
+pub const SUPPORTED_MODELS: [&str; 10] = [
     "muse",
     "muse-video",
     "gen-3",
@@ -16,21 +16,16 @@ pub(crate) const SUPPORTED_MODELS: [&str; 10] = [
     "aleph-2.0",
     "ruby",
 ];
-pub(crate) const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
+pub const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
 
-pub(crate) fn build_video_prompt(
-    model: &str,
-    prompt: &str,
-    aspect_ratio: &str,
-    duration: u64,
-) -> String {
+pub fn build_video_prompt(model: &str, prompt: &str, aspect_ratio: &str, duration: u64) -> String {
     let _ = (model, aspect_ratio, duration);
     format!(
         "Create a video from this description if video generation is available: \"{prompt}\". Return a public Google Drive link when ready."
     )
 }
 
-pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
+pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
     let body: serde_json::Value = if request_body.is_empty() {
         serde_json::json!({})
     } else {
@@ -128,7 +123,7 @@ pub(crate) fn create_video(request_body: &[u8], config: &Config) -> io::Result<s
     )
 }
 
-pub(crate) fn build_video_result(
+pub fn build_video_result(
     model: &str,
     requested_model: &str,
     prompt: &str,
@@ -158,19 +153,17 @@ pub(crate) fn build_video_result(
     }))
 }
 
-pub(crate) fn extract_url_from_text(text: &str) -> String {
+pub fn extract_url_from_text(text: &str) -> String {
     let urls: Vec<&str> = text
         .split_whitespace()
         .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
         .collect();
-    // Prioritize public Google Drive URLs if output by upstream.
     for url in &urls {
         let cleaned = trim_trailing_punct(url);
         if is_google_drive_file_path(cleaned) {
             return cleaned.to_string();
         }
     }
-    // Fall back to direct video file URLs (.mp4, .mov, .webm).
     for url in &urls {
         let cleaned = trim_trailing_punct(url);
         if is_supported_video_url(cleaned) {
@@ -180,13 +173,13 @@ pub(crate) fn extract_url_from_text(text: &str) -> String {
     String::new()
 }
 
-pub(crate) fn is_supported_video_url(url: &str) -> bool {
+pub fn is_supported_video_url(url: &str) -> bool {
     url.starts_with("https://")
         && ((is_google_drive_host(url) && is_google_drive_file_path(url))
             || has_supported_video_extension(url))
 }
 
-pub(crate) fn has_supported_video_extension(url: &str) -> bool {
+pub fn has_supported_video_extension(url: &str) -> bool {
     let path = url
         .strip_prefix("https://")
         .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
@@ -201,12 +194,12 @@ pub(crate) fn has_supported_video_extension(url: &str) -> bool {
     path.ends_with(".mp4") || path.ends_with(".mov") || path.ends_with(".webm")
 }
 
-pub(crate) fn is_google_drive_host(url: &str) -> bool {
+pub fn is_google_drive_host(url: &str) -> bool {
     let authority = url_authority(url);
     matches!(authority, "drive.google.com" | "docs.google.com")
 }
 
-pub(crate) fn is_google_drive_file_path(url: &str) -> bool {
+pub fn is_google_drive_file_path(url: &str) -> bool {
     url.starts_with("https://")
         && is_google_drive_host(url)
         && url
@@ -215,7 +208,7 @@ pub(crate) fn is_google_drive_file_path(url: &str) -> bool {
             .is_some_and(|path| path.starts_with("file/") || path.starts_with("uc?"))
 }
 
-pub(crate) fn url_authority(url: &str) -> &str {
+pub fn url_authority(url: &str) -> &str {
     url.strip_prefix("https://")
         .and_then(|rest| rest.split('/').next())
         .and_then(|host| host.split('?').next())
@@ -223,13 +216,13 @@ pub(crate) fn url_authority(url: &str) -> &str {
         .unwrap_or("")
 }
 
-pub(crate) fn trim_trailing_punct(s: &str) -> &str {
+pub fn trim_trailing_punct(s: &str) -> &str {
     s.trim_matches([
         '"', '\'', ',', ';', ')', '}', '(', '{', ']', '[', '\\', '\n', '\r', ' ',
     ])
 }
 
-pub(crate) fn normalize_video_model(model: &str) -> &str {
+pub fn normalize_video_model(model: &str) -> &str {
     match model {
         "muse-video" | "muse" => "muse-video",
         "gen-3" | "gen-2" | "kling" | "gen-4" | "gen-4.5" | "gen-4-turbo" | "aleph-2.0"

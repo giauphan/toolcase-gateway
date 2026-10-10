@@ -8,7 +8,7 @@ use std::io;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-pub(crate) const MUSE_POST_COMPLETION_WAIT_SECS: u64 = 300;
+pub const MUSE_POST_COMPLETION_WAIT_SECS: u64 = 300;
 
 fn debug_log(msg: &str) {
     if std::env::var("MUSEAI_DEBUG").is_ok() {
@@ -16,7 +16,7 @@ fn debug_log(msg: &str) {
     }
 }
 
-pub(crate) fn extract_user_prompt(request_body: &[u8]) -> io::Result<String> {
+pub fn extract_user_prompt(request_body: &[u8]) -> io::Result<String> {
     let json: serde_json::Value = serde_json::from_slice(request_body)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid JSON: {e}")))?;
 
@@ -54,7 +54,7 @@ pub(crate) fn extract_user_prompt(request_body: &[u8]) -> io::Result<String> {
     Ok("Hello".to_string())
 }
 
-pub(crate) fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> {
+pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> {
     if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
         if event == "task.status" || event == "agent.status" || event == "approvals.snapshot" {
             return None;
@@ -163,15 +163,15 @@ pub(crate) fn parse_assistant_content_from_json(val: &serde_json::Value) -> Opti
 }
 
 #[derive(Default)]
-pub(crate) struct MuseChatStream {
-    pub(crate) pending: Vec<u8>,
-    pub(crate) session_id: Option<String>,
-    pub(crate) text: String,
-    pub(crate) completed: bool,
+pub struct MuseChatStream {
+    pub pending: Vec<u8>,
+    pub session_id: Option<String>,
+    pub text: String,
+    pub completed: bool,
 }
 
 impl MuseChatStream {
-    pub(crate) fn push(&mut self, bytes: &[u8], ended: bool) -> io::Result<()> {
+    pub fn push(&mut self, bytes: &[u8], ended: bool) -> io::Result<()> {
         const LIMIT: usize = 1024 * 1024;
         if self.pending.len().saturating_add(bytes.len()) > LIMIT {
             return Err(io::Error::new(
@@ -207,10 +207,9 @@ impl MuseChatStream {
         Ok(())
     }
 
-    pub(crate) fn record(&mut self, record: &serde_json::Value) -> io::Result<()> {
-        #[cfg(test)]
+    pub fn record(&mut self, record: &serde_json::Value) -> io::Result<()> {
         if std::env::var("MUSE_LIVE_RESUME_OWNED").ok().as_deref() == Some("1") {
-            crate::museai::museai_tests::log_owned_record_schema(record);
+            crate::test_helpers::log_owned_record_schema(record);
         }
         let payload = record.get("payload").unwrap_or(record);
         let status = payload.get("status").and_then(|value| value.as_str());
@@ -319,7 +318,7 @@ impl MuseChatStream {
         Ok(())
     }
 
-    pub(crate) fn finish(self) -> io::Result<(String, String)> {
+    pub fn finish(self) -> io::Result<(String, String)> {
         if !self.completed || !self.pending.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -338,7 +337,7 @@ impl MuseChatStream {
     }
 }
 
-pub(crate) fn build_muse_chat_request(prompt: &str) -> serde_json::Value {
+pub fn build_muse_chat_request(prompt: &str) -> serde_json::Value {
     serde_json::json!({
         "message": prompt,
         "node_id": Uuid::new_v4().to_string(),
@@ -347,12 +346,12 @@ pub(crate) fn build_muse_chat_request(prompt: &str) -> serde_json::Value {
     })
 }
 
-pub(crate) fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {
+pub fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {
     let extracted = crate::museai::video::extract_url_from_text(&stream.text);
     (!extracted.is_empty()).then_some(extracted)
 }
 
-pub(crate) fn explicit_video_refusal(text: &str) -> bool {
+pub fn explicit_video_refusal(text: &str) -> bool {
     let text = text.to_ascii_lowercase();
     let mentions_video_action = text.contains("video generation")
         || text.contains("generate a video")
@@ -371,7 +370,7 @@ pub(crate) fn explicit_video_refusal(text: &str) -> bool {
     mentions_video_action && mentions_inability
 }
 
-pub(crate) fn request_museai_chat_completion(
+pub fn request_museai_chat_completion(
     request_body: &[u8],
     config: &Config,
     wait_for_video_artifact: bool,
@@ -480,9 +479,8 @@ pub(crate) fn request_museai_chat_completion(
                     "Muse chat acknowledgement missing",
                 )
             })?;
-            #[cfg(test)]
             if std::env::var("MUSE_LIVE_TEST").ok().as_deref() == Some("1") {
-                crate::museai::museai_tests::save_live_owned_session(session_id)?;
+                crate::test_helpers::save_live_owned_session(session_id)?;
             }
             let subscription = serde_json::json!({
                 "session_id": session_id,

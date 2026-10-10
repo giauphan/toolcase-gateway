@@ -17,6 +17,11 @@ exclude = ["/.github", "/docs"]
 name = "toolcase-gateway"
 path = "src/main.rs"
 
+[lib]
+name = "toolcase_gateway"
+path = "src/lib.rs"
+
+
 [lints.rust]
 unsafe_code = "forbid"
 

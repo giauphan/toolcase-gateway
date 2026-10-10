@@ -9,7 +9,7 @@ use std::error::Error;
 pub const NOISE_PATTERN_XX: &str = "Noise_XX_25519_AESGCM_SHA256";
 pub const NOISE_PATTERN_IK: &str = "Noise_IK_25519_AESGCM_SHA256";
 
-pub(crate) fn encode_confidential_vm_message_three(notary_token: &str) -> Vec<u8> {
+pub fn encode_confidential_vm_message_three(notary_token: &str) -> Vec<u8> {
     let mut payload = Vec::new();
 
     // Field 1: notary_token (string)
@@ -43,7 +43,7 @@ pub(crate) fn encode_confidential_vm_message_three(notary_token: &str) -> Vec<u8
     payload
 }
 
-pub(crate) fn get_primary_message_one_payload() -> Vec<u8> {
+pub fn get_primary_message_one_payload() -> Vec<u8> {
     let mut nonce = [0u8; 32];
     let r1 = uuid::Uuid::new_v4();
     let r2 = uuid::Uuid::new_v4();

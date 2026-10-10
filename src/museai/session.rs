@@ -7,7 +7,7 @@ fn debug_log(msg: &str) {
     }
 }
 
-pub(crate) fn append_query_component(url: &mut String, key: &str, value: &str) {
+pub fn append_query_component(url: &mut String, key: &str, value: &str) {
     url.push(if url.contains('?') { '&' } else { '?' });
     url.push_str(key);
     url.push('=');
@@ -26,7 +26,7 @@ pub(crate) fn append_query_component(url: &mut String, key: &str, value: &str) {
     }
 }
 
-pub(crate) fn is_allowed_muse_ws_authority(authority_path: &str) -> bool {
+pub fn is_allowed_muse_ws_authority(authority_path: &str) -> bool {
     let host = authority_path
         .split('/')
         .next()
@@ -37,7 +37,7 @@ pub(crate) fn is_allowed_muse_ws_authority(authority_path: &str) -> bool {
     host == "metaaivm.com" || host.ends_with(".metaaivm.com")
 }
 
-pub(crate) fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Result<String> {
+pub fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Result<String> {
     let configured = config.museai_ws_url.as_str();
 
     let (base_url, query_str) = if let Some(idx) = configured.find('?') {
@@ -130,7 +130,7 @@ pub(crate) fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Resu
     Ok(url)
 }
 
-pub(crate) fn apply_muse_session_metadata(config: &mut Config, session: &serde_json::Value) {
+pub fn apply_muse_session_metadata(config: &mut Config, session: &serde_json::Value) {
     let selected_vm = session
         .get("vms")
         .and_then(|value| value.as_array())
@@ -175,7 +175,7 @@ pub(crate) fn apply_muse_session_metadata(config: &mut Config, session: &serde_j
     }
 }
 
-pub(crate) fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
+pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
     if !config.museai_access_token.is_empty() {
         return Ok(config.clone());
     }

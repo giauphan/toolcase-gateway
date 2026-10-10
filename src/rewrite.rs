@@ -1,8 +1,8 @@
-pub(crate) fn escape_json_string(value: &str) -> String {
+pub fn escape_json_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-pub(crate) fn json_string_value(text: &str, key: &str) -> Option<String> {
+pub fn json_string_value(text: &str, key: &str) -> Option<String> {
     let start = text.find(&format!("\"{key}\""))?;
     let rest = &text[start + key.len() + 2..];
     let open = rest.find('"')?;
@@ -10,7 +10,7 @@ pub(crate) fn json_string_value(text: &str, key: &str) -> Option<String> {
     Some(value[..value.find('"')?].to_owned())
 }
 
-pub(crate) fn replace_model(body: &[u8], model: &str) -> Vec<u8> {
+pub fn replace_model(body: &[u8], model: &str) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(body) else {
         return body.to_vec();
     };
@@ -38,7 +38,7 @@ pub(crate) fn replace_model(body: &[u8], model: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-pub(crate) fn rewrite_tool_names(body: &[u8], request_body: &[u8]) -> Vec<u8> {
+pub fn rewrite_tool_names(body: &[u8], request_body: &[u8]) -> Vec<u8> {
     let Ok(mut output) = String::from_utf8(body.to_vec()) else {
         return body.to_vec();
     };
