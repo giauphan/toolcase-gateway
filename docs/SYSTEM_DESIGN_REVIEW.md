@@ -127,7 +127,7 @@ Before executing the current tests, inspect their live gates; the current suite 
 
 ## Miro review
 
-The requested publication channel is Miro MCP through Claude CLI only. The CLI reported Miro tool availability; authenticated drawing capability and the board link require an actual MCP result. Only sanitized architecture descriptions may be published. This document remains the local review artifact if publication is blocked.
+The requested publication channel is Miro MCP through Claude CLI only. The CLI reported Miro tool availability. A drawing request for a new board titled `Toolcase Gateway - Architecture and Test Migration Review` timed out after 180 seconds without returning a result. A subsequent read-only lookup failed with `Exceeded USD budget (1)`. Board creation and diagram contents are therefore unknown, not verified; no board URL was returned. Check for a partially created board before retrying creation. Only sanitized architecture descriptions were supplied in the drawing prompt. This document is the available local review artifact; publication remains blocked pending a successful MCP check.
 
 ## References
 
