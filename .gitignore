@@ -9,3 +9,4 @@ scripts/__pycache__
 scripts/patches/
 gateway.log
 plan/*
+.claude/worktrees
