@@ -103,6 +103,28 @@ Send it through either `Authorization: Bearer <API_KEY>` or `x-api-key: <API_KEY
 
 An explicit `openai-sentinel-token` inbound header overrides the token embedded in the API key. The legacy four-part triple-pipe and comma-separated formats remain accepted, but they contain no sentinel token and may receive Prism `403 Forbidden` responses.
 
+### Jev AI Multi-Account Settings
+
+The gateway includes dedicated Jev AI routes (`/jev/v1`, `/jev-ai/v1`) that pool
+multiple Jev AI account keys and transparently round-robin + fail over between
+them. Each request tries the current account, and if that account hits a
+credit cap or authentication limit (HTTP `401`/`402`/`403`/`429`), it
+automatically falls back to the next account.
+
+**Set multiple Jev AI account keys** (Jev AI Tools: up to 300 credits/month,
+capped 30/day; Jev AI Space: 200 one-time credits; Jev AI Playground:
+5 welcome credits + daily claims) via `GW_JEV_API_KEYS`:
+
+```text
+GW_JEV_API_KEYS="<Jev-Account-1-Key>,<Jev-Account-2-Key>,<Jev-Account-3-Key>"
+```
+
+The gateway routes Jev AI OpenAI-compatible `/v1/chat/completions` calls to
+`http://127.0.0.1:20129/jev/v1` (or `/jev-ai/v1`) while internally rotating
+the `Authorization: Bearer <key>` header through every configured Jev account
+in round-robin order. See [Jev AI Integration & Multi-Account Guide](docs/JEV_INTEGRATION.md)
+for setup steps in Claude Code, Codex, VS Code, Cursor, and JetBrains IDEs.
+
 ## Configuration
 
 All configuration is environment variables, read once at startup.
@@ -114,6 +136,7 @@ All configuration is environment variables, read once at startup.
 | `GW_TARGET_HOST` | `127.0.0.1` | Upstream host. |
 | `GW_TARGET_PORT` | `20128` | Upstream port. |
 | `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated fallback models, tried in round-robin order. |
+| `GW_JEV_API_KEYS` | empty | Comma-separated Jev AI account keys for multi-account round-robin and credit failover. |
 | `GW_MAX_CONNECTIONS` | `256` | Concurrent connection cap; excess gets `503`. |
 | `GW_IO_TIMEOUT_SECS` | `120` | Read/write timeout per socket. `0` disables. |
 

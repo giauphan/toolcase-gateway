@@ -18,10 +18,10 @@ const HOP_BY_HOP: [&str; 8] = [
     "upgrade",
 ];
 
-pub(crate) const RETRYABLE: [u16; 11] = [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524];
+pub const RETRYABLE: [u16; 11] = [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524];
 static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) fn parse_retry_after(headers: &[(String, String)]) -> Option<Duration> {
+pub fn parse_retry_after(headers: &[(String, String)]) -> Option<Duration> {
     let value = header_value(headers, "retry-after")?;
     let trimmed = value.trim();
     if let Ok(seconds) = trimmed.parse::<u64>() {
@@ -30,7 +30,7 @@ pub(crate) fn parse_retry_after(headers: &[(String, String)]) -> Option<Duration
     None
 }
 
-pub(crate) fn calculate_retry_delay(
+pub fn calculate_retry_delay(
     attempt: usize,
     base_delay_ms: u64,
     max_delay_ms: u64,
@@ -48,7 +48,7 @@ pub(crate) fn calculate_retry_delay(
     Duration::from_millis(final_ms)
 }
 
-pub(crate) fn open_upstream(
+pub fn open_upstream(
     client: &TcpStream,
     request: &Request,
     config: &Config,
@@ -87,7 +87,7 @@ pub(crate) fn open_upstream(
     Ok(upstream)
 }
 
-pub(crate) fn handle_omniroute_proxy(
+pub fn handle_omniroute_proxy(
     client: &mut TcpStream,
     request: &Request,
     config: &Config,
@@ -125,7 +125,7 @@ pub(crate) fn handle_omniroute_proxy(
         );
 
         if model == "muse" {
-            match crate::museai::request_museai_chat_completion(&request.body, config) {
+            match crate::museai::request_museai_chat_completion(&request.body, config, false) {
                 Ok(response) => return crate::museai::write_chat_completion(client, &response),
                 Err(error) if !last => {
                     let delay = calculate_retry_delay(
@@ -351,7 +351,7 @@ fn normalize_model_id(requested: &str, default_model: &str) -> String {
     trimmed.to_string()
 }
 
-pub(crate) fn candidate_models(
+pub fn candidate_models(
     body: &[u8],
     fallbacks: &[String],
     rotation: usize,

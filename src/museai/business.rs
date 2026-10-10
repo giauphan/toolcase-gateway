@@ -9,7 +9,7 @@ pub struct MuseAiRequest {
     pub body: Option<serde_json::Value>,
 }
 
-pub(crate) fn build_museai_request(
+pub fn build_museai_request(
     request_body: &[u8],
     config: &Config,
 ) -> io::Result<(String, String, String)> {

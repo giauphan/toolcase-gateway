@@ -1,6 +1,6 @@
 use crate::config::Config;
-use crate::museai_noise::MuseNoiseSession;
-use crate::museai_protocol::Header;
+use crate::museai::noise::MuseNoiseSession;
+use crate::museai::protocol::Header;
 use std::io;
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
@@ -11,22 +11,22 @@ use tungstenite::{connect, Message, WebSocket};
 
 const MAX_MUSE_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
-pub(crate) const MUSE_WS_OPERATION_DEADLINE_SECS: u64 = 360;
+pub const MUSE_WS_OPERATION_DEADLINE_SECS: u64 = 360;
 
 #[allow(dead_code)]
-pub(crate) struct MuseWebSocket {
+pub struct MuseWebSocket {
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
     deadline: Instant,
 }
 
 #[allow(dead_code)]
-pub(crate) fn muse_ws_operation_deadline_secs() -> u64 {
+pub fn muse_ws_operation_deadline_secs() -> u64 {
     MUSE_WS_OPERATION_DEADLINE_SECS
 }
 
 #[allow(dead_code)]
 impl MuseWebSocket {
-    pub(crate) fn connect(url: &str, origin: &str, cookie: &str) -> io::Result<Self> {
+    pub fn connect(url: &str, origin: &str, cookie: &str) -> io::Result<Self> {
         let mut request = url
             .into_client_request()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
@@ -97,7 +97,7 @@ impl MuseWebSocket {
         tcp.set_write_timeout(Some(remaining))
     }
 
-    pub(crate) fn send_binary(&mut self, message: &[u8]) -> io::Result<()> {
+    pub fn send_binary(&mut self, message: &[u8]) -> io::Result<()> {
         self.apply_deadline()?;
         println!(
             "[museai_transport] Sending binary frame (length: {})",
@@ -114,7 +114,7 @@ impl MuseWebSocket {
             .map_err(io::Error::other)
     }
 
-    pub(crate) fn read_binary(&mut self) -> io::Result<Vec<u8>> {
+    pub fn read_binary(&mut self) -> io::Result<Vec<u8>> {
         loop {
             self.apply_deadline()?;
             match self.socket.read().map_err(|error| {
@@ -149,7 +149,7 @@ impl MuseWebSocket {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn send_encrypted_service_request(
+    pub fn send_encrypted_service_request(
         &mut self,
         session: &mut MuseNoiseSession,
         service: u64,
@@ -163,11 +163,11 @@ impl MuseWebSocket {
 
         // Send single ApplicationRequest with body and end_body = true
         let app_req =
-            crate::museai_protocol::encode_application_request(verb, path, headers, body, true);
-        let frame_req = crate::museai_protocol::encode_service_frame_request(stream_id, &app_req);
-        let svc_req = crate::museai_protocol::encode_service_request(service, &frame_req);
+            crate::museai::protocol::encode_application_request(verb, path, headers, body, true);
+        let frame_req = crate::museai::protocol::encode_service_frame_request(stream_id, &app_req);
+        let svc_req = crate::museai::protocol::encode_service_request(service, &frame_req);
 
-        let frames = crate::museai_protocol::encode_transport_frames(chunk_id, &svc_req)?;
+        let frames = crate::museai::protocol::encode_transport_frames(chunk_id, &svc_req)?;
         for frame in frames {
             let mut encrypted = vec![0u8; frame.len() + 64];
             let len = session
@@ -183,10 +183,10 @@ impl MuseWebSocket {
         Ok(())
     }
 
-    pub(crate) fn read_encrypted_service_frame(
+    pub fn read_encrypted_service_frame(
         &mut self,
-        session: &mut crate::museai_noise::MuseNoiseSession,
-    ) -> io::Result<crate::museai_protocol::ServiceFrame> {
+        session: &mut crate::museai::noise::MuseNoiseSession,
+    ) -> io::Result<crate::museai::protocol::ServiceFrame> {
         let mut assembled_payload: Vec<u8> = Vec::new();
         let mut expected_total: u32 = 0;
         let mut expected_id: i64 = 0;
@@ -197,7 +197,7 @@ impl MuseWebSocket {
             let len = session
                 .decrypt(&cipher, &mut plain)
                 .map_err(io::Error::other)?;
-            let frame = crate::museai_protocol::decode_transport_frame(&plain[..len])?;
+            let frame = crate::museai::protocol::decode_transport_frame(&plain[..len])?;
             if assembled_payload.is_empty() {
                 expected_id = frame.chunk_id;
                 expected_total = frame.total_chunks;
@@ -213,19 +213,19 @@ impl MuseWebSocket {
             }
         }
 
-        let svc_resp = crate::museai_protocol::decode_service_response(&assembled_payload)?;
-        crate::museai_protocol::decode_service_frame(&svc_resp)
+        let svc_resp = crate::museai::protocol::decode_service_response(&assembled_payload)?;
+        crate::museai::protocol::decode_service_frame(&svc_resp)
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct UpstreamResponse {
+pub struct UpstreamResponse {
     pub status: u16,
     pub body: String,
     pub content_type: String,
 }
 
-pub(crate) fn send_museai_request(
+pub fn send_museai_request(
     url: &str,
     method: &str,
     body_json: &str,

@@ -60,3 +60,40 @@ Write the plan as requirements and outcomes, not as an implementation recipe:
 - New plans go in `plan/pending/`.
 - Move a plan out of `plan/pending/` (for example to `plan/done/`) only after
   the work is complete and verified.
+
+## Codebase architecture & maintainability rules
+
+### Modular separation & Domain-Driven Design (DDD)
+
+- **Domain/Business separation**: Keep core business logic separate from transport,
+  wire protocols, and HTTP serialization. Handlers and route endpoints must only
+  orchestrate and delegate to domain services.
+- **Single responsibility per module**: Group related concerns into focused modules
+  under `src/museai/`:
+  - Transport / framing: `src/museai/transport.rs`, `src/museai/protocol.rs`, `src/museai/noise.rs`
+  - Domain & Application services: `src/museai/chat.rs`, `src/museai/video.rs`, `src/museai/business.rs`
+  - HTTP route handlers: `src/museai/handlers.rs`
+  - Session lifecycle & credentials: `src/museai/session.rs`
+  - Background work & thread maintenance: `src/museai/threads.rs`
+  - Public facade / re-exports: `src/museai/mod.rs`
+- **File size ceiling**:
+  - Target: **under 450 lines** per module.
+  - Soft ceiling: **800 lines** maximum. If any source file exceeds 800 lines, it must
+    be decomposed into cohesive submodules.
+- **Backward compatibility**:
+  - Provide thin facade re-exports (`pub(crate) use`) from the primary module so that
+    crate routes, public entry points, and existing callers remain unchanged after a
+    refactor.
+
+## System Design & Architectural Guidance
+
+- **Architecture Reference**: Consult `claude/claude.md` for the system design, subsystem pipelines, and file size governance rules.
+- **Strict File-Size Ceilings**:
+  - Target: **under 450 lines** per module.
+  - Soft ceiling: **800 lines** maximum. Files exceeding 800 lines (e.g. `src/museai/chat.rs` at 930 lines, `src/har_config.rs` at 797 lines, `src/tests.rs` at 3,002 lines) must be decomposed into cohesive submodules.
+- **Core Invariants**:
+  - Zero-async (`std::net` and `std::thread` only; no `tokio` or `async-std`).
+  - Fail-closed route dispatching in `src/routes.rs`.
+  - Subsystem facade encapsulation (`pub(crate) use` in `mod.rs`).
+
+

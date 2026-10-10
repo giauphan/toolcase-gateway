@@ -5,18 +5,18 @@ use std::io::{self, Write};
 use std::net::TcpStream;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CatalogPlatform {
+pub enum CatalogPlatform {
     Muse,
 }
 
-pub(crate) fn catalog_route(path: &str) -> Option<CatalogPlatform> {
+pub fn catalog_route(path: &str) -> Option<CatalogPlatform> {
     match path {
         "/muse-ai/models" | "/muse-ai/v1/models" => Some(CatalogPlatform::Muse),
         _ => None,
     }
 }
 
-pub(crate) fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
+pub fn handle_cors_preflight(client: &mut TcpStream) -> io::Result<()> {
     let response = "HTTP/1.1 200 OK\r\n\
                     Access-Control-Allow-Origin: *\r\n\
                     Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
@@ -39,16 +39,13 @@ fn handle_muse_models_catalog(client: &mut TcpStream) -> io::Result<()> {
     client.flush()
 }
 
-pub(crate) fn handle_models_catalog(
-    client: &mut TcpStream,
-    platform: CatalogPlatform,
-) -> io::Result<()> {
+pub fn handle_models_catalog(client: &mut TcpStream, platform: CatalogPlatform) -> io::Result<()> {
     match platform {
         CatalogPlatform::Muse => handle_muse_models_catalog(client),
     }
 }
 
-pub(crate) fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<()> {
+pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<()> {
     let request = read_request(&mut client)?;
     let clean_path = request
         .path
@@ -171,6 +168,46 @@ fn route_request_impl(
     }
     if clean_path == "/muse-ai" || clean_path.starts_with("/muse-ai/") {
         return write_error(client, 404, "Not Found", "unknown Muse route");
+    }
+
+    if clean_path == "/jev/v1/models"
+        || clean_path == "/jev/models"
+        || clean_path == "/jev-ai/v1/models"
+    {
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::jev::handle_jev_models_catalog(client)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Jev models catalog only supports GET",
+            )
+        };
+    }
+    if clean_path == "/jev/v1" || clean_path.starts_with("/jev/v1/") {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::jev::handle_jev_ai(client, request, config)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Jev chat completions only support POST",
+            )
+        };
+    }
+    if clean_path == "/jev-ai/v1" || clean_path.starts_with("/jev-ai/v1/") {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::jev::handle_jev_ai(client, request, config)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Jev chat completions only support POST",
+            )
+        };
     }
 
     if clean_path == "/video-template" || clean_path.starts_with("/video-template/") {
