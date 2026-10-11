@@ -1,7 +1,7 @@
 use crate::config::Config;
-use crate::museai::transport::send_museai_request;
-use crate::museai::video::create_video;
-use crate::museai::MuseApprovalRequired;
+use crate::providers::museai::transport::send_museai_request;
+use crate::providers::museai::video::create_video;
+use crate::providers::museai::MuseApprovalRequired;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
@@ -23,7 +23,7 @@ pub fn handle_museai_v1(
     config: &Config,
 ) -> io::Result<()> {
     let (url, method, body_json) =
-        crate::museai::business::build_museai_request(request_body, config)?;
+        crate::providers::museai::business::build_museai_request(request_body, config)?;
 
     let result = send_museai_request(&url, &method, &body_json, config);
 
@@ -129,7 +129,7 @@ pub fn handle_museai_thread_cleanup(
         config.museai_base_url.as_str()
     };
 
-    match crate::museai::threads::delete_muse_thread(base_url, thread_id, config) {
+    match crate::providers::museai::threads::delete_muse_thread(base_url, thread_id, config) {
         Ok(()) => {
             let body = serde_json::json!({
                 "object": "thread.cleanup",

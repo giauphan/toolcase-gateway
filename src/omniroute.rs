@@ -1,25 +1,15 @@
 use crate::config::Config;
-use crate::http::{header_value, read_response_head, stream_response, write_error, Request};
-use crate::rewrite::{json_string_value, replace_model};
-use std::io::{self, Write};
+use crate::http::{header_value, Request};
+use std::io;
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::thread;
 use std::time::Duration;
 
-const HOP_BY_HOP: [&str; 8] = [
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-];
-
 pub const RETRYABLE: [u16; 11] = [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524];
-static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// Pure gateway decision: check if an HTTP status code is retryable.
+pub fn is_status_retryable(status: u16) -> bool {
+    crate::gateway::retry::is_safe_to_retry(status)
+}
 
 pub fn parse_retry_after(headers: &[(String, String)]) -> Option<Duration> {
     let value = header_value(headers, "retry-after")?;
@@ -54,37 +44,7 @@ pub fn open_upstream(
     config: &Config,
     model: &str,
 ) -> io::Result<TcpStream> {
-    let host = config.target_host.as_str();
-    let port = config.target_port;
-    let mut upstream = TcpStream::connect((host, port))?;
-    if let Some(timeout) = config.io_timeout {
-        upstream.set_read_timeout(Some(timeout))?;
-        upstream.set_write_timeout(Some(timeout))?;
-    }
-    let body = replace_model(&request.body, model);
-    write!(upstream, "{} {} HTTP/1.1\r\n", request.method, request.path)?;
-    for (name, value) in &request.headers {
-        if name.eq_ignore_ascii_case("host")
-            || name.eq_ignore_ascii_case("content-length")
-            || name.eq_ignore_ascii_case("accept-encoding")
-            || HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
-        {
-            continue;
-        }
-        write!(upstream, "{name}: {value}\r\n")?;
-    }
-    let client_ip = client
-        .peer_addr()
-        .map(|a| a.ip().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-    write!(
-        upstream,
-        "Host: {host}:{port}\r\nAccept-Encoding: identity\r\nX-Forwarded-For: {client_ip}\r\nX-Real-Ip: {client_ip}\r\nX-Forwarded-Proto: http\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    )?;
-    upstream.write_all(&body)?;
-    upstream.flush()?;
-    Ok(upstream)
+    crate::providers::omniroute::OmniRouteAdapter::open_upstream(client, request, config, model)
 }
 
 pub fn handle_omniroute_proxy(
@@ -92,263 +52,7 @@ pub fn handle_omniroute_proxy(
     request: &Request,
     config: &Config,
 ) -> io::Result<()> {
-    let rotation = RR_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let candidates = candidate_models(
-        &request.body,
-        &config.fallbacks,
-        rotation,
-        &config.default_model,
-    );
-    let has_auth = header_value(&request.headers, "authorization").is_some();
-    let has_x_api_key = header_value(&request.headers, "x-api-key").is_some();
-    eprintln!(
-        "[toolcase-gateway] request {} {} (auth: auth_header={}, x_api_key={}) candidates: {}",
-        request.method,
-        request.path,
-        has_auth,
-        has_x_api_key,
-        candidates
-            .iter()
-            .map(|model| if model.is_empty() { "<empty>" } else { model })
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-
-    let mut last_status: Option<u16> = None;
-
-    for (index, model) in candidates.iter().enumerate() {
-        let attempt_number = index + 1;
-        let last = attempt_number == candidates.len();
-        eprintln!(
-            "[toolcase-gateway] attempt {attempt_number}/{} model \"{model}\"",
-            candidates.len()
-        );
-
-        if model == "muse" {
-            match crate::museai::request_museai_chat_completion(&request.body, config, false) {
-                Ok(response) => return crate::museai::write_chat_completion(client, &response),
-                Err(error) if !last => {
-                    let delay = calculate_retry_delay(
-                        index,
-                        config.retry_base_delay_ms,
-                        config.max_retry_delay_ms,
-                        None,
-                    );
-                    eprintln!(
-                        "[toolcase-gateway] upstream model \"muse\" failed ({}: {}). Failing over to \"{}\" (retry in {}ms)...",
-                        error.kind(),
-                        error,
-                        candidates[index + 1],
-                        delay.as_millis()
-                    );
-                    if !delay.is_zero() {
-                        thread::sleep(delay);
-                    }
-                    continue;
-                }
-                Err(error) => {
-                    eprintln!(
-                        "[toolcase-gateway] model \"muse\" failed on final attempt ({}: {})",
-                        error.kind(),
-                        error
-                    );
-                    return write_error(
-                        client,
-                        502,
-                        "Bad Gateway",
-                        &format!(
-                            "toolcase-gateway: all upstream models exhausted; model \"muse\" failed ({})",
-                            error.kind()
-                        ),
-                    );
-                }
-            }
-        }
-
-        let attempt = open_upstream(client, request, config, model).and_then(|mut upstream| {
-            let head = read_response_head(&mut upstream)?;
-            last_status = Some(head.status);
-            if RETRYABLE.contains(&head.status) {
-                let delay = calculate_retry_delay(
-                    index,
-                    config.retry_base_delay_ms,
-                    config.max_retry_delay_ms,
-                    Some(&head.headers),
-                );
-                if !last {
-                    eprintln!(
-                        "[toolcase-gateway] upstream model \"{model}\" returned HTTP {}. Failing over to \"{}\" (retry in {}ms)...",
-                        head.status,
-                        candidates[index + 1],
-                        delay.as_millis()
-                    );
-                    if !delay.is_zero() {
-                        thread::sleep(delay);
-                    }
-                    return Ok(());
-                }
-                eprintln!(
-                    "[toolcase-gateway] upstream model \"{model}\" returned HTTP {} on final attempt",
-                    head.status
-                );
-                write_error(
-                    client,
-                    head.status,
-                    match head.status {
-                        400 => "Bad Request",
-                        401 => "Unauthorized",
-                        402 => "Payment Required",
-                        403 => "Forbidden",
-                        408 => "Request Timeout",
-                        429 => "Too Many Requests",
-                        503 => "Service Unavailable",
-                        502 => "Bad Gateway",
-                        500 => "Internal Server Error",
-                        504 => "Gateway Timeout",
-                        _ => "Service Unavailable",
-                    },
-                    &format!(
-                        "toolcase-gateway: all upstream models exhausted; model \"{model}\" returned HTTP {}",
-                        head.status
-                    ),
-                )
-            } else {
-                if head.status >= 400 {
-                    let body_snippet = String::from_utf8_lossy(&head.buffered_body)
-                        .trim()
-                        .to_string();
-                    if !body_snippet.is_empty() {
-                        eprintln!(
-                            "[toolcase-gateway] model \"{model}\" accepted with HTTP {} but body preview: {}",
-                            head.status, body_snippet
-                        );
-                    }
-                }
-                eprintln!(
-                    "[toolcase-gateway] model \"{model}\" accepted with HTTP {}",
-                    head.status
-                );
-                stream_response(client, &mut upstream, head, &request.body)?;
-                Ok(())
-            }
-        });
-
-        match attempt {
-            Ok(()) => {
-                if let Some(status) = last_status {
-                    if !RETRYABLE.contains(&status) {
-                        return Ok(());
-                    }
-                } else {
-                    return Ok(());
-                }
-            }
-            Err(error) if !last => {
-                let delay = calculate_retry_delay(
-                    index,
-                    config.retry_base_delay_ms,
-                    config.max_retry_delay_ms,
-                    None,
-                );
-                eprintln!(
-                    "[toolcase-gateway] upstream model \"{model}\" failed ({}). Failing over to \"{}\" (retry in {}ms)...",
-                    error.kind(),
-                    candidates[index + 1],
-                    delay.as_millis()
-                );
-                if !delay.is_zero() {
-                    thread::sleep(delay);
-                }
-            }
-            Err(error) => {
-                eprintln!(
-                    "[toolcase-gateway] model \"{model}\" failed on final attempt ({})",
-                    error.kind()
-                );
-                return write_error(
-                    client,
-                    502,
-                    match last_status {
-                        Some(400) => "Bad Request",
-                        Some(401) => "Unauthorized",
-                        Some(402) => "Payment Required",
-                        Some(403) => "Forbidden",
-                        Some(408) => "Request Timeout",
-                        Some(429) => "Too Many Requests",
-                        Some(503) => "Service Unavailable",
-                        Some(502) => "Bad Gateway",
-                        Some(500) => "Internal Server Error",
-                        Some(504) => "Gateway Timeout",
-                        _ => "Bad Gateway",
-                    },
-                    &format!(
-                        "toolcase-gateway: all upstream models exhausted; model \"{model}\" failed ({})",
-                        error.kind()
-                    ),
-                );
-            }
-        }
-    }
-
-    write_error(
-        client,
-        last_status.unwrap_or(502),
-        match last_status {
-            Some(400) => "Bad Request",
-            Some(401) => "Unauthorized",
-            Some(402) => "Payment Required",
-            Some(403) => "Forbidden",
-            Some(408) => "Request Timeout",
-            Some(429) => "Too Many Requests",
-            Some(503) => "Service Unavailable",
-            Some(502) => "Bad Gateway",
-            Some(500) => "Internal Server Error",
-            Some(504) => "Gateway Timeout",
-            _ => "Bad Gateway",
-        },
-        &format!(
-            "toolcase-gateway: all upstream models exhausted; model \"{}\" returned {}",
-            candidates.last().map(String::as_str).unwrap_or("unknown"),
-            last_status
-                .map(|status| format!("HTTP {status}"))
-                .unwrap_or_else(|| "an unavailable upstream response".to_string())
-        ),
-    )
-}
-
-const EFFORT_SUFFIXES: [&str; 4] = ["-xhigh", "-high", "-medium", "-low"];
-
-fn normalize_model_id(requested: &str, default_model: &str) -> String {
-    let trimmed = default_model.trim();
-    if trimmed.is_empty() {
-        return requested.to_string();
-    }
-    // Already a known model id — pass through unchanged.
-    if requested == trimmed {
-        return requested.to_string();
-    }
-    for suffix in EFFORT_SUFFIXES {
-        if let Some(base) = requested.strip_suffix(suffix) {
-            if base == trimmed {
-                // e.g. "gpt-5.6-sol-high" — already valid, keep it.
-                return requested.to_string();
-            }
-            // Unknown base with a recognised effort level: keep the effort,
-            // rewrite the base to the configured default.
-            eprintln!(
-                "[toolcase-gateway] repairing unknown model \"{}\" to \"{trimmed}{suffix}\"",
-                requested
-            );
-            return format!("{trimmed}{suffix}");
-        }
-    }
-    // No recognised effort suffix and the base is not the default: fall back to
-    // the default model so the request uses an id the upstream actually knows.
-    eprintln!(
-        "[toolcase-gateway] repairing unknown model \"{}\" to configured default \"{trimmed}\"",
-        requested
-    );
-    trimmed.to_string()
+    crate::features::proxy::ProxyService::forward(client, request, config)
 }
 
 pub fn candidate_models(
@@ -357,25 +61,5 @@ pub fn candidate_models(
     rotation: usize,
     default_model: &str,
 ) -> Vec<String> {
-    let mut candidates = Vec::new();
-    if let Ok(text) = std::str::from_utf8(body) {
-        if let Some(model) = json_string_value(text, "model") {
-            // Normalize model ID without Prism-specific handling
-            let normalized = normalize_model_id(&model, default_model);
-            candidates.push(normalized);
-        }
-    }
-    if !fallbacks.is_empty() {
-        let offset = rotation % fallbacks.len();
-        for step in 0..fallbacks.len() {
-            let fallback = &fallbacks[(offset + step) % fallbacks.len()];
-            if !candidates.iter().any(|v| v == fallback) {
-                candidates.push(fallback.clone());
-            }
-        }
-    }
-    if candidates.is_empty() {
-        candidates.push(default_model.trim().to_string());
-    }
-    candidates
+    crate::gateway::candidates::plan_candidates(body, fallbacks, rotation, default_model)
 }

@@ -1,9 +1,9 @@
 use crate::config::Config;
-use crate::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
-use crate::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
-use crate::museai::session::{bootstrap_museai_config, build_museai_ws_url};
-use crate::museai::transport::MuseWebSocket;
-use crate::museai::MuseApprovalRequired;
+use crate::providers::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
+use crate::providers::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
+use crate::providers::museai::session::{bootstrap_museai_config, build_museai_ws_url};
+use crate::providers::museai::transport::MuseWebSocket;
+use crate::providers::museai::MuseApprovalRequired;
 use std::io;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -347,7 +347,7 @@ pub fn build_muse_chat_request(prompt: &str) -> serde_json::Value {
 }
 
 pub fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {
-    let extracted = crate::museai::video::extract_url_from_text(&stream.text);
+    let extracted = crate::providers::museai::video::extract_url_from_text(&stream.text);
     (!extracted.is_empty()).then_some(extracted)
 }
 
@@ -507,7 +507,8 @@ pub fn request_museai_chat_completion(
     let (thread_id, full_assistant_text) = stream.finish()?;
 
     let mut video_url: Option<String> = {
-        let extracted = crate::museai::video::extract_url_from_text(&full_assistant_text);
+        let extracted =
+            crate::providers::museai::video::extract_url_from_text(&full_assistant_text);
         (!extracted.is_empty()).then_some(extracted)
     };
     if wait_for_video_artifact
@@ -549,9 +550,13 @@ pub fn request_museai_chat_completion(
 
     if config.museai_auto_cleanup_threads && !thread_id.is_empty() {
         if config.museai_thread_retention_secs == 0 {
-            let _ = crate::museai::delete_muse_thread(base_origin, &thread_id, &config);
+            let _ = crate::providers::museai::delete_muse_thread(base_origin, &thread_id, &config);
         } else {
-            crate::museai::register_thread(thread_id, base_origin.to_string(), config.clone());
+            crate::providers::museai::register_thread(
+                thread_id,
+                base_origin.to_string(),
+                config.clone(),
+            );
         }
     }
 

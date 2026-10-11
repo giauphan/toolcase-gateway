@@ -71,18 +71,27 @@ pub struct Config {
 pub struct ConfigStore {
     inner: Arc<RwLock<Config>>,
     pub env_file: PathBuf,
+    pub jev_pool: Arc<crate::providers::jev::accounts::JevAccountPool>,
 }
 
 impl ConfigStore {
     pub fn new(config: Config, env_file: PathBuf) -> Self {
+        let pool = Arc::new(crate::providers::jev::accounts::JevAccountPool::new(
+            &config.jev_api_keys,
+        ));
         Self {
             inner: Arc::new(RwLock::new(config)),
             env_file,
+            jev_pool: pool,
         }
     }
 
     pub fn snapshot(&self) -> Config {
         self.inner.read().unwrap().clone()
+    }
+
+    pub fn jev_pool(&self) -> Arc<crate::providers::jev::accounts::JevAccountPool> {
+        self.jev_pool.clone()
     }
 
     pub fn write_guard(&self) -> std::sync::RwLockWriteGuard<'_, Config> {
