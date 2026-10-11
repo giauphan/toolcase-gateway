@@ -3,13 +3,16 @@ use crate::http::Request;
 use crate::providers::omniroute::OmniRouteAdapter;
 use std::io;
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
+
+static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub struct ProxyService;
 
 impl ProxyService {
     pub fn forward(client: &mut TcpStream, request: &Request, config: &Config) -> io::Result<()> {
-        let rotation = 0;
+        let rotation = RR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let candidates = crate::gateway::candidates::plan_candidates(
             &request.body,
             &config.fallbacks,
@@ -69,7 +72,7 @@ impl ProxyService {
                             return crate::http::write_error(
                                     client,
                                     head.status,
-                                    "Service Unavailable",
+                                    &head.reason,
                                     &format!("toolcase-gateway: all upstream models exhausted; model \"{model}\" returned HTTP {}", head.status),
                                 );
                         } else {

@@ -44,22 +44,26 @@ impl AdmissionController {
     }
 
     pub fn acquire_connection(&self) -> Option<ConnectionGuard> {
-        let current = self.active_connections.load(Ordering::Relaxed);
-        if current >= self.max_connections {
-            return None;
-        }
-        self.active_connections.fetch_add(1, Ordering::Relaxed);
+        self.active_connections
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current
+                    .checked_add(1)
+                    .filter(|next| *next <= self.max_connections)
+            })
+            .ok()?;
         Some(ConnectionGuard {
             active_connections: self.active_connections.clone(),
         })
     }
 
     pub fn acquire_bytes(&self, amount: usize) -> Option<ByteGuard> {
-        let current = self.in_flight_bytes.load(Ordering::Relaxed);
-        if current.saturating_add(amount) > self.max_in_flight_bytes {
-            return None;
-        }
-        self.in_flight_bytes.fetch_add(amount, Ordering::Relaxed);
+        self.in_flight_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current
+                    .checked_add(amount)
+                    .filter(|next| *next <= self.max_in_flight_bytes)
+            })
+            .ok()?;
         Some(ByteGuard {
             amount,
             in_flight_bytes: self.in_flight_bytes.clone(),
@@ -89,5 +93,75 @@ mod tests {
         assert!(controller.acquire_bytes(50).is_none());
         drop(b1);
         assert!(controller.acquire_bytes(50).is_some());
+    }
+
+    #[test]
+    fn concurrent_connections_never_exceed_limit() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const CONTENDERS: usize = 32;
+        let controller = Arc::new(AdmissionController::new(1, 1024));
+        let start = Arc::new(Barrier::new(CONTENDERS));
+        let acquired = Arc::new(Barrier::new(CONTENDERS));
+        let handles: Vec<_> = (0..CONTENDERS)
+            .map(|_| {
+                let controller = controller.clone();
+                let start = start.clone();
+                let acquired = acquired.clone();
+                thread::spawn(move || {
+                    start.wait();
+                    let guard = controller.acquire_connection();
+                    let succeeded = guard.is_some();
+                    acquired.wait();
+                    (succeeded, guard)
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(
+            results.iter().filter(|(succeeded, _)| *succeeded).count(),
+            1
+        );
+        drop(results);
+        assert!(controller.acquire_connection().is_some());
+    }
+
+    #[test]
+    fn concurrent_byte_acquisitions_never_exceed_limit() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const CONTENDERS: usize = 32;
+        let controller = Arc::new(AdmissionController::new(10, 100));
+        let start = Arc::new(Barrier::new(CONTENDERS));
+        let acquired = Arc::new(Barrier::new(CONTENDERS));
+        let handles: Vec<_> = (0..CONTENDERS)
+            .map(|_| {
+                let controller = controller.clone();
+                let start = start.clone();
+                let acquired = acquired.clone();
+                thread::spawn(move || {
+                    start.wait();
+                    let guard = controller.acquire_bytes(60);
+                    let succeeded = guard.is_some();
+                    acquired.wait();
+                    (succeeded, guard)
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(
+            results.iter().filter(|(succeeded, _)| *succeeded).count(),
+            1
+        );
+        drop(results);
+        assert!(controller.acquire_bytes(100).is_some());
     }
 }
