@@ -118,7 +118,7 @@ fn exhausted_models_report_final_model_and_status() {
             let _request = toolcase_gateway::http::read_request(&mut socket).unwrap();
             socket
                 .write_all(
-                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    b"HTTP/1.1 503 Upstream Overloaded\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 )
                 .unwrap();
         }
@@ -137,6 +137,7 @@ fn exhausted_models_report_final_model_and_status() {
 
     let response = read_response_head(&mut client).unwrap();
     assert_eq!(response.status, 503);
+    assert_eq!(response.reason, "Upstream Overloaded");
     let mut body = response.buffered_body;
     client.read_to_end(&mut body).unwrap();
     let body = String::from_utf8_lossy(&body);

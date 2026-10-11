@@ -3,27 +3,29 @@
 
 use std::io::{self, ErrorKind};
 use std::net::TcpListener;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
+pub mod codecs;
 pub mod config;
+pub mod features;
+pub mod gateway;
 pub mod har_config;
 pub mod http;
 pub mod http_provider;
 pub mod jev;
 pub mod museai;
 pub mod omniroute;
+pub mod providers;
 pub mod rewrite;
 pub mod routes;
+pub mod runtime;
 pub mod test_helpers;
 pub mod video_template;
 
 pub use config::*;
 pub use http::*;
 pub use routes::*;
-
-static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 pub fn run() -> io::Result<()> {
     let _ = dotenvy::dotenv();
@@ -73,9 +75,13 @@ pub fn run() -> io::Result<()> {
     if config.museai_auto_cleanup_threads && config.museai_thread_retention_secs > 0 {
         crate::museai::start_cleanup_worker();
     }
+    let admission = crate::runtime::admission::AdmissionController::new(
+        max_connections,
+        crate::runtime::admission::DEFAULT_MAX_IN_FLIGHT_BYTES,
+    );
     for stream in listener.incoming() {
         let Ok(client) = stream else { continue };
-        if ACTIVE.load(Ordering::Relaxed) >= max_connections {
+        let Some(conn_guard) = admission.acquire_connection() else {
             let mut client = client;
             let _ = write_error(
                 &mut client,
@@ -84,14 +90,14 @@ pub fn run() -> io::Result<()> {
                 "too many connections",
             );
             continue;
-        }
+        };
         if let Some(timeout) = config.io_timeout {
             let _ = client.set_read_timeout(Some(timeout));
             let _ = client.set_write_timeout(Some(timeout));
         }
-        ACTIVE.fetch_add(1, Ordering::Relaxed);
         let store = store.clone();
         thread::spawn(move || {
+            let _guard = conn_guard;
             if let Err(error) = route_request(client, &store) {
                 if !matches!(
                     error.kind(),
@@ -100,7 +106,6 @@ pub fn run() -> io::Result<()> {
                     eprintln!("[toolcase-gateway] request failed: {}", error.kind());
                 }
             }
-            ACTIVE.fetch_sub(1, Ordering::Relaxed);
         });
     }
     Ok(())

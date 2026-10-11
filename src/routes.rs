@@ -99,13 +99,14 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
     }
 
     let snapshot = store.snapshot();
-    route_request_impl(&mut client, &request, &snapshot)
+    route_request_impl(&mut client, &request, &snapshot, &store.jev_pool())
 }
 
 fn route_request_impl(
     client: &mut TcpStream,
     request: &crate::http::Request,
     config: &Config,
+    jev_pool: &crate::providers::jev::accounts::JevAccountPool,
 ) -> io::Result<()> {
     let clean_path = request
         .path
@@ -175,7 +176,7 @@ fn route_request_impl(
         || clean_path == "/jev-ai/v1/models"
     {
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::jev::handle_jev_models_catalog(client, request, config)
+            crate::jev::handle_jev_models_catalog(client, request, config, jev_pool)
         } else {
             write_error(
                 client,
@@ -186,11 +187,11 @@ fn route_request_impl(
         };
     }
     if clean_path == "/jev/v1" || clean_path.starts_with("/jev/v1/") {
-        let expected = crate::jev::handlers::expected_jev_method(clean_path);
+        let expected = crate::providers::jev::adapter::expected_jev_method(clean_path);
         if expected.is_some()
             && expected.is_some_and(|method| request.method.eq_ignore_ascii_case(method))
         {
-            return crate::jev::handle_jev_ai(client, request, config);
+            return crate::jev::handle_jev_ai(client, request, config, jev_pool);
         }
         return write_error(
             client,
@@ -200,11 +201,11 @@ fn route_request_impl(
         );
     }
     if clean_path == "/jev-ai/v1" || clean_path.starts_with("/jev-ai/v1/") {
-        let expected = crate::jev::handlers::expected_jev_method(clean_path);
+        let expected = crate::providers::jev::adapter::expected_jev_method(clean_path);
         if expected.is_some()
             && expected.is_some_and(|method| request.method.eq_ignore_ascii_case(method))
         {
-            return crate::jev::handle_jev_ai(client, request, config);
+            return crate::jev::handle_jev_ai(client, request, config, jev_pool);
         }
         return write_error(
             client,

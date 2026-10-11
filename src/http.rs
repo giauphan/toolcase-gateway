@@ -23,6 +23,7 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
+#[derive(Clone, Debug)]
 pub struct ResponseHead {
     pub status: u16,
     pub reason: String,
@@ -230,6 +231,8 @@ pub fn read_response_head(stream: &mut TcpStream) -> io::Result<ResponseHead> {
     })
 }
 
+pub const MAX_STREAM_BYTES: usize = 128 * 1024 * 1024; // 128 MB maximum streamed bytes guard
+
 pub fn stream_response(
     client: &mut TcpStream,
     upstream: &mut TcpStream,
@@ -252,6 +255,7 @@ pub fn stream_response(
         "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
     )?;
 
+    let mut total_streamed: usize = 0;
     let mut buffered = head.buffered_body;
     let chunked = is_chunked(&head.headers);
     let length = header_value(&head.headers, "content-length").and_then(|v| v.parse().ok());
@@ -261,6 +265,13 @@ pub fn stream_response(
         if chunked {
             let decoded = read_one_chunk(upstream, &mut buffered)?;
             let Some(decoded) = decoded else { break };
+            total_streamed = total_streamed.saturating_add(decoded.len());
+            if total_streamed > MAX_STREAM_BYTES {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "stream exceeded maximum byte budget",
+                ));
+            }
             output.extend_from_slice(&decoded);
         } else if remaining == Some(0) {
             break;
@@ -274,6 +285,13 @@ pub fn stream_response(
                 buffered.extend_from_slice(&temp[..count]);
             }
             let take = remaining.map_or(buffered.len(), |n| n.min(buffered.len()));
+            total_streamed = total_streamed.saturating_add(take);
+            if total_streamed > MAX_STREAM_BYTES {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "stream exceeded maximum byte budget",
+                ));
+            }
             output.extend(buffered.drain(..take));
             if let Some(n) = &mut remaining {
                 *n -= take;

@@ -3,8 +3,8 @@ use crate::http::{header_value, write_error, Request};
 use crate::http_provider::{
     execute_http_failover, write_ureq_response, FailoverCandidate, FailoverConfig,
 };
-use crate::jev::business::is_retryable;
-use crate::jev::pool::JevAccountPool;
+use crate::providers::jev::accounts::JevAccountPool;
+use crate::providers::jev::business::is_retryable;
 use std::io;
 use std::net::TcpStream;
 
@@ -49,14 +49,6 @@ fn is_valid_request_id(request_id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-pub fn map_jev_upstream_path(inbound_path: &str) -> Option<String> {
-    jev_route(inbound_path).map(|(path, _)| path)
-}
-
-pub fn expected_jev_method(inbound_path: &str) -> Option<&'static str> {
-    jev_route(inbound_path).map(|(_, method)| method)
-}
-
 fn configured_jev_keys(request: &Request, config: &Config) -> Vec<String> {
     if !config.jev_api_keys.is_empty() {
         return config.jev_api_keys.clone();
@@ -87,9 +79,16 @@ pub fn handle_jev_models_catalog(
     client: &mut TcpStream,
     request: &Request,
     config: &Config,
+    jev_pool: &JevAccountPool,
 ) -> io::Result<()> {
-    let keys = configured_jev_keys(request, config);
-    let pool = JevAccountPool::new(&keys);
+    let fallback_pool;
+    let pool = if !jev_pool.is_empty() {
+        jev_pool
+    } else {
+        let keys = configured_jev_keys(request, config);
+        fallback_pool = JevAccountPool::new(&keys);
+        &fallback_pool
+    };
     let base_url = config.jev_base_url.trim_end_matches('/');
     let target_url = format!("{base_url}/api/v1/models/");
     let agent_config = ureq::Agent::config_builder()
@@ -114,10 +113,21 @@ pub fn handle_jev_models_catalog(
     }
 }
 
-pub fn handle_jev_ai(client: &mut TcpStream, request: &Request, config: &Config) -> io::Result<()> {
-    let keys = configured_jev_keys(request, config);
+pub fn handle_jev_ai(
+    client: &mut TcpStream,
+    request: &Request,
+    config: &Config,
+    jev_pool: &JevAccountPool,
+) -> io::Result<()> {
+    let fallback_pool;
+    let pool = if !jev_pool.is_empty() {
+        jev_pool
+    } else {
+        let keys = configured_jev_keys(request, config);
+        fallback_pool = JevAccountPool::new(&keys);
+        &fallback_pool
+    };
 
-    let pool = JevAccountPool::new(&keys);
     if pool.is_empty() {
         return write_error(
             client,
@@ -127,9 +137,41 @@ pub fn handle_jev_ai(client: &mut TcpStream, request: &Request, config: &Config)
         );
     }
 
-    let Some(upstream_path) = map_jev_upstream_path(&request.path) else {
-        return write_error(client, 404, "Not Found", "unknown Jev Decision API route");
+    let clean = request
+        .path
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/');
+    let relative = if clean == "/jev/models" {
+        "models"
+    } else {
+        clean
+            .strip_prefix("/jev/v1/")
+            .or_else(|| clean.strip_prefix("/jev-ai/v1/"))
+            .unwrap_or("")
     };
+
+    let upstream_path = match relative {
+        "models" => "/api/v1/models/".to_string(),
+        "systemone" => "/api/v1/systemone/".to_string(),
+        _ => {
+            let segments: Vec<&str> = relative.split('/').collect();
+            if segments.first() == Some(&"requests") {
+                let request_id = segments.get(1).copied().unwrap_or("");
+                if segments.len() == 2 {
+                    format!("/api/v1/requests/{request_id}/")
+                } else if segments.len() == 3 && segments[2] == "cancel" {
+                    format!("/api/v1/requests/{request_id}/cancel/")
+                } else {
+                    return write_error(client, 404, "Not Found", "unknown Jev route");
+                }
+            } else {
+                return write_error(client, 404, "Not Found", "unknown Jev route");
+            }
+        }
+    };
+
     let base_url = config.jev_base_url.trim_end_matches('/');
     let target_url = format!("{base_url}{upstream_path}");
 
@@ -173,4 +215,12 @@ pub fn handle_jev_ai(client: &mut TcpStream, request: &Request, config: &Config)
             }
         },
     )
+}
+
+pub fn expected_jev_method(inbound_path: &str) -> Option<&'static str> {
+    jev_route(inbound_path).map(|(_, method)| method)
+}
+
+pub fn map_jev_upstream_path(inbound_path: &str) -> Option<String> {
+    jev_route(inbound_path).map(|(path, _)| path)
 }
