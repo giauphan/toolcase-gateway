@@ -123,7 +123,7 @@ pub fn handle_jev_ai(client: &mut TcpStream, request: &Request, config: &Config)
             client,
             401,
             "Unauthorized",
-            "No Jev AI accounts configured. Set JEV_API_KEY or GW_JEV_API_KEYS, or pass Authorization: Bearer <key>",
+            "No Jev AI accounts configured. Set GW_JEV_API_KEYS or pass Authorization: Bearer <key>",
         );
     }
 

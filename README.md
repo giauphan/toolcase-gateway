@@ -113,7 +113,7 @@ automatically falls back to the next account.
 
 **Set multiple Jev AI account keys** (Jev AI Tools: up to 300 credits/month,
 capped 30/day; Jev AI Space: 200 one-time credits; Jev AI Playground:
-5 welcome credits + daily claims) via `GW_JEV_API_KEYS`:
+5 welcome credits + daily claims) with comma-separated `GW_JEV_API_KEYS`:
 
 ```text
 GW_JEV_API_KEYS="<Jev-Account-1-Key>,<Jev-Account-2-Key>,<Jev-Account-3-Key>"
@@ -136,7 +136,7 @@ All configuration is environment variables, read once at startup.
 | `GW_TARGET_HOST` | `127.0.0.1` | Upstream host. |
 | `GW_TARGET_PORT` | `20128` | Upstream port. |
 | `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated fallback models, tried in round-robin order. |
-| `GW_JEV_API_KEYS` | empty | Comma-separated Jev AI account keys for multi-account round-robin and credit failover. |
+| `GW_JEV_API_KEYS` | empty | One or more comma-separated Jev AI account keys for credit failover. |
 | `GW_MAX_CONNECTIONS` | `256` | Concurrent connection cap; excess gets `503`. |
 | `GW_IO_TIMEOUT_SECS` | `120` | Read/write timeout per socket. `0` disables. |
 

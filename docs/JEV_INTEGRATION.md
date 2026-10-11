@@ -4,14 +4,14 @@ Jev is a decision service, not an OpenAI-compatible chat API. Send `state` and `
 
 ## Configuration
 
-Set `JEV_API_KEY` to one key or a comma-separated list. `GW_JEV_API_KEYS` also accepts a comma-separated list; when both are set, the gateway uses both lists. Keys rotate between requests and fail over to the next key on account errors.
+Set `GW_JEV_API_KEYS` to one key or a comma-separated list. Keys rotate between requests and fail over to the next key on account errors.
 
 ```sh
-JEV_API_KEY="<key-1>,<key-2>"
+GW_JEV_API_KEYS="<key-1>,<key-2>"
 GW_JEV_BASE_URL="https://jev-ai.org"
 ```
 
-`GW_JEV_BASE_URL` defaults to `https://jev-ai.org`. Set it to another `http://` or `https://` base URL for a test or alternate deployment. When neither key variable is set, requests can supply `Authorization: Bearer <key>` or `x-api-key: <key>`. Keep keys out of public clients and source control.
+`GW_JEV_BASE_URL` defaults to `https://jev-ai.org`. Set it to another `http://` or `https://` base URL for a test or alternate deployment. When `GW_JEV_API_KEYS` is empty, requests can supply `Authorization: Bearer <key>` or `x-api-key: <key>`. Keep keys out of public clients and source control.
 
 ## Routes
 

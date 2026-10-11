@@ -1,8 +1,17 @@
 //! Integration tests for the Jev AI multi-account pool and retryable-status logic.
 
+use toolcase_gateway::config::parse_jev_api_keys;
 use toolcase_gateway::jev::business::{is_account_retryable, is_retryable, is_transient_retryable};
 use toolcase_gateway::jev::handlers::map_jev_upstream_path;
 use toolcase_gateway::jev::pool::JevAccountPool;
+
+#[test]
+fn parse_jev_api_keys_trims_and_ignores_empty_entries() {
+    assert_eq!(
+        parse_jev_api_keys(" primary-key, ,secondary-key ,, "),
+        vec!["primary-key", "secondary-key"]
+    );
+}
 
 #[test]
 fn test_jev_account_pool_round_robin() {

@@ -10,6 +10,15 @@ pub fn env_or(key: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.into())
 }
 
+pub fn parse_jev_api_keys(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 pub fn env_or_duration_ms(key: &str, fallback: u64) -> u64 {
     env::var(key)
         .ok()

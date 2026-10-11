@@ -61,7 +61,7 @@ The gateway routes inbound HTTP requests through distinct subsystem pipelines vi
   - `src/museai/mod.rs` (32 lines): Thin public facade exposing crate-level re-exports.
 
 ### 2.3. Jev Subsystem (`src/jev/`)
-- Multi-account rotation pool for Jev endpoints (`GW_JEV_API_KEYS`).
+- Multi-account failover pool for Jev endpoints (`GW_JEV_API_KEYS`, comma-separated).
 - Handlers in `src/jev/handlers.rs` (221 lines), Account Pool in `src/jev/pool.rs` (104 lines), Business classification in `src/jev/business.rs` (21 lines).
 
 ### 2.4. Configuration & HAR Importer (`src/har_config.rs`, `src/config.rs`)
