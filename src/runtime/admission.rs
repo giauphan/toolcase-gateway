@@ -44,30 +44,49 @@ impl AdmissionController {
     }
 
     pub fn acquire_connection(&self) -> Option<ConnectionGuard> {
-        self.active_connections
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                current
-                    .checked_add(1)
-                    .filter(|next| *next <= self.max_connections)
-            })
-            .ok()?;
-        Some(ConnectionGuard {
-            active_connections: self.active_connections.clone(),
-        })
+        let mut current = self.active_connections.load(Ordering::Relaxed);
+        loop {
+            if current >= self.max_connections {
+                return None;
+            }
+            match self.active_connections.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(ConnectionGuard {
+                        active_connections: self.active_connections.clone(),
+                    });
+                }
+                Err(actual) => current = actual,
+            }
+        }
     }
 
     pub fn acquire_bytes(&self, amount: usize) -> Option<ByteGuard> {
-        self.in_flight_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                current
-                    .checked_add(amount)
-                    .filter(|next| *next <= self.max_in_flight_bytes)
-            })
-            .ok()?;
-        Some(ByteGuard {
-            amount,
-            in_flight_bytes: self.in_flight_bytes.clone(),
-        })
+        let mut current = self.in_flight_bytes.load(Ordering::Relaxed);
+        loop {
+            let next = current.checked_add(amount)?;
+            if next > self.max_in_flight_bytes {
+                return None;
+            }
+            match self.in_flight_bytes.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(ByteGuard {
+                        amount,
+                        in_flight_bytes: self.in_flight_bytes.clone(),
+                    });
+                }
+                Err(actual) => current = actual,
+            }
+        }
     }
 }
 
