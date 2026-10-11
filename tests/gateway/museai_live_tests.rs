@@ -110,6 +110,7 @@ fn live_capture_config() -> Config {
         museai_auto_cleanup_threads: false,
         museai_thread_retention_secs: 0,
         jev_api_keys: vec![],
+        jev_base_url: "https://jev-ai.org".into(),
     };
     apply_muse_session_metadata(&mut config, &session);
     config
@@ -152,6 +153,7 @@ fn test_live_muse_thread_spawn_and_cleanup() {
         museai_auto_cleanup_threads: true,
         museai_thread_retention_secs: 0,
         jev_api_keys: vec![],
+        jev_base_url: "https://jev-ai.org".into(),
     };
 
     match toolcase_gateway::museai::threads::spawn_muse_thread(&base_url, &config) {
@@ -196,6 +198,7 @@ fn test_thread_cleanup_route_dispatch() {
         museai_auto_cleanup_threads: true,
         museai_thread_retention_secs: 86400,
         jev_api_keys: vec![],
+        jev_base_url: "https://jev-ai.org".into(),
     };
 
     let handle = std::thread::spawn(move || {

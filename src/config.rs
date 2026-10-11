@@ -55,6 +55,7 @@ pub struct Config {
     pub museai_auto_cleanup_threads: bool,
     pub museai_thread_retention_secs: u64,
     pub jev_api_keys: Vec<String>,
+    pub jev_base_url: String,
 }
 
 #[derive(Clone)]

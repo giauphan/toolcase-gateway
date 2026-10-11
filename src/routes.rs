@@ -175,7 +175,7 @@ fn route_request_impl(
         || clean_path == "/jev-ai/v1/models"
     {
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::jev::handle_jev_models_catalog(client)
+            crate::jev::handle_jev_models_catalog(client, request, config)
         } else {
             write_error(
                 client,
@@ -186,28 +186,32 @@ fn route_request_impl(
         };
     }
     if clean_path == "/jev/v1" || clean_path.starts_with("/jev/v1/") {
-        return if request.method.eq_ignore_ascii_case("post") {
-            crate::jev::handle_jev_ai(client, request, config)
-        } else {
-            write_error(
-                client,
-                405,
-                "Method Not Allowed",
-                "Jev chat completions only support POST",
-            )
-        };
+        let expected = crate::jev::handlers::expected_jev_method(clean_path);
+        if expected.is_some()
+            && expected.is_some_and(|method| request.method.eq_ignore_ascii_case(method))
+        {
+            return crate::jev::handle_jev_ai(client, request, config);
+        }
+        return write_error(
+            client,
+            405,
+            "Method Not Allowed",
+            "Jev Decision API routes: GET /requests/{id}, POST /systemone, /cancel",
+        );
     }
     if clean_path == "/jev-ai/v1" || clean_path.starts_with("/jev-ai/v1/") {
-        return if request.method.eq_ignore_ascii_case("post") {
-            crate::jev::handle_jev_ai(client, request, config)
-        } else {
-            write_error(
-                client,
-                405,
-                "Method Not Allowed",
-                "Jev chat completions only support POST",
-            )
-        };
+        let expected = crate::jev::handlers::expected_jev_method(clean_path);
+        if expected.is_some()
+            && expected.is_some_and(|method| request.method.eq_ignore_ascii_case(method))
+        {
+            return crate::jev::handle_jev_ai(client, request, config);
+        }
+        return write_error(
+            client,
+            405,
+            "Method Not Allowed",
+            "Jev Decision API routes: GET /requests/{id}, POST /systemone, /cancel",
+        );
     }
 
     if clean_path == "/video-template" || clean_path.starts_with("/video-template/") {

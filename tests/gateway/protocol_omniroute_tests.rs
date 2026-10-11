@@ -527,6 +527,7 @@ Connection: close
         museai_auto_cleanup_threads: true,
         museai_thread_retention_secs: 86400,
         jev_api_keys: vec![],
+        jev_base_url: "https://jev-ai.org".into(),
     };
 
     let bootstrapped = toolcase_gateway::museai::bootstrap_museai_config(&config).unwrap();

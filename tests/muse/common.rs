@@ -32,6 +32,7 @@ pub fn test_config() -> Config {
         museai_auto_cleanup_threads: true,
         museai_thread_retention_secs: 86400,
         jev_api_keys: vec![],
+        jev_base_url: "https://jev-ai.org".into(),
     }
 }
 

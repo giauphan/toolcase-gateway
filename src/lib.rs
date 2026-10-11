@@ -10,6 +10,7 @@ use std::time::Duration;
 pub mod config;
 pub mod har_config;
 pub mod http;
+pub mod http_provider;
 pub mod jev;
 pub mod museai;
 pub mod omniroute;
@@ -56,12 +57,20 @@ pub fn run() -> io::Result<()> {
         museai_thread_retention_secs: env_or("GW_MUSEAI_THREAD_RETENTION_SECS", "86400")
             .parse()
             .unwrap_or(86400),
-        jev_api_keys: env_or("GW_JEV_API_KEYS", "")
+        jev_api_keys: env_or("JEV_API_KEY", "")
             .split(',')
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_owned)
+            .chain(
+                env_or("GW_JEV_API_KEYS", "")
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_owned),
+            )
             .collect(),
+        jev_base_url: env_or("GW_JEV_BASE_URL", "https://jev-ai.org"),
     };
     let store = ConfigStore::new(config, resolve_env_file());
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;

@@ -1,85 +1,47 @@
-# Jev AI Integration & Multi-Account Guide
+# Jev Decision API
 
-`toolcase-gateway` provides built-in support for proxying Jev AI OpenAI-compatible endpoints (`/jev/v1/*` and `/jev-ai/v1/*`) with multi-account rotation and failover.
+Jev is a decision service, not an OpenAI-compatible chat API. Send `state` and `questions` to the gateway; it forwards the JSON unchanged to Jev and returns Jev's JSON response.
 
----
+## Configuration
 
-## Credit & Platform Reference
+Set `JEV_API_KEY` to one key or a comma-separated list. `GW_JEV_API_KEYS` also accepts a comma-separated list; when both are set, the gateway uses both lists. Keys rotate between requests and fail over to the next key on account errors.
 
-| Platform | Free Allowance / Credits | Usage / Referral Link |
+```sh
+JEV_API_KEY="<key-1>,<key-2>"
+GW_JEV_BASE_URL="https://jev-ai.org"
+```
+
+`GW_JEV_BASE_URL` defaults to `https://jev-ai.org`. Set it to another `http://` or `https://` base URL for a test or alternate deployment. When neither key variable is set, requests can supply `Authorization: Bearer <key>` or `x-api-key: <key>`. Keep keys out of public clients and source control.
+
+## Routes
+
+| Gateway route | Method | Jev upstream route |
 | --- | --- | --- |
-| **Jev AI Tools** | 3 free uses without account; login gives up to **300 credits/month** (capped at **30/day**) | [Try Jev AI Tools](https://jev.ai) |
-| **Jev AI Space** | **200 free credits** one-time upon registration | [Get Jev Space Credits](https://jev.ai) |
-| **Jev AI Playground** | **5 welcome credits** + daily claimable credits mechanism | [Try Jev Playground](https://jev.ai) |
+| `/jev/v1/systemone` | POST | `/api/v1/systemone/` |
+| `/jev/v1/models` | GET | `/api/v1/models/` |
+| `/jev/v1/requests/{id}` | GET | `/api/v1/requests/{id}/` |
+| `/jev/v1/requests/{id}/cancel` | POST | `/api/v1/requests/{id}/cancel/` |
 
----
+The `/jev-ai/v1/` prefix is an alias. Canonical upstream paths include trailing slashes. `/jev/v1/chat/completions` is not a chat endpoint; use `/jev/v1/systemone` with Jev's decision schema instead.
 
-## Multi-Account Configuration
-
-To aggregate multiple Jev AI account keys for maximum daily throughput and automatic failover on 401 / 402 / 429 errors:
-
-Set the comma-separated `GW_JEV_API_KEYS` environment variable:
+## Example
 
 ```sh
-GW_JEV_API_KEYS="sk-jev-account1,sk-jev-account2,sk-jev-account3"
-```
-
-The gateway automatically round-robins across all configured account keys on each request, and transparently fails over to the next active account if an account exhausts its daily credit cap (HTTP 429) or requires re-authentication (HTTP 401/402/403).
-
-Per-request authorization headers (`Authorization: Bearer <key>`) are also supported when `GW_JEV_API_KEYS` is omitted.
-
----
-
-## Integrating with AI Agent CLIs & IDEs
-
-The gateway exposes standard OpenAI-compatible endpoints at:
-- `http://127.0.0.1:20129/jev/v1`
-- `http://127.0.0.1:20129/jev-ai/v1`
-
-### 1. Claude Code CLI
-
-Set standard OpenAI environment variables before running `claude`:
-
-```sh
-export OPENAI_BASE_URL="http://127.0.0.1:20129/jev/v1"
-export OPENAI_API_KEY="sk-jev-gateway" # or set GW_JEV_API_KEYS in gateway env
-claude
-```
-
-### 2. Codex CLI
-
-Configure OpenAI provider endpoint in Codex settings or shell:
-
-```sh
-export OPENAI_BASE_URL="http://127.0.0.1:20129/jev/v1"
-export OPENAI_API_KEY="sk-jev-gateway"
-codex
-```
-
-### 3. VS Code / Cursor / JetBrains Extensions (Continue, Cline, Roo Code)
-
-In your AI plugin configuration (`~/.continue/config.json` or plugin settings):
-
-```json
-{
-  "models": [
-    {
-      "title": "Jev AI (Multi-Account)",
-      "provider": "openai",
-      "model": "gpt-4o-mini",
-      "apiBase": "http://127.0.0.1:20129/jev/v1",
-      "apiKey": "sk-jev-gateway"
+curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: ticket-8814-20261010" \
+  -d '{
+    "model": "jev-1.13",
+    "state": "A customer wants a refund for a damaged product.",
+    "questions": {
+      "refund": {
+        "type": "noul",
+        "instructions": "Is the customer requesting a refund?"
+      }
     }
-  ]
-}
+  }'
 ```
 
----
+When no key is configured on the gateway, add `-H "Authorization: Bearer <key>"` to the request. Do not use a dummy token with configured keys: gateway uses its configured account pool. The optional `Idempotency-Key` is forwarded unchanged across retries; use the same key for the same logical request.
 
-## API Endpoints
-
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/jev/v1/chat/completions` | `POST` | OpenAI-compatible chat completion route |
-| `/jev-ai/v1/chat/completions` | `POST` | Dedicated alias route |
-| `/jev/v1/models` | `GET` | Models catalog |
+Account errors `401`, `402`, `403`, and `429` trigger failover when another key is available. Jev marks `429`, `499`, `502`, `503`, and `504` retryable; malformed input (`400`, `404`, `413`, `422`) is returned without account rotation. Jev bills only successful `200` decisions; models, status lookups, and cancellation are free. See [the Jev API guide](../target/jev_ai_api_integration_guide_en.md) for schema, rate limits, and error codes.
