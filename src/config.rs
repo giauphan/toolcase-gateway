@@ -46,6 +46,21 @@ pub fn absolute_env_file(configured: PathBuf, current_dir: PathBuf) -> PathBuf {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoutingMode {
+    Existing,
+    RoundRobin,
+    Rules,
+    Jev,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelTier {
+    Fast,
+    Strong,
+    Unknown,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub target_host: String,
@@ -65,6 +80,38 @@ pub struct Config {
     pub museai_thread_retention_secs: u64,
     pub jev_api_keys: Vec<String>,
     pub jev_base_url: String,
+    pub routing_mode: RoutingMode,
+    pub jev_enabled: bool,
+    pub jev_shadow_mode: bool,
+    pub default_tier: ModelTier,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            target_host: "127.0.0.1".into(),
+            target_port: 20128,
+            fallbacks: vec!["fail-try".into()],
+            io_timeout: Some(Duration::from_secs(120)),
+            retry_base_delay_ms: 100,
+            max_retry_delay_ms: 5000,
+            default_model: "".into(),
+            museai_base_url: "https://muse.ai".into(),
+            museai_cookie: "".into(),
+            museai_ws_url: "wss://hatch.metaaivm.com/v1/noise".into(),
+            museai_access_token: "".into(),
+            museai_notary_token: "".into(),
+            museai_vm_id: "".into(),
+            museai_auto_cleanup_threads: true,
+            museai_thread_retention_secs: 86400,
+            jev_api_keys: vec![],
+            jev_base_url: "https://jev-ai.org".into(),
+            routing_mode: RoutingMode::Existing,
+            jev_enabled: false,
+            jev_shadow_mode: true,
+            default_tier: ModelTier::Strong,
+        }
+    }
 }
 
 #[derive(Clone)]

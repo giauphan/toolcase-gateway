@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::http::Request;
 use crate::providers::omniroute::OmniRouteAdapter;
+use crate::rewrite::json_string_value;
 use std::io;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -19,6 +20,26 @@ impl ProxyService {
             rotation,
             &config.default_model,
         );
+        let requested_model = std::str::from_utf8(&request.body)
+            .ok()
+            .and_then(|body| json_string_value(body, "model"))
+            .unwrap_or_else(|| candidates.first().cloned().unwrap_or_default());
+        let has_tools = std::str::from_utf8(&request.body)
+            .map(|body| body.contains("\"tools\""))
+            .unwrap_or(false);
+        let decision = crate::gateway::policy::evaluate_routing_policy(
+            &requested_model,
+            candidates,
+            config,
+            has_tools,
+        );
+        if let Some(shadow) = decision.shadow_recommendation.as_deref() {
+            eprintln!(
+                "[toolcase-gateway] routing_shadow mode={:?} requested={} recommended={} reason={}",
+                decision.strategy, requested_model, shadow, decision.reason
+            );
+        }
+        let candidates = decision.candidates;
 
         let mut last_status: Option<u16> = None;
 

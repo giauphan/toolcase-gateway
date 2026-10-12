@@ -275,6 +275,7 @@ fn forces_identity_encoding_upstream() {
         museai_thread_retention_secs: 86400,
         jev_api_keys: vec![],
         jev_base_url: "https://jev-ai.org".into(),
+        ..Config::default()
     };
     let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let client_port = client_listener.local_addr().unwrap().port();
@@ -354,6 +355,7 @@ fn test_fallback_to_config_credentials_when_header_missing() {
         museai_thread_retention_secs: 86400,
         jev_api_keys: vec![],
         jev_base_url: "https://jev-ai.org".into(),
+        ..Config::default()
     };
 
     // Test that config credentials handle work
@@ -380,6 +382,7 @@ fn test_museai_business_builds_configured_request() {
         museai_thread_retention_secs: 86400,
         jev_api_keys: vec![],
         jev_base_url: "https://jev-ai.org".into(),
+        ..Config::default()
     };
 
     let request = br#"{"target":"session","method":"GET"}"#;
@@ -410,6 +413,7 @@ fn test_museai_business_rejects_unsafe_target() {
         museai_thread_retention_secs: 86400,
         jev_api_keys: vec![],
         jev_base_url: "https://jev-ai.org".into(),
+        ..Config::default()
     };
 
     let request = br#"{"target":"../session","method":"GET"}"#;
@@ -463,6 +467,7 @@ fn test_museai_v1_mock_proxy_flow() {
             museai_thread_retention_secs: 86400,
             jev_api_keys: vec![],
             jev_base_url: "https://jev-ai.org".into(),
+            ..Config::default()
         };
 
         let (mut client, _) = mock_gw.accept().unwrap();

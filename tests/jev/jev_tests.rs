@@ -137,6 +137,7 @@ fn jev_config(upstream_port: u16, keys: &[&str]) -> Config {
         museai_thread_retention_secs: 0,
         jev_api_keys: keys.iter().map(|key| (*key).to_string()).collect(),
         jev_base_url: format!("http://127.0.0.1:{upstream_port}"),
+        ..Config::default()
     }
 }
 

@@ -61,6 +61,20 @@ pub fn run() -> io::Result<()> {
             .unwrap_or(86400),
         jev_api_keys: crate::config::parse_jev_api_keys(&env_or("GW_JEV_API_KEYS", "")),
         jev_base_url: env_or("GW_JEV_BASE_URL", "https://jev-ai.org"),
+        routing_mode: match env_or("GW_ROUTING_MODE", "existing").as_str() {
+            "existing" => crate::config::RoutingMode::Existing,
+            "round_robin" => crate::config::RoutingMode::RoundRobin,
+            "rules" => crate::config::RoutingMode::Rules,
+            "jev" => crate::config::RoutingMode::Jev,
+            _ => crate::config::RoutingMode::Existing,
+        },
+        jev_enabled: env_or("GW_JEV_ENABLED", "false").eq_ignore_ascii_case("true"),
+        jev_shadow_mode: env_or("GW_JEV_SHADOW_MODE", "true").eq_ignore_ascii_case("true"),
+        default_tier: match env_or("GW_DEFAULT_TIER", "strong").as_str() {
+            "fast" => crate::config::ModelTier::Fast,
+            "strong" => crate::config::ModelTier::Strong,
+            _ => crate::config::ModelTier::Strong,
+        },
     };
     let store = ConfigStore::new_with_limits(
         config,
