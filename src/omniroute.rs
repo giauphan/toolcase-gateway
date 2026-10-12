@@ -4,7 +4,7 @@ use std::io;
 use std::net::TcpStream;
 use std::time::Duration;
 
-pub const RETRYABLE: [u16; 11] = [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524];
+pub const RETRYABLE: [u16; 11] = [401, 402, 403, 408, 429, 499, 500, 502, 503, 504, 524];
 
 /// Pure gateway decision: check if an HTTP status code is retryable.
 pub fn is_status_retryable(status: u16) -> bool {

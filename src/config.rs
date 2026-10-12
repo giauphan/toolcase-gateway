@@ -72,10 +72,25 @@ pub struct ConfigStore {
     inner: Arc<RwLock<Config>>,
     pub env_file: PathBuf,
     pub jev_pool: Arc<crate::providers::jev::accounts::JevAccountPool>,
+    admission: Arc<crate::runtime::admission::AdmissionController>,
 }
 
 impl ConfigStore {
     pub fn new(config: Config, env_file: PathBuf) -> Self {
+        Self::new_with_limits(
+            config,
+            env_file,
+            256,
+            crate::runtime::admission::DEFAULT_MAX_IN_FLIGHT_BYTES,
+        )
+    }
+
+    pub fn new_with_limits(
+        config: Config,
+        env_file: PathBuf,
+        max_connections: usize,
+        max_in_flight_bytes: usize,
+    ) -> Self {
         let pool = Arc::new(crate::providers::jev::accounts::JevAccountPool::new(
             &config.jev_api_keys,
         ));
@@ -83,6 +98,10 @@ impl ConfigStore {
             inner: Arc::new(RwLock::new(config)),
             env_file,
             jev_pool: pool,
+            admission: Arc::new(crate::runtime::admission::AdmissionController::new(
+                max_connections,
+                max_in_flight_bytes,
+            )),
         }
     }
 
@@ -92,6 +111,10 @@ impl ConfigStore {
 
     pub fn jev_pool(&self) -> Arc<crate::providers::jev::accounts::JevAccountPool> {
         self.jev_pool.clone()
+    }
+
+    pub fn admission(&self) -> Arc<crate::runtime::admission::AdmissionController> {
+        self.admission.clone()
     }
 
     pub fn write_guard(&self) -> std::sync::RwLockWriteGuard<'_, Config> {

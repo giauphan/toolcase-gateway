@@ -21,7 +21,7 @@
 | **PR4** | Transparent vs. Adapted Modes | **Passed** | Verified transparent proxying alongside adapter-based streaming and tool-name case repair. |
 | **PR5** | Codecs & Contracts | **Passed** | Implemented capability-neutral Server-Sent Events decoding codec (`src/codecs/sse.rs`) supporting LF/CRLF/CR delimiters, multiline framing, and unit tests. |
 | **PR6** | Integration Ownership | **Passed** | Decomposed OmniRoute into application feature proxy (`src/features/proxy/service.rs`) and provider adapter (`src/providers/omniroute/adapter.rs`), Jev into `src/providers/jev/`, and MuseAI into `src/providers/museai/` under target modular V4 directory structure (`src/features/`, `src/providers/`), with facade re-exports in `src/omniroute.rs`. |
-| **PR7** | Reliability & Limits | **Passed** | Implemented RAII connection and byte quotas (`src/runtime/admission.rs`), wired admission control into connection accept loop in `src/lib.rs`, enforced `MAX_STREAM_BYTES` stream bounds in `src/http.rs`, and verified via `admission_controller_quota_guards_and_release`. |
+| **PR7** | Reliability & Limits | **Passed** | Implemented RAII connection and byte-quota guards (`src/runtime/admission.rs`); connection admission enforced in `src/lib.rs` accept loop; byte quota enforced in `src/http.rs` request parsing via `ConfigStore::admission()` — requests exceeding `DEFAULT_MAX_IN_FLIGHT_BYTES` are rejected with 503. `MAX_STREAM_BYTES` per-stream bounds enforced in `stream_response`. Verified via `admission_controller_quota_guards_and_release` and `request_is_rejected_when_byte_budget_is_exceeded`. |
 
 ## 3. Validation Summary
 - `cargo fmt --all` (passed)

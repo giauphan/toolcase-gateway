@@ -62,7 +62,12 @@ pub fn run() -> io::Result<()> {
         jev_api_keys: crate::config::parse_jev_api_keys(&env_or("GW_JEV_API_KEYS", "")),
         jev_base_url: env_or("GW_JEV_BASE_URL", "https://jev-ai.org"),
     };
-    let store = ConfigStore::new(config, resolve_env_file());
+    let store = ConfigStore::new_with_limits(
+        config,
+        resolve_env_file(),
+        max_connections,
+        crate::runtime::admission::DEFAULT_MAX_IN_FLIGHT_BYTES,
+    );
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     let config = store.snapshot();
     eprintln!(
@@ -75,10 +80,7 @@ pub fn run() -> io::Result<()> {
     if config.museai_auto_cleanup_threads && config.museai_thread_retention_secs > 0 {
         crate::museai::start_cleanup_worker();
     }
-    let admission = crate::runtime::admission::AdmissionController::new(
-        max_connections,
-        crate::runtime::admission::DEFAULT_MAX_IN_FLIGHT_BYTES,
-    );
+    let admission = store.admission();
     for stream in listener.incoming() {
         let Ok(client) = stream else { continue };
         let Some(conn_guard) = admission.acquire_connection() else {

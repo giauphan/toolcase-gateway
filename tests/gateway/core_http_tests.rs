@@ -151,9 +151,10 @@ fn muse_websocket_exchanges_binary_frames() {
 #[test]
 fn keeps_413_out_of_retry_statuses() {
     assert!(!RETRYABLE.contains(&413));
-    for status in [400, 401, 402, 403, 408, 429, 500, 502, 503, 504, 524] {
+    for status in [401, 402, 403, 408, 429, 499, 500, 502, 503, 504, 524] {
         assert!(RETRYABLE.contains(&status));
     }
+    assert!(!RETRYABLE.contains(&400));
 }
 
 #[test]
@@ -703,6 +704,82 @@ fn test_cors_preflight_response() {
         Some("*")
     );
     handle.join().unwrap();
+}
+
+#[test]
+fn request_is_rejected_when_byte_budget_is_exceeded() {
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_port = 65530;
+    let store = toolcase_gateway::config::ConfigStore::new_with_limits(
+        config,
+        std::path::PathBuf::from(".env"),
+        1,
+        4,
+    );
+    let gateway = thread::spawn(move || {
+        let (client, _) = client_listener.accept().unwrap();
+        let _ = toolcase_gateway::routes::route_request(client, &store);
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    client
+        .write_all(b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nConnection: close\r\n\r\n12345")
+        .unwrap();
+    let response = read_response_head(&mut client).unwrap();
+
+    gateway.join().unwrap();
+    assert_eq!(response.status, 503);
+}
+
+#[test]
+fn chunked_request_is_rejected_when_byte_budget_is_exceeded() {
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_port = 65530;
+    let store = toolcase_gateway::config::ConfigStore::new_with_limits(
+        config,
+        std::path::PathBuf::from(".env"),
+        1,
+        4,
+    );
+    let gateway = thread::spawn(move || {
+        let (client, _) = client_listener.accept().unwrap();
+        let _ = toolcase_gateway::routes::route_request(client, &store);
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    client
+        .write_all(b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\n12345\r\n0\r\n\r\n")
+        .unwrap();
+    let response = read_response_head(&mut client).unwrap();
+
+    gateway.join().unwrap();
+    assert_eq!(response.status, 503);
+}
+
+#[test]
+fn oversized_request_returns_413() {
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+    let store = toolcase_gateway::config::ConfigStore::new(test_config(), ".env".into());
+    let gateway = thread::spawn(move || {
+        let (client, _) = client_listener.accept().unwrap();
+        let _ = toolcase_gateway::routes::route_request(client, &store);
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    client
+        .write_all(b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 67108865\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let response = read_response_head(&mut client).unwrap();
+
+    gateway.join().unwrap();
+    assert_eq!(response.status, 413);
 }
 
 #[test]

@@ -1,8 +1,9 @@
 use crate::config::{Config, ConfigStore};
-use crate::http::{read_request, write_error};
+use crate::http::{read_request_with_admission, write_error};
 use crate::omniroute::handle_omniroute_proxy;
-use std::io::{self, Write};
-use std::net::TcpStream;
+use std::io::{self, Read, Write};
+use std::net::{Shutdown, TcpStream};
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CatalogPlatform {
@@ -45,8 +46,53 @@ pub fn handle_models_catalog(client: &mut TcpStream, platform: CatalogPlatform) 
     }
 }
 
+fn write_rejection_and_drain(
+    client: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    message: &str,
+) -> io::Result<()> {
+    write_error(client, status, reason, message)?;
+    client.flush()?;
+    let _ = client.shutdown(Shutdown::Write);
+    let _ = client.set_read_timeout(Some(Duration::from_millis(50)));
+    let mut remaining = 64 * 1024;
+    let mut buffer = [0u8; 8192];
+    while remaining > 0 {
+        let read_len = remaining.min(buffer.len());
+        match client.read(&mut buffer[..read_len]) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => remaining -= count,
+        }
+    }
+    Ok(())
+}
+
 pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<()> {
-    let request = read_request(&mut client)?;
+    let (request, _byte_guard) = match read_request_with_admission(&mut client, &store.admission())
+    {
+        Ok(request) => request,
+        Err(error) if error.kind() == io::ErrorKind::Other => {
+            return write_rejection_and_drain(
+                &mut client,
+                503,
+                "Service Unavailable",
+                "too many in-flight bytes",
+            );
+        }
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            return write_rejection_and_drain(
+                &mut client,
+                413,
+                "Payload Too Large",
+                &error.to_string(),
+            );
+        }
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            return write_rejection_and_drain(&mut client, 400, "Bad Request", &error.to_string());
+        }
+        Err(error) => return Err(error),
+    };
     let clean_path = request
         .path
         .split('?')

@@ -26,6 +26,16 @@ pub struct ByteGuard {
     in_flight_bytes: Arc<AtomicUsize>,
 }
 
+impl ByteGuard {
+    fn add_amount(&mut self, amount: usize) -> bool {
+        let Some(next) = self.amount.checked_add(amount) else {
+            return false;
+        };
+        self.amount = next;
+        true
+    }
+}
+
 impl Drop for ByteGuard {
     fn drop(&mut self) {
         self.in_flight_bytes
@@ -66,6 +76,25 @@ impl AdmissionController {
     }
 
     pub fn acquire_bytes(&self, amount: usize) -> Option<ByteGuard> {
+        self.reserve_bytes(amount).map(|_| ByteGuard {
+            amount,
+            in_flight_bytes: self.in_flight_bytes.clone(),
+        })
+    }
+
+    pub fn acquire_more_bytes(&self, guard: &mut ByteGuard, amount: usize) -> bool {
+        if self.reserve_bytes(amount).is_none() {
+            return false;
+        }
+        if guard.add_amount(amount) {
+            true
+        } else {
+            self.in_flight_bytes.fetch_sub(amount, Ordering::Relaxed);
+            false
+        }
+    }
+
+    fn reserve_bytes(&self, amount: usize) -> Option<()> {
         let mut current = self.in_flight_bytes.load(Ordering::Relaxed);
         loop {
             let next = current.checked_add(amount)?;
@@ -78,12 +107,7 @@ impl AdmissionController {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => {
-                    return Some(ByteGuard {
-                        amount,
-                        in_flight_bytes: self.in_flight_bytes.clone(),
-                    });
-                }
+                Ok(_) => return Some(()),
                 Err(actual) => current = actual,
             }
         }

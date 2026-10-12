@@ -32,6 +32,14 @@ pub struct ResponseHead {
 }
 
 pub fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
+    let admission = crate::runtime::admission::AdmissionController::new(1, usize::MAX);
+    read_request_with_admission(stream, &admission).map(|(request, _)| request)
+}
+
+pub fn read_request_with_admission(
+    stream: &mut TcpStream,
+    admission: &crate::runtime::admission::AdmissionController,
+) -> io::Result<(Request, crate::runtime::admission::ByteGuard)> {
     let raw = read_until_headers(stream, MAX_HEAD_BYTES)?;
     let split = raw
         .windows(4)
@@ -64,20 +72,23 @@ pub fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
             "conflicting framing headers",
         ));
     }
+    let length = match content_lengths.first() {
+        Some(value) => value
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid content-length"))?,
+        None => 0,
+    };
+    if length > MAX_REQUEST_BYTES {
+        return Err(io::Error::new(ErrorKind::InvalidInput, "request too large"));
+    }
+    let mut byte_guard = admission
+        .acquire_bytes(length)
+        .ok_or_else(|| io::Error::other("too many in-flight bytes"))?;
     let mut body = raw[split..].to_vec();
     if chunked {
-        body = read_chunked_body(stream, body)?;
+        body = read_chunked_body_with_admission(stream, body, admission, &mut byte_guard)?;
     } else {
-        let length = match content_lengths.first() {
-            Some(value) => value
-                .trim()
-                .parse::<usize>()
-                .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid content-length"))?,
-            None => 0,
-        };
-        if length > MAX_REQUEST_BYTES {
-            return Err(io::Error::new(ErrorKind::InvalidInput, "request too large"));
-        }
         if body.len() < length {
             let mut tail = vec![0; length - body.len()];
             stream.read_exact(&mut tail)?;
@@ -85,12 +96,15 @@ pub fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
         }
         body.truncate(length);
     }
-    Ok(Request {
-        method,
-        path,
-        headers,
-        body,
-    })
+    Ok((
+        Request {
+            method,
+            path,
+            headers,
+            body,
+        },
+        byte_guard,
+    ))
 }
 
 pub fn parse_headers<'a>(
@@ -155,11 +169,25 @@ pub fn read_until_headers(stream: &mut TcpStream, limit: usize) -> io::Result<Ve
     Ok(data)
 }
 
-pub fn read_chunked_body(stream: &mut TcpStream, mut buffered: Vec<u8>) -> io::Result<Vec<u8>> {
+pub fn read_chunked_body(stream: &mut TcpStream, buffered: Vec<u8>) -> io::Result<Vec<u8>> {
+    let admission = crate::runtime::admission::AdmissionController::new(1, usize::MAX);
+    let mut guard = admission.acquire_bytes(0).unwrap();
+    read_chunked_body_with_admission(stream, buffered, &admission, &mut guard)
+}
+
+fn read_chunked_body_with_admission(
+    stream: &mut TcpStream,
+    mut buffered: Vec<u8>,
+    admission: &crate::runtime::admission::AdmissionController,
+    byte_guard: &mut crate::runtime::admission::ByteGuard,
+) -> io::Result<Vec<u8>> {
     let mut body = Vec::new();
     loop {
         while !buffered.windows(2).any(|w| w == b"\r\n") {
             read_more(stream, &mut buffered)?;
+            if buffered.len() > MAX_REQUEST_BYTES {
+                return Err(io::Error::new(ErrorKind::InvalidInput, "request too large"));
+            }
         }
         let end = buffered.windows(2).position(|w| w == b"\r\n").unwrap();
         let size = usize::from_str_radix(
@@ -175,14 +203,27 @@ pub fn read_chunked_body(stream: &mut TcpStream, mut buffered: Vec<u8>) -> io::R
         if size == 0 {
             break;
         }
-        while buffered.len() < size + 2 {
-            read_more(stream, &mut buffered)?;
-        }
-        body.extend_from_slice(&buffered[..size]);
-        buffered.drain(..size + 2);
-        if body.len() > MAX_REQUEST_BYTES {
+        let total = body
+            .len()
+            .checked_add(size)
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "request too large"))?;
+        if total > MAX_REQUEST_BYTES {
             return Err(io::Error::new(ErrorKind::InvalidInput, "request too large"));
         }
+        if !admission.acquire_more_bytes(byte_guard, size) {
+            return Err(io::Error::other("too many in-flight bytes"));
+        }
+        let framed_size = size
+            .checked_add(2)
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "invalid chunk size"))?;
+        while buffered.len() < framed_size {
+            read_more(stream, &mut buffered)?;
+            if buffered.len() > MAX_REQUEST_BYTES {
+                return Err(io::Error::new(ErrorKind::InvalidInput, "request too large"));
+            }
+        }
+        body.extend_from_slice(&buffered[..size]);
+        buffered.drain(..framed_size);
     }
     Ok(body)
 }
