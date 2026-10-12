@@ -8,46 +8,7 @@ use crate::providers::jev::business::is_retryable;
 use std::io;
 use std::net::TcpStream;
 
-fn jev_route(inbound_path: &str) -> Option<(String, &'static str)> {
-    let clean = inbound_path.split('?').next()?.trim_end_matches('/');
-    let relative = if clean == "/jev/models" {
-        "models"
-    } else {
-        clean
-            .strip_prefix("/jev/v1/")
-            .or_else(|| clean.strip_prefix("/jev-ai/v1/"))?
-    };
-
-    match relative {
-        "models" => Some(("/api/v1/models/".to_string(), "GET")),
-        "systemone" => Some(("/api/v1/systemone/".to_string(), "POST")),
-        "requests" => None,
-        _ => {
-            let segments: Vec<&str> = relative.split('/').collect();
-            if segments.first() != Some(&"requests") {
-                return None;
-            }
-            let request_id = segments.get(1)?;
-            if !is_valid_request_id(request_id) {
-                return None;
-            }
-            match segments.len() {
-                2 => Some((format!("/api/v1/requests/{request_id}/"), "GET")),
-                3 if segments[2] == "cancel" => {
-                    Some((format!("/api/v1/requests/{request_id}/cancel/"), "POST"))
-                }
-                _ => None,
-            }
-        }
-    }
-}
-
-fn is_valid_request_id(request_id: &str) -> bool {
-    !request_id.is_empty()
-        && request_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-}
+use crate::providers::jev::route::resolve_jev_route;
 
 fn configured_jev_keys(request: &Request, config: &Config) -> Vec<String> {
     if !config.jev_api_keys.is_empty() {
@@ -137,40 +98,11 @@ pub fn handle_jev_ai(
         );
     }
 
-    let clean = request
-        .path
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .trim_end_matches('/');
-    let relative = if clean == "/jev/models" {
-        "models"
-    } else {
-        clean
-            .strip_prefix("/jev/v1/")
-            .or_else(|| clean.strip_prefix("/jev-ai/v1/"))
-            .unwrap_or("")
+    let route = match resolve_jev_route(&request.path) {
+        Some(route) => route,
+        None => return write_error(client, 404, "Not Found", "unknown Jev route"),
     };
-
-    let upstream_path = match relative {
-        "models" => "/api/v1/models/".to_string(),
-        "systemone" => "/api/v1/systemone/".to_string(),
-        _ => {
-            let segments: Vec<&str> = relative.split('/').collect();
-            if segments.first() == Some(&"requests") {
-                let request_id = segments.get(1).copied().unwrap_or("");
-                if segments.len() == 2 {
-                    format!("/api/v1/requests/{request_id}/")
-                } else if segments.len() == 3 && segments[2] == "cancel" {
-                    format!("/api/v1/requests/{request_id}/cancel/")
-                } else {
-                    return write_error(client, 404, "Not Found", "unknown Jev route");
-                }
-            } else {
-                return write_error(client, 404, "Not Found", "unknown Jev route");
-            }
-        }
-    };
+    let upstream_path = route.upstream_path;
 
     let base_url = config.jev_base_url.trim_end_matches('/');
     let target_url = format!("{base_url}{upstream_path}");
@@ -218,9 +150,9 @@ pub fn handle_jev_ai(
 }
 
 pub fn expected_jev_method(inbound_path: &str) -> Option<&'static str> {
-    jev_route(inbound_path).map(|(_, method)| method)
+    resolve_jev_route(inbound_path).map(|route| route.expected_method)
 }
 
 pub fn map_jev_upstream_path(inbound_path: &str) -> Option<String> {
-    jev_route(inbound_path).map(|(path, _)| path)
+    resolve_jev_route(inbound_path).map(|route| route.upstream_path)
 }

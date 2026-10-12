@@ -171,7 +171,9 @@ pub fn read_until_headers(stream: &mut TcpStream, limit: usize) -> io::Result<Ve
 
 pub fn read_chunked_body(stream: &mut TcpStream, buffered: Vec<u8>) -> io::Result<Vec<u8>> {
     let admission = crate::runtime::admission::AdmissionController::new(1, usize::MAX);
-    let mut guard = admission.acquire_bytes(0).unwrap();
+    let mut guard = admission
+        .acquire_bytes(0)
+        .ok_or_else(|| io::Error::other("failed to initialize admission byte guard"))?;
     read_chunked_body_with_admission(stream, buffered, &admission, &mut guard)
 }
 

@@ -2,7 +2,7 @@
 
 use toolcase_gateway::config::parse_jev_api_keys;
 use toolcase_gateway::jev::business::{is_account_retryable, is_retryable, is_transient_retryable};
-use toolcase_gateway::jev::handlers::map_jev_upstream_path;
+use toolcase_gateway::jev::handlers::{expected_jev_method, map_jev_upstream_path};
 use toolcase_gateway::jev::pool::JevAccountPool;
 
 #[test]
@@ -84,7 +84,31 @@ fn test_jev_documented_paths_map_to_canonical_endpoints() {
         map_jev_upstream_path("/jev/v1/requests/dec_123/cancel").as_deref(),
         Some("/api/v1/requests/dec_123/cancel/")
     );
-    assert_eq!(map_jev_upstream_path("/jev/v1/chat/completions"), None);
+    assert_eq!(
+        map_jev_upstream_path("/jev/models").as_deref(),
+        Some("/api/v1/models/")
+    );
+    assert_eq!(
+        map_jev_upstream_path("/jev-ai/v1/requests/req-abc_123/cancel?dry_run=true").as_deref(),
+        Some("/api/v1/requests/req-abc_123/cancel/")
+    );
+    for path in [
+        "/jev/v1/chat/completions",
+        "/jev/v1/requests",
+        "/jev/v1/requests/",
+        "/jev/v1/requests/dec_123/other",
+        "/jev/v1/requests/invalid.id",
+    ] {
+        assert_eq!(map_jev_upstream_path(path), None, "{path}");
+        assert_eq!(expected_jev_method(path), None, "{path}");
+    }
+    assert_eq!(expected_jev_method("/jev/v1/models"), Some("GET"));
+    assert_eq!(expected_jev_method("/jev/v1/systemone"), Some("POST"));
+    assert_eq!(expected_jev_method("/jev/v1/requests/dec_123"), Some("GET"));
+    assert_eq!(
+        expected_jev_method("/jev/v1/requests/dec_123/cancel"),
+        Some("POST")
+    );
 }
 
 use std::io::{Read, Write};
