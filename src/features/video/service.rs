@@ -58,6 +58,26 @@ pub fn handle_video_task_submit(
         return write_json_response(client, 400, "Bad Request", &err_body);
     }
 
+    if let Some(images) = body.get("reference_images").and_then(|v| v.as_array()) {
+        for img in images {
+            if let Some(url) = img.get("url").and_then(|v| v.as_str()) {
+                if !validate_secure_url(url) {
+                    let err_body = serde_json::json!({
+                        "error": {
+                            "code": "INVALID_INPUT",
+                            "category": "invalid_input",
+                            "retryable": false,
+                            "submission_unknown": false,
+                            "message": "reference_images url failed security validation"
+                        },
+                        "request_id": "redacted-request-id"
+                    });
+                    return write_json_response(client, 400, "Bad Request", &err_body);
+                }
+            }
+        }
+    }
+
     let err_body = serde_json::json!({
         "error": {
             "code": "UNSUPPORTED_CAPABILITY",

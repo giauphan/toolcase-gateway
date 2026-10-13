@@ -573,3 +573,76 @@ fn test_shared_contract_v1_poll_response_descriptor_serialization() {
         "https://provider-storage.example.com/generated.mp4"
     );
 }
+
+#[test]
+fn test_video_task_submit_rejects_ssrf_reference_images() {
+    let bad_body = serde_json::json!({
+        "model": "kling-v1",
+        "operation": "image_to_video",
+        "prompt": "Animate character",
+        "reference_images": [
+            {
+                "role": "first_frame",
+                "url": "https://127.0.0.1/evil.png"
+            }
+        ]
+    })
+    .to_string();
+
+    let (status, response) = request_route(
+        "POST",
+        "/video/v1/providers/kling_official/tasks",
+        &bad_body,
+        test_config(),
+    );
+    assert_eq!(status, 400);
+    assert_eq!(response["error"]["code"], "INVALID_INPUT");
+    assert_eq!(
+        response["error"]["message"],
+        "reference_images url failed security validation"
+    );
+
+    let ipv6_bad_body = serde_json::json!({
+        "model": "kling-v1",
+        "operation": "image_to_video",
+        "prompt": "Animate character",
+        "reference_images": [
+            {
+                "role": "first_frame",
+                "url": "https://[::1]/evil.png"
+            }
+        ]
+    })
+    .to_string();
+
+    let (status, response) = request_route(
+        "POST",
+        "/video/v1/providers/kling_official/tasks",
+        &ipv6_bad_body,
+        test_config(),
+    );
+    assert_eq!(status, 400);
+    assert_eq!(response["error"]["code"], "INVALID_INPUT");
+
+    let good_body = serde_json::json!({
+        "model": "kling-v1",
+        "operation": "image_to_video",
+        "prompt": "Animate character",
+        "reference_images": [
+            {
+                "role": "first_frame",
+                "url": "https://storage.example.com/frame.png"
+            }
+        ]
+    })
+    .to_string();
+
+    let (status, response) = request_route(
+        "POST",
+        "/video/v1/providers/kling_official/tasks",
+        &good_body,
+        test_config(),
+    );
+    assert_eq!(status, 422);
+    assert_eq!(response["error"]["code"], "UNSUPPORTED_CAPABILITY");
+}

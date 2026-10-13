@@ -43,7 +43,9 @@ pub fn validate_secure_url(url_str: &str) -> bool {
     let authority = rest.split('/').next().unwrap_or(rest);
     let host = authority.split('@').next_back().unwrap_or(authority);
     let host_clean = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
-    let host_trimmed = host_clean.trim_end_matches('.');
+    let host_trimmed = host_clean
+        .trim_matches(|c| c == '[' || c == ']')
+        .trim_end_matches('.');
 
     if host_trimmed.is_empty()
         || host_trimmed == "localhost"
@@ -54,7 +56,7 @@ pub fn validate_secure_url(url_str: &str) -> bool {
         || host_trimmed.starts_with("169.254.")
         || host_trimmed == "0.0.0.0"
         || host_trimmed == "::1"
-        || host_trimmed == "[::1]"
+        || host_trimmed == "0:0:0:0:0:0:0:1"
         || host_trimmed.ends_with(".internal")
         || host_trimmed.ends_with(".local")
     {
