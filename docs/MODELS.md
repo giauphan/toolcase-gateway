@@ -95,6 +95,14 @@ The gateway provides a distinct wrapper endpoint for upstream video generation u
 - `aspect_ratio` (string, optional): Desired aspect ratio request. Supported values: `16:9` (default), `9:16`, `1:1`, `5:4`, `4:3`.
 - `duration` (number or string, optional): Desired generation duration in seconds (e.g., `5`, `10`, `30`, `60`). Defaults to `5`.
 
+### Curl Smoke Test
+
+Keep the JSON payload on one physical line; real newlines inside the `prompt` string make the body invalid JSON.
+
+```bash
+curl --no-buffer --max-time 930 -H 'Content-Type: application/json' --data-raw '{"prompt":"Create a cheerful cartoon-style short video: a small orange fox wearing a blue scarf rides a skateboard through a colorful city park, bouncy animation, bright morning light, playful camera moves, whimsical clouds, no text, no logos, family-friendly.","model":"muse-video","aspect_ratio":"16:9","duration":5}' http://127.0.0.1:20130/muse-ai/v1/create-video
+```
+
 ### Response Schema
 Success returns `200 OK` with the following structure:
 ```json
