@@ -527,6 +527,9 @@ fn test_ssrf_and_url_validation_blocks_unsafe_targets() {
     assert!(!validate_secure_url(
         "https://169.254.169.254/latest/meta-data"
     ));
+    assert!(!validate_secure_url("https://[::1]/video.mp4"));
+    assert!(!validate_secure_url("https://[0:0:0:0:0:0:0:1]/video.mp4"));
+    assert!(!validate_secure_url("https://[fe80::1]/video.mp4"));
     assert!(!validate_secure_url("https://api.internal/video.mp4"));
     assert!(!validate_secure_url("https://service.local/video.mp4"));
 

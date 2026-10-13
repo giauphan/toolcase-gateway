@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -36,31 +38,51 @@ pub struct VideoTaskStatusResponse {
 }
 
 pub fn validate_secure_url(url_str: &str) -> bool {
-    if !url_str.starts_with("https://") {
+    let Some(host_trimmed) = secure_url_host(url_str) else {
         return false;
+    };
+
+    if let Ok(ip) = host_trimmed.parse::<IpAddr>() {
+        return is_public_ip(ip);
     }
-    let rest = &url_str["https://".len()..];
+
+    !(host_trimmed.is_empty()
+        || host_trimmed == "localhost"
+        || host_trimmed.ends_with(".internal")
+        || host_trimmed.ends_with(".local"))
+}
+
+fn secure_url_host(url_str: &str) -> Option<String> {
+    let rest = url_str.strip_prefix("https://")?;
     let authority = rest.split('/').next().unwrap_or(rest);
     let host = authority.split('@').next_back().unwrap_or(authority);
-    let host_clean = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
-    let host_trimmed = host_clean
-        .trim_matches(|c| c == '[' || c == ']')
-        .trim_end_matches('.');
+    let host = if host.starts_with('[') {
+        host.split(']').next()?.trim_start_matches('[')
+    } else {
+        host.split(':').next().unwrap_or(host)
+    };
+    Some(host.to_ascii_lowercase().trim_end_matches('.').to_string())
+}
 
-    if host_trimmed.is_empty()
-        || host_trimmed == "localhost"
-        || host_trimmed.starts_with("127.")
-        || host_trimmed.starts_with("10.")
-        || host_trimmed.starts_with("192.168.")
-        || host_trimmed.starts_with("172.")
-        || host_trimmed.starts_with("169.254.")
-        || host_trimmed == "0.0.0.0"
-        || host_trimmed == "::1"
-        || host_trimmed == "0:0:0:0:0:0:0:1"
-        || host_trimmed.ends_with(".internal")
-        || host_trimmed.ends_with(".local")
-    {
-        return false;
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_public_ipv4(ip),
+        IpAddr::V6(ip) => is_public_ipv6(ip),
     }
-    true
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    !(ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast())
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    let first = ip.segments()[0];
+    !(ip.is_loopback()
+        || ip.is_unspecified()
+        || first & 0xfe00 == 0xfc00
+        || first & 0xffc0 == 0xfe80)
 }
