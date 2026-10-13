@@ -43,18 +43,20 @@ pub fn validate_secure_url(url_str: &str) -> bool {
     let authority = rest.split('/').next().unwrap_or(rest);
     let host = authority.split('@').next_back().unwrap_or(authority);
     let host_clean = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
+    let host_trimmed = host_clean.trim_end_matches('.');
 
-    if host_clean.is_empty()
-        || host_clean == "localhost"
-        || host_clean.starts_with("127.")
-        || host_clean.starts_with("10.")
-        || host_clean.starts_with("192.168.")
-        || host_clean.starts_with("172.")
-        || host_clean == "0.0.0.0"
-        || host_clean == "::1"
-        || host_clean == "[::1]"
-        || host_clean.ends_with(".internal")
-        || host_clean.ends_with(".local")
+    if host_trimmed.is_empty()
+        || host_trimmed == "localhost"
+        || host_trimmed.starts_with("127.")
+        || host_trimmed.starts_with("10.")
+        || host_trimmed.starts_with("192.168.")
+        || host_trimmed.starts_with("172.")
+        || host_trimmed.starts_with("169.254.")
+        || host_trimmed == "0.0.0.0"
+        || host_trimmed == "::1"
+        || host_trimmed == "[::1]"
+        || host_trimmed.ends_with(".internal")
+        || host_trimmed.ends_with(".local")
     {
         return false;
     }

@@ -517,12 +517,16 @@ fn test_ssrf_and_url_validation_blocks_unsafe_targets() {
     assert!(!validate_secure_url("ftp://google.com"));
     assert!(!validate_secure_url("file:///etc/passwd"));
     assert!(!validate_secure_url("https://localhost/video.mp4"));
+    assert!(!validate_secure_url("https://localhost./video.mp4"));
     assert!(!validate_secure_url("https://127.0.0.1/video.mp4"));
     assert!(!validate_secure_url("https://127.0.0.1:8080/video.mp4"));
     assert!(!validate_secure_url("https://0.0.0.0/video.mp4"));
     assert!(!validate_secure_url("https://10.0.0.1/video.mp4"));
     assert!(!validate_secure_url("https://192.168.1.1/video.mp4"));
     assert!(!validate_secure_url("https://172.16.0.1/video.mp4"));
+    assert!(!validate_secure_url(
+        "https://169.254.169.254/latest/meta-data"
+    ));
     assert!(!validate_secure_url("https://api.internal/video.mp4"));
     assert!(!validate_secure_url("https://service.local/video.mp4"));
 
