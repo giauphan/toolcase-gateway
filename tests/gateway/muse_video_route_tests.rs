@@ -507,3 +507,65 @@ fn test_versioned_video_route_handles_tasks_as_task_id_and_key() {
     assert_eq!(status, 501);
     assert_eq!(response["error"]["code"], "RECONCILE_UNSUPPORTED");
 }
+
+#[test]
+fn test_ssrf_and_url_validation_blocks_unsafe_targets() {
+    use toolcase_gateway::features::video::types::validate_secure_url;
+
+    // Disallowed / SSRF targets
+    assert!(!validate_secure_url("http://google.com"));
+    assert!(!validate_secure_url("ftp://google.com"));
+    assert!(!validate_secure_url("file:///etc/passwd"));
+    assert!(!validate_secure_url("https://localhost/video.mp4"));
+    assert!(!validate_secure_url("https://127.0.0.1/video.mp4"));
+    assert!(!validate_secure_url("https://127.0.0.1:8080/video.mp4"));
+    assert!(!validate_secure_url("https://0.0.0.0/video.mp4"));
+    assert!(!validate_secure_url("https://10.0.0.1/video.mp4"));
+    assert!(!validate_secure_url("https://192.168.1.1/video.mp4"));
+    assert!(!validate_secure_url("https://172.16.0.1/video.mp4"));
+    assert!(!validate_secure_url("https://api.internal/video.mp4"));
+    assert!(!validate_secure_url("https://service.local/video.mp4"));
+
+    // Allowed public HTTPS targets
+    assert!(validate_secure_url("https://cdn.example.com/video.mp4"));
+    assert!(validate_secure_url(
+        "https://storage.googleapis.com/bucket/ref.png"
+    ));
+    assert!(validate_secure_url(
+        "https://drive.google.com/file/d/123/view"
+    ));
+}
+
+#[test]
+fn test_shared_contract_v1_poll_response_descriptor_serialization() {
+    use toolcase_gateway::features::video::types::{ArtifactDescriptor, VideoTaskStatusResponse};
+
+    let resp = VideoTaskStatusResponse {
+        schema_version: "video.transport.v1".into(),
+        provider: "kling_official".into(),
+        provider_task_id: "task-abc-123".into(),
+        provider_status: "succeeded".into(),
+        artifact_available: true,
+        artifact_url_expires_at: Some(1730000000),
+        media_validated: false,
+        reconciliation_capability: "unsupported".into(),
+        artifacts: vec![ArtifactDescriptor {
+            kind: "video".into(),
+            download_url: "https://provider-storage.example.com/generated.mp4".into(),
+        }],
+    };
+
+    let serialized = serde_json::to_value(&resp).unwrap();
+    assert_eq!(serialized["schema_version"], "video.transport.v1");
+    assert_eq!(serialized["provider"], "kling_official");
+    assert_eq!(serialized["provider_task_id"], "task-abc-123");
+    assert_eq!(serialized["provider_status"], "succeeded");
+    assert_eq!(serialized["artifact_available"], true);
+    assert_eq!(serialized["artifact_url_expires_at"], 1730000000);
+    assert_eq!(serialized["media_validated"], false);
+    assert_eq!(serialized["artifacts"][0]["kind"], "video");
+    assert_eq!(
+        serialized["artifacts"][0]["download_url"],
+        "https://provider-storage.example.com/generated.mp4"
+    );
+}
