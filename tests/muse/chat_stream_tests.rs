@@ -311,6 +311,23 @@ fn test_explicit_video_refusal_skips_delayed_artifact_wait() {
 }
 
 #[test]
+fn museai_chat_module_keeps_public_helpers_at_existing_path() {
+    use toolcase_gateway::museai::chat::{
+        build_muse_chat_request, explicit_video_refusal, extract_user_prompt,
+        parse_assistant_content_from_json,
+    };
+
+    let request = br#"{"messages":[{"role":"user","content":"hello"}]}"#;
+    assert_eq!(extract_user_prompt(request).unwrap(), "user:\nhello");
+    assert_eq!(build_muse_chat_request("hello")["message"], "hello");
+    assert_eq!(
+        parse_assistant_content_from_json(&serde_json::json!({"content": "response"})),
+        Some("response".to_string())
+    );
+    assert!(explicit_video_refusal("video generation is unavailable"));
+}
+
+#[test]
 fn museai_stream_request_uses_fresh_draft_session_id() {
     let first = build_muse_chat_request("sanitized test prompt");
     let second = build_muse_chat_request("sanitized test prompt");

@@ -1,0 +1,236 @@
+use super::{
+    build_muse_chat_request, debug_log, explicit_video_refusal, extract_user_prompt,
+    extract_video_url_from_stream, MuseChatStream,
+};
+use crate::config::Config;
+use crate::providers::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
+use crate::providers::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
+use crate::providers::museai::session::{bootstrap_museai_config, build_museai_ws_url};
+use crate::providers::museai::transport::MuseWebSocket;
+use std::io;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
+
+pub const MUSE_POST_COMPLETION_WAIT_SECS: u64 = 300;
+
+pub fn request_museai_chat_completion(
+    request_body: &[u8],
+    config: &Config,
+    wait_for_video_artifact: bool,
+) -> io::Result<String> {
+    let prompt = extract_user_prompt(request_body)?;
+    let config = bootstrap_museai_config(config)?;
+
+    let base_url = if config.museai_base_url.is_empty() {
+        "https://muse.ai"
+    } else {
+        config.museai_base_url.as_str()
+    };
+    let base_origin = base_url.trim_end_matches('/');
+
+    let req_id = Uuid::new_v4().to_string();
+    let ws_url = build_museai_ws_url(&config, &req_id)?;
+
+    let mut socket = MuseWebSocket::connect(&ws_url, base_origin, "")?;
+    let mut session = MuseNoiseSession::new_initiator(NOISE_PATTERN_XX, None)
+        .map_err(|e| io::Error::other(format!("Noise initiator error: {e}")))?;
+
+    session
+        .perform_client_handshake(&mut socket, &config.museai_notary_token)
+        .map_err(|e| io::Error::other(format!("Noise handshake error: {e}")))?;
+
+    let stream_id = 1;
+    let headers = vec![
+        Header {
+            key: "Host".to_string(),
+            value: "hatch.metaaivm.com".to_string(),
+        },
+        Header {
+            key: "Content-Type".to_string(),
+            value: "application/json".to_string(),
+        },
+        Header {
+            key: "Accept".to_string(),
+            value: "text/event-stream".to_string(),
+        },
+        Header {
+            key: "x-request-id".to_string(),
+            value: Uuid::new_v4().to_string(),
+        },
+        Header {
+            key: "x-app-id".to_string(),
+            value: "hatch-web".to_string(),
+        },
+        Header {
+            key: "Accept-Language".to_string(),
+            value: "en-US".to_string(),
+        },
+    ];
+
+    let chat_payload = build_muse_chat_request(&prompt);
+
+    let payload_bytes = serde_json::to_vec(&chat_payload)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    debug_log("Sending encrypted POST /chat/stream over Noise...");
+
+    socket.send_encrypted_service_request(
+        &mut session,
+        SERVICE_DAEMON,
+        stream_id,
+        "POST",
+        "/chat/stream",
+        &headers,
+        &payload_bytes,
+    )?;
+
+    let mut stream = MuseChatStream::default();
+    let mut active_stream_id = stream_id;
+    for _ in 0..1000 {
+        let frame = socket.read_encrypted_service_frame(&mut session)?;
+        if frame.stream_id != active_stream_id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unexpected Muse response stream",
+            ));
+        }
+        let (bytes, ended) = match frame.kind {
+            ServiceFrameKind::Response {
+                status,
+                body,
+                end_body,
+                ..
+            } => {
+                debug_log(&format!("Chat response HTTP status={status}"));
+                if !(200..300).contains(&status) {
+                    return Err(io::Error::other(format!(
+                        "Muse chat returned HTTP {status}"
+                    )));
+                }
+                (body, end_body)
+            }
+            ServiceFrameKind::BodyChunk { data, end_body } => (data, end_body),
+            ServiceFrameKind::Reset { code, .. } => {
+                return Err(io::Error::other(format!("Muse chat reset code={code}")));
+            }
+        };
+        stream.push(&bytes, ended)?;
+        if ended && active_stream_id == stream_id && !stream.completed {
+            let session_id = stream.session_id.as_deref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Muse chat acknowledgement missing",
+                )
+            })?;
+            if std::env::var("MUSE_LIVE_TEST").ok().as_deref() == Some("1") {
+                crate::test_helpers::save_live_owned_session(session_id)?;
+            }
+            let subscription = serde_json::json!({
+                "session_id": session_id,
+                "after_stream_seq": 0,
+                "after_chat_event_seq": 0,
+                "capabilities": ["chat_cancel", "delta_stream"]
+            });
+            active_stream_id = 2;
+            socket.send_encrypted_service_request(
+                &mut session,
+                SERVICE_DAEMON,
+                active_stream_id,
+                "POST",
+                "/chat/subscribe",
+                &headers,
+                subscription.to_string().as_bytes(),
+            )?;
+            continue;
+        }
+        if stream.completed || ended {
+            break;
+        }
+    }
+    let (thread_id, full_assistant_text) = stream.finish()?;
+
+    let mut video_url: Option<String> = {
+        let extracted =
+            crate::providers::museai::video::extract_url_from_text(&full_assistant_text);
+        (!extracted.is_empty()).then_some(extracted)
+    };
+    if wait_for_video_artifact
+        && video_url.is_none()
+        && !explicit_video_refusal(&full_assistant_text)
+    {
+        let deadline =
+            std::time::Instant::now() + Duration::from_secs(MUSE_POST_COMPLETION_WAIT_SECS);
+        let mut presentation_stream = MuseChatStream {
+            session_id: Some(thread_id.clone()),
+            ..Default::default()
+        };
+        while std::time::Instant::now() < deadline && video_url.is_none() {
+            match socket.read_encrypted_service_frame(&mut session) {
+                Ok(frame) => {
+                    let (bytes, ended) = match frame.kind {
+                        ServiceFrameKind::Response { body, end_body, .. } => (body, end_body),
+                        ServiceFrameKind::BodyChunk { data, end_body } => (data, end_body),
+                        ServiceFrameKind::Reset { .. } => break,
+                    };
+                    presentation_stream.push(&bytes, ended)?;
+                    if let Some(extracted) = extract_video_url_from_stream(&presentation_stream) {
+                        debug_log("Video artifact URL received");
+                        video_url = Some(extracted);
+                    }
+                }
+                Err(e) => {
+                    debug_log(&format!("Video URL read error: {e}"));
+                    break;
+                }
+            }
+        }
+    }
+
+    let created = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    if config.museai_auto_cleanup_threads && !thread_id.is_empty() {
+        if config.museai_thread_retention_secs == 0 {
+            let _ = crate::providers::museai::delete_muse_thread(base_origin, &thread_id, &config);
+        } else {
+            crate::providers::museai::register_thread(
+                thread_id,
+                base_origin.to_string(),
+                config.clone(),
+            );
+        }
+    }
+
+    let mut full_assistant_text = full_assistant_text;
+    if let Some(url) = &video_url {
+        if !full_assistant_text.contains(url.as_str()) {
+            full_assistant_text.push_str(&format!("\nVideo URL: {url}\n"));
+        }
+    }
+    let completion_response = serde_json::json!({
+        "id": format!("chatcmpl-{}", Uuid::new_v4()),
+        "object": "chat.completion",
+        "created": created,
+        "model": "muse",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": full_assistant_text
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt.len() / 4 + 1,
+            "completion_tokens": full_assistant_text.len() / 4 + 1,
+            "total_tokens": (prompt.len() + full_assistant_text.len()) / 4 + 2
+        }
+    });
+
+    serde_json::to_string(&completion_response)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
