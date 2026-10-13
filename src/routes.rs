@@ -261,6 +261,79 @@ fn route_request_impl(
         );
     }
 
+    if clean_path == "/video/v1/providers" {
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::features::video::handle_video_providers_catalog(client)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "video providers catalog only supports GET",
+            )
+        };
+    }
+
+    let parts: Vec<&str> = clean_path.split('/').collect();
+    if parts.len() == 6
+        && parts.get(1) == Some(&"video")
+        && parts.get(2) == Some(&"v1")
+        && parts.get(3) == Some(&"providers")
+        && parts.get(5) == Some(&"tasks")
+    {
+        let provider = parts.get(4).copied().unwrap_or("");
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::features::video::handle_video_task_submit(client, &request.body, provider)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "video task submit only supports POST",
+            )
+        };
+    }
+
+    if parts.len() == 8
+        && parts.get(1) == Some(&"video")
+        && parts.get(2) == Some(&"v1")
+        && parts.get(3) == Some(&"providers")
+        && parts.get(5) == Some(&"tasks")
+        && parts.get(6) == Some(&"by-key")
+    {
+        let provider = parts.get(4).copied().unwrap_or("");
+        let key = parts.get(7).copied().unwrap_or("");
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::features::video::handle_video_task_reconciliation(client, provider, key)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "reconciliation lookup only supports GET",
+            )
+        };
+    }
+
+    if parts.len() == 7
+        && parts.get(1) == Some(&"video")
+        && parts.get(2) == Some(&"v1")
+        && parts.get(3) == Some(&"providers")
+        && parts.get(5) == Some(&"tasks")
+    {
+        let provider = parts.get(4).copied().unwrap_or("");
+        let task_id = parts.get(6).copied().unwrap_or("");
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::features::video::handle_video_task_status(client, provider, task_id)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "video task status only supports GET",
+            )
+        };
+    }
     if clean_path == "/video-template" || clean_path.starts_with("/video-template/") {
         return if request.method.eq_ignore_ascii_case("get") {
             crate::video_template::handle_video_template_page(client)

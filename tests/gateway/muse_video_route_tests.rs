@@ -2,6 +2,111 @@
 #![allow(unused_imports)]
 use super::common::*;
 
+fn request_route(method: &str, path: &str, body: &str, config: Config) -> (u16, serde_json::Value) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let store =
+        toolcase_gateway::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+
+    let handle = thread::spawn(move || {
+        let (client, _) = listener.accept().unwrap();
+        toolcase_gateway::routes::route_request(client, &store).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    client.flush().unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    let mut response_body = head.buffered_body;
+    let length =
+        header_value(&head.headers, "content-length").and_then(|value| value.parse::<usize>().ok());
+    if let Some(length) = length {
+        while response_body.len() < length {
+            read_more(&mut client, &mut response_body).unwrap();
+        }
+        response_body.truncate(length);
+    } else {
+        let _ = client.read_to_end(&mut response_body);
+    }
+    handle.join().unwrap();
+    (head.status, serde_json::from_slice(&response_body).unwrap())
+}
+
+#[test]
+fn test_versioned_video_capability_listing_has_no_production_ready_native_provider() {
+    let (status, body) = request_route("GET", "/video/v1/providers", "", test_config());
+
+    assert_eq!(status, 200);
+    assert_eq!(body["schema_version"], "video.transport.v1");
+    assert_eq!(body["providers"], serde_json::json!([]));
+}
+
+#[test]
+fn test_unsupported_video_task_is_rejected_before_upstream_call() {
+    let upstream = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let upstream_port = upstream.local_addr().unwrap().port();
+    upstream.set_nonblocking(true).unwrap();
+
+    let mut config = test_config();
+    config.target_host = "127.0.0.1".into();
+    config.target_port = upstream_port;
+    let body = serde_json::json!({
+        "model": "unverified-model",
+        "operation": "text_to_video",
+        "prompt": "A cat"
+    })
+    .to_string();
+    let (status, response) = request_route(
+        "POST",
+        "/video/v1/providers/unverified/tasks",
+        &body,
+        config,
+    );
+
+    assert_eq!(status, 422);
+    assert!(upstream.accept().is_err(), "route must not call upstream");
+    assert_eq!(response["error"]["code"], "UNSUPPORTED_CAPABILITY");
+    assert_eq!(response["error"]["category"], "invalid_input");
+    assert_eq!(response["error"]["retryable"], false);
+    assert_eq!(response["error"]["submission_unknown"], false);
+}
+
+#[test]
+fn test_versioned_video_errors_have_stable_json_envelope() {
+    let body = serde_json::json!({
+        "model": "unverified-model",
+        "operation": "text_to_video",
+        "prompt": "A cat"
+    })
+    .to_string();
+    let (status, response) = request_route(
+        "POST",
+        "/video/v1/providers/unverified/tasks",
+        &body,
+        test_config(),
+    );
+
+    assert_eq!(status, 422);
+    assert_eq!(
+        response,
+        serde_json::json!({
+            "error": {
+                "code": "UNSUPPORTED_CAPABILITY",
+                "category": "invalid_input",
+                "retryable": false,
+                "submission_unknown": false,
+                "message": "provider/model/operation is not production-ready"
+            },
+            "request_id": "redacted-request-id"
+        })
+    );
+}
+
 #[test]
 fn test_create_video_route() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -350,4 +455,55 @@ fn test_video_template_only_served_on_get() {
         Some("text/html; charset=utf-8")
     );
     handle.join().unwrap();
+}
+
+#[test]
+fn test_versioned_video_task_status_returns_not_found_for_unknown_task() {
+    let (status, response) = request_route(
+        "GET",
+        "/video/v1/providers/kling_official/tasks/unknown-task-id",
+        "",
+        test_config(),
+    );
+
+    assert_eq!(status, 404);
+    assert_eq!(response["error"]["code"], "NOT_FOUND");
+    assert_eq!(response["error"]["category"], "not_found");
+    assert_eq!(response["error"]["retryable"], false);
+}
+
+#[test]
+fn test_versioned_video_reconciliation_returns_unsupported_error() {
+    let (status, response) = request_route(
+        "GET",
+        "/video/v1/providers/kling_official/tasks/by-key/my-idempotency-key",
+        "",
+        test_config(),
+    );
+
+    assert_eq!(status, 501);
+    assert_eq!(response["error"]["code"], "RECONCILE_UNSUPPORTED");
+    assert_eq!(response["error"]["category"], "unsupported");
+    assert_eq!(response["error"]["retryable"], false);
+}
+
+#[test]
+fn test_versioned_video_route_handles_tasks_as_task_id_and_key() {
+    let (status, response) = request_route(
+        "GET",
+        "/video/v1/providers/kling_official/tasks/tasks",
+        "",
+        test_config(),
+    );
+    assert_eq!(status, 404);
+    assert_eq!(response["error"]["code"], "NOT_FOUND");
+
+    let (status, response) = request_route(
+        "GET",
+        "/video/v1/providers/kling_official/tasks/by-key/tasks",
+        "",
+        test_config(),
+    );
+    assert_eq!(status, 501);
+    assert_eq!(response["error"]["code"], "RECONCILE_UNSUPPORTED");
 }

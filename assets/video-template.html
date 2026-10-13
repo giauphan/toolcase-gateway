@@ -77,6 +77,7 @@ pre{margin:0}
 
   <div class="card">
     <h2>Options</h2>
+    <p style="color:var(--muted);margin:0 0 14px;font-size:13px">Experimental legacy Muse test harness. OpenMontage owns creative profiles and final production orchestration.</p>
 
     <div class="row">
       <label>Aspect ratio</label>
@@ -89,7 +90,7 @@ pre{margin:0}
     </div>
 
     <div class="row">
-      <label>Model</label>
+      <label>Model <span style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-left:6px">Legacy experimental</span></label>
       <div class="pill" id="model">
         <span class="chip on" data-v="muse-video">Muse Video</span>
       </div>
@@ -108,8 +109,10 @@ pre{margin:0}
   </div>
 
   <div class="card">
-    <h2>Live prompt preview</h2>
-    <div class="preview" id="preview"></div>
+    <h2>Live request preview</h2>
+    <p style="color:var(--muted);margin:0 0 10px;font-size:13px">This exact compiled prompt and requested settings are submitted to the legacy Muse route.</p>
+    <div class="preview" id="settings-preview"></div>
+    <div class="preview" id="preview" style="margin-top:10px"></div>
   </div>
 
   <div class="card">
@@ -125,7 +128,7 @@ pre{margin:0}
       <div class="err-box" id="errbox"></div>
     </div>
 
-    <p style="color:var(--muted);margin:12px 0 0;font-size:13px">Video generation requires an authorized Muse session with video capabilities.</p>
+    <p style="color:var(--muted);margin:12px 0 0;font-size:13px">Video generation requires an authorized Muse session with video capabilities. Returned artifact URLs are unverified; OpenMontage owns download, decode, review, and publishing checks.</p>
   </div>
 </div>
 
@@ -177,6 +180,7 @@ pre{margin:0}
   }
 
   function render(){
+    document.getElementById("settings-preview").textContent=JSON.stringify({model:state.model, aspect_ratio:state.aspect, duration:duration()}, null, 2);
     document.getElementById("preview").textContent=buildPrompt();
   }
 
@@ -236,7 +240,7 @@ pre{margin:0}
       prompt: buildPrompt(),
       model: state.model,
       aspect_ratio: state.aspect,
-      duration: parseInt(document.getElementById("duration").value, 10)
+      duration: duration()
     };
 
     fetch("/muse-ai/v1/create-video", {
@@ -264,7 +268,8 @@ pre{margin:0}
       urlEl.style.display="none";
 
       if(d && d.status==="completed" && d.video_url){
-        setStatus("Done.", "ok");
+        var verified = d.media_validated===true || d.output_verified===true;
+        setStatus(verified ? "Done." : "Artifact URL returned; media not validated.", verified ? "ok" : "busy");
         urlEl.textContent=d.video_url;
         urlEl.style.display="block";
       } else {

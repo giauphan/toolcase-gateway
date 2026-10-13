@@ -104,6 +104,53 @@ fn test_create_video_validation() {
 }
 
 #[test]
+fn test_duration_must_be_positive_and_positive_values_pass_validation() {
+    let mut config = test_config();
+    config.museai_access_token = "synthetic-token".into();
+    config.museai_ws_url = "https://not-a-trusted-muse-host.example/noise".into();
+
+    for duration in [
+        serde_json::json!(0),
+        serde_json::json!("0"),
+        serde_json::json!(-1),
+        serde_json::json!(null),
+        serde_json::json!(""),
+    ] {
+        let request = serde_json::json!({"prompt": "A cat", "duration": duration});
+        let error = create_video(&serde_json::to_vec(&request).unwrap(), &config).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(error.to_string(), "duration must be a positive integer");
+    }
+
+    for duration in [serde_json::json!(1), serde_json::json!("5s")] {
+        let request = serde_json::json!({"prompt": "A cat", "duration": duration});
+        let error = create_video(&serde_json::to_vec(&request).unwrap(), &config).unwrap_err();
+        assert_ne!(error.to_string(), "duration must be a positive integer");
+    }
+}
+
+#[test]
+fn test_legacy_muse_artifact_reports_provider_and_media_validation_truthfully() {
+    let result = build_video_result(
+        "muse-video",
+        "gen-3",
+        "a dancing cat",
+        "16:9",
+        5,
+        "Video ready: https://drive.google.com/file/d/legacy-artifact/view",
+    )
+    .unwrap();
+
+    assert_eq!(result["provider"], "muse_chat");
+    assert_eq!(result["resolved_provider"], "muse_chat");
+    assert_eq!(result["requested_model"], "gen-3");
+    assert_eq!(result["resolved_model"], "muse-video");
+    assert_eq!(result["media_validated"], false);
+    assert_eq!(result["output_verified"], false);
+    assert_eq!(result["provider_status"], "artifact_url_reported");
+}
+
+#[test]
 fn test_completed_video_response_requires_supported_artifact() {
     let error = build_video_result(
         "muse-video",

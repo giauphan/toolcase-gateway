@@ -18,6 +18,13 @@ pub const SUPPORTED_MODELS: [&str; 10] = [
 ];
 pub const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
 
+pub fn is_muse_video_alias(model: &str) -> bool {
+    matches!(
+        model,
+        "gen-3" | "gen-2" | "kling" | "gen-4" | "gen-4.5" | "gen-4-turbo" | "aleph-2.0" | "ruby"
+    )
+}
+
 pub fn build_video_prompt(model: &str, prompt: &str, aspect_ratio: &str, duration: u64) -> String {
     let _ = (model, aspect_ratio, duration);
     format!(
@@ -76,18 +83,22 @@ pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_js
         ));
     }
 
-    let duration: u64 = body
-        .get("duration")
-        .and_then(|v| {
-            if let Some(n) = v.as_u64() {
-                Some(n)
-            } else if let Some(s) = v.as_str() {
-                s.trim_end_matches('s').parse::<u64>().ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or(5);
+    let duration = match body.get("duration") {
+        None => 5,
+        Some(value) => {
+            let parsed = value.as_u64().or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|text| text.strip_suffix('s').unwrap_or(text).parse::<u64>().ok())
+            });
+            parsed.filter(|seconds| *seconds > 0).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "duration must be a positive integer",
+                )
+            })?
+        }
+    };
 
     let full_prompt = build_video_prompt(upstream_model, &prompt, aspect_ratio, duration);
 
@@ -143,12 +154,18 @@ pub fn build_video_result(
         "id": format!("video-{}", Uuid::new_v4()),
         "object": "video.generation",
         "created": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-        "model": model,
+        "provider": "muse_chat",
+        "resolved_provider": "muse_chat",
         "requested_model": requested_model,
+        "resolved_model": model,
+        "model": model,
         "prompt": prompt,
         "requested_aspect_ratio": aspect_ratio,
         "requested_duration": duration,
         "status": "completed",
+        "provider_status": "artifact_url_reported",
+        "output_verified": false,
+        "media_validated": false,
         "video_url": video_url
     }))
 }
