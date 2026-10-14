@@ -53,6 +53,15 @@ fn test_extract_url_from_text() {
         extract_url_from_text(drive_and_direct),
         "https://drive.google.com/file/d/drive123/view"
     );
+
+    let muse_files_url = "Video uploaded to https://muse.ai/files/1378866961972717/1124543089916741/er47bxzumhn4tcankbn87rkr/cheerful-3d-short.mp4 ready.";
+    assert_eq!(
+        extract_url_from_text(muse_files_url),
+        "https://muse.ai/files/1378866961972717/1124543089916741/er47bxzumhn4tcankbn87rkr/cheerful-3d-short.mp4"
+    );
+
+    let spoofed_muse_files = "Do not accept https://muse.ai.evil.example/files/123/abc/file.mp4";
+    assert_eq!(extract_url_from_text(spoofed_muse_files), "");
 }
 
 #[test]
@@ -202,4 +211,16 @@ fn test_completed_video_response_requires_supported_artifact() {
     )
     .unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+}
+
+#[test]
+fn test_muse_files_url_is_supported() {
+    let url = "https://muse.ai/files/1378868031972717/1124543089916741/er47bxzumhn4tcankbn87rkr/cheerful-3d-short.mp4";
+    assert!(is_supported_video_url(url));
+
+    let spoofed = "https://muse.ai.evil.example/files/123/abc/file.mp4";
+    assert!(!is_supported_video_url(spoofed));
+
+    let wrong_ext = "https://muse.ai/files/123/abc/file.txt";
+    assert!(!is_supported_video_url(wrong_ext));
 }

@@ -200,8 +200,30 @@ pub fn extract_url_from_text(text: &str) -> String {
 
 pub fn is_supported_video_url(url: &str) -> bool {
     url.starts_with("https://")
-        && ((is_google_drive_host(url) && is_google_drive_file_path(url))
-            || has_supported_video_extension(url))
+        && (is_muse_files_url(url)
+            || (is_google_drive_host(url) && is_google_drive_file_path(url))
+            || (has_supported_video_extension(url) && !is_spoofed_host(url)))
+}
+
+pub fn is_muse_files_url(url: &str) -> bool {
+    url.starts_with("https://")
+        && url_authority(url) == "muse.ai"
+        && url
+            .strip_prefix("https://")
+            .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
+            .is_some_and(|path| path.starts_with("files/") && has_supported_video_extension(url))
+}
+
+fn is_spoofed_host(url: &str) -> bool {
+    let authority = url_authority(url);
+    let dots = authority.matches('.').count();
+    let base = authority
+        .split('.')
+        .rev()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(".");
+    base == "ai" || dots != 2
 }
 
 pub fn has_supported_video_extension(url: &str) -> bool {

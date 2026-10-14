@@ -11,7 +11,7 @@ pub use toolcase_gateway::museai::threads::{
 };
 pub use toolcase_gateway::museai::video::{
     build_video_prompt, build_video_result, create_video, extract_url_from_text,
-    normalize_video_model,
+    is_supported_video_url, normalize_video_model,
 };
 pub use toolcase_gateway::museai::MuseApprovalRequired;
 
