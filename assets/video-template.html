@@ -267,8 +267,8 @@ pre{margin:0}
       var urlEl=document.getElementById("video-url");
       urlEl.style.display="none";
 
-      if(d && d.status==="completed" && d.video_url){
-        var verified = d.media_validated===true || d.output_verified===true;
+      if(d && (d.status==="completed" || d.status==="artifact_reported") && d.video_url){
+        var verified = d.media_validated===true;
         setStatus(verified ? "Done." : "Artifact URL returned; media not validated.", verified ? "ok" : "busy");
         urlEl.textContent=d.video_url;
         urlEl.style.display="block";

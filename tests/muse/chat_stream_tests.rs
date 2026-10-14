@@ -153,6 +153,18 @@ fn test_post_completion_parser_propagates_scoped_approval() {
 }
 
 #[test]
+fn test_approvals_snapshot_rejects_unauthorized_bypass_attempt() {
+    let mut stream = acknowledged_chat_stream();
+    let record = br#"{"event":"approvals.snapshot","payload":{"pending_approvals":[{"scope":{"thread_id":"00000000-0000-4000-8000-000000000001"}}]}}
+"#;
+    let error = stream.push(record, false).unwrap_err();
+    assert!(error
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<MuseApprovalRequired>())
+        .is_some());
+}
+
+#[test]
 fn test_delta_message_done_populates_transcript_when_deltas_empty() {
     let mut stream = acknowledged_chat_stream();
     stream
@@ -235,7 +247,7 @@ fn test_status_completed_before_presentation_without_text() {
         &text,
     )
     .unwrap();
-    assert_eq!(result["status"], "completed");
+    assert_eq!(result["status"], "artifact_reported");
     assert_eq!(
         result["video_url"],
         "https://drive.google.com/file/d/123/view"

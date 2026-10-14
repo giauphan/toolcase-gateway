@@ -5,6 +5,7 @@ pub use toolcase_gateway::museai::chat::{
     build_muse_chat_request, explicit_video_refusal, extract_video_url_from_stream, MuseChatStream,
     MUSE_POST_COMPLETION_WAIT_SECS,
 };
+pub use toolcase_gateway::museai::session::validate_muse_session_readiness;
 pub use toolcase_gateway::museai::threads::{
     cleanup_tracked_threads_once, extract_new_thread_id, register_thread, tracked_threads,
 };

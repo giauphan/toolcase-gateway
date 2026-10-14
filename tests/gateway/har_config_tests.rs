@@ -608,13 +608,17 @@ fn pipeline_stable_after_apply() {
     har_handler_response(har_fixture_full(), &store);
 
     let snap = store.snapshot();
-    // With both tokens present, bootstrap short-circuits: no network, fields intact.
-    let booted = toolcase_gateway::museai::bootstrap_museai_config(&snap).unwrap();
-    assert_eq!(booted.museai_access_token, snap.museai_access_token);
-    assert_eq!(booted.museai_vm_id, snap.museai_vm_id);
+    let bootstrap_result = toolcase_gateway::museai::bootstrap_museai_config(&snap);
+    assert!(bootstrap_result.is_err());
+    let bootstrap_error = bootstrap_result.err().unwrap();
+    assert!(
+        bootstrap_error
+            .to_string()
+            .contains("session bootstrap failed")
+            || bootstrap_error.to_string().contains("readiness")
+    );
 
-    // The WS URL builder now carries the applied values.
-    let url = toolcase_gateway::museai::build_museai_ws_url(&booted, "req-1").unwrap();
+    let url = toolcase_gateway::museai::build_museai_ws_url(&snap, "req-1").unwrap();
     assert_eq!(
         url,
         "wss://hatch.metaaivm.com/v1/noise?vm_id=vm-id-42&auth_token=access-token-abc123&notary_token=notary-token-def456&app_id=hatch-web&request_id=req-1"

@@ -499,8 +499,7 @@ Connection: close
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/api/session");
 
-        let session_body =
-            r#"{"vm_id":"test_vm_id","endpoint_url":"wss://test.invalid/v1/noise","vms":[]}"#;
+        let session_body = r#"{"vm_state":"RUNNING","vm_id":"test_vm_id","endpoint_url":"wss://test.invalid/v1/noise","vms":[]}"#;
         write!(
             client,
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -563,6 +562,7 @@ fn test_museai_bootstrap_uses_auth_check_and_current_session_shape() {
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/api/session");
         let body = r#"{
+            "vm_state": "RUNNING",
             "vms": [
                 {"id":"fallback-id","endpoint_url":"wss://fallback.metaaivm.com/","is_preferred":false},
                 {"vm_id":"preferred-vm","endpoint_url":"wss://preferred.metaaivm.com/","is_preferred":true}

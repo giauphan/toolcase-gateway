@@ -145,9 +145,49 @@ fn test_legacy_muse_artifact_reports_provider_and_media_validation_truthfully() 
     assert_eq!(result["resolved_provider"], "muse_chat");
     assert_eq!(result["requested_model"], "gen-3");
     assert_eq!(result["resolved_model"], "muse-video");
+    assert_eq!(result["status"], "artifact_reported");
     assert_eq!(result["media_validated"], false);
     assert_eq!(result["output_verified"], false);
     assert_eq!(result["provider_status"], "artifact_url_reported");
+}
+
+#[test]
+fn test_unverified_artifact_is_not_reported_as_completed() {
+    let result = build_video_result(
+        "muse-video",
+        "muse-video",
+        "a rotating square",
+        "16:9",
+        5,
+        "Video ready: https://cdn.muse.ai/video/unverified.mp4",
+    )
+    .unwrap();
+
+    assert_eq!(result["status"], "artifact_reported");
+    assert_eq!(result["media_validated"], false);
+    assert_eq!(result["output_verified"], false);
+}
+
+#[test]
+fn test_session_readiness_requires_running_vm_state() {
+    validate_muse_session_readiness(&serde_json::json!({"vm_state":"RUNNING"})).unwrap();
+
+    let error = validate_muse_session_readiness(&serde_json::json!({})).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+
+    let error =
+        validate_muse_session_readiness(&serde_json::json!({"vm_state": null})).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+
+    for state in ["UPDATING", "STARTING", "STOPPING", "STOPPED", "ERROR"] {
+        let error =
+            validate_muse_session_readiness(&serde_json::json!({"vm_state": state})).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::Other);
+    }
+
+    let error =
+        validate_muse_session_readiness(&serde_json::json!({"vm_state":"UNKNOWN"})).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
 }
 
 #[test]

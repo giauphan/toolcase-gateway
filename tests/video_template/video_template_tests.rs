@@ -53,5 +53,5 @@ fn video_template_surfaces_unverified_media_boundary() {
     let html = include_str!("../../assets/video-template.html");
     assert!(html.contains("Returned artifact URLs are unverified"));
     assert!(html.contains("Artifact URL returned; media not validated."));
-    assert!(html.contains("d.media_validated===true || d.output_verified===true"));
+    assert!(html.contains("d.media_validated===true"));
 }

@@ -150,6 +150,14 @@ pub fn build_video_result(
         ));
     }
 
+    let output_verified = false;
+    let media_validated = false;
+    let status = if media_validated {
+        "completed"
+    } else {
+        "artifact_reported"
+    };
+
     Ok(serde_json::json!({
         "id": format!("video-{}", Uuid::new_v4()),
         "object": "video.generation",
@@ -162,10 +170,10 @@ pub fn build_video_result(
         "prompt": prompt,
         "requested_aspect_ratio": aspect_ratio,
         "requested_duration": duration,
-        "status": "completed",
+        "status": status,
         "provider_status": "artifact_url_reported",
-        "output_verified": false,
-        "media_validated": false,
+        "output_verified": output_verified,
+        "media_validated": media_validated,
         "video_url": video_url
     }))
 }

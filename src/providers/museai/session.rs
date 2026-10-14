@@ -130,6 +130,26 @@ pub fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Result<Stri
     Ok(url)
 }
 
+pub fn validate_muse_session_readiness(session: &serde_json::Value) -> io::Result<()> {
+    let Some(state) = session.get("vm_state").and_then(|value| value.as_str()) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Muse VM session is missing readiness state",
+        ));
+    };
+
+    match state.to_ascii_uppercase().as_str() {
+        "RUNNING" => Ok(()),
+        "UPDATING" | "STARTING" | "STOPPING" | "STOPPED" | "ERROR" => {
+            Err(io::Error::other("Muse VM session is not ready"))
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Muse VM session returned an unsupported readiness state",
+        )),
+    }
+}
+
 pub fn apply_muse_session_metadata(config: &mut Config, session: &serde_json::Value) {
     let selected_vm = session
         .get("vms")
@@ -176,10 +196,6 @@ pub fn apply_muse_session_metadata(config: &mut Config, session: &serde_json::Va
 }
 
 pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
-    if !config.museai_access_token.is_empty() {
-        return Ok(config.clone());
-    }
-
     let base_url = if config.museai_base_url.is_empty() {
         "https://muse.ai"
     } else {
@@ -274,7 +290,27 @@ pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
         match wake_req.send_json(wake_body) {
             Ok(response) => {
                 if response.status() == 200 {
-                    debug_log("Note: Woke VM successfully");
+                    let wake_status = response
+                        .into_body()
+                        .read_json::<serde_json::Value>()
+                        .ok()
+                        .and_then(|wake| {
+                            wake.get("status")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_owned)
+                        });
+                    match wake_status.as_deref() {
+                        Some("wake_requested") => debug_log(
+                            "Note: Muse VM wake requested; readiness still requires RUNNING session",
+                        ),
+                        Some("already_running" | "ready") => debug_log(
+                            "Note: Muse VM wake acknowledged; readiness still requires RUNNING session",
+                        ),
+                        Some("failed") => debug_log("Note: Muse VM wake endpoint returned failed status"),
+                        _ => debug_log(
+                            "Note: Muse VM wake returned HTTP 200; readiness still requires RUNNING session",
+                        ),
+                    }
                 }
             }
             Err(e) => {
@@ -364,6 +400,7 @@ pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
         .read_json()
         .map_err(|error| io::Error::other(format!("Muse.ai session response invalid: {error}")))?;
 
+    validate_muse_session_readiness(&session)?;
     apply_muse_session_metadata(&mut bootstrapped, &session);
     if bootstrapped.museai_access_token.is_empty() {
         return Err(io::Error::new(

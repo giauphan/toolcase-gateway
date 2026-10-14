@@ -16,9 +16,14 @@ fn live_capture_config() -> Config {
         .expect("live Muse HAR capture is required");
     let extracted = toolcase_gateway::har_config::extract_muse_config_from_har(&har_bytes)
         .unwrap_or_else(|_| panic!("live Muse HAR could not be parsed"));
-    let cookie = std::fs::read(manifest.join("target/muse-header.txt"))
+    let cookie = std::env::var("GW_MUSEAI_COOKIE")
         .ok()
-        .and_then(|bytes| parse_cookie_from_header_dump(&bytes))
+        .filter(|cookie| !cookie.trim().is_empty())
+        .or_else(|| {
+            std::fs::read(manifest.join("target/muse-header.txt"))
+                .ok()
+                .and_then(|bytes| parse_cookie_from_header_dump(&bytes))
+        })
         .or(extracted.cookie)
         .filter(|cookie| !cookie.is_empty())
         .expect("live Muse capture has no cookie");
