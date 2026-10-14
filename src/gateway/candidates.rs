@@ -1,24 +1,39 @@
+use crate::gateway::capabilities::lookup_capabilities;
 use crate::rewrite::json_string_value;
 
 const EFFORT_SUFFIXES: [&str; 4] = ["-xhigh", "-high", "-medium", "-low"];
+pub const FALLBACK_DEFAULT_MODEL: &str = "claude-3-5-sonnet";
 
 pub fn normalize_model_id(requested: &str, default_model: &str) -> String {
     let trimmed = default_model.trim();
-    if trimmed.is_empty() {
-        return requested.to_string();
-    }
-    if requested == trimmed {
+    let effective_default = if trimmed.is_empty() {
+        if lookup_capabilities(requested).is_some() {
+            return requested.to_string();
+        }
+        for suffix in EFFORT_SUFFIXES {
+            if let Some(base) = requested.strip_suffix(suffix) {
+                if lookup_capabilities(base).is_some() {
+                    return requested.to_string();
+                }
+            }
+        }
+        FALLBACK_DEFAULT_MODEL
+    } else {
+        trimmed
+    };
+
+    if requested == effective_default {
         return requested.to_string();
     }
     for suffix in EFFORT_SUFFIXES {
         if let Some(base) = requested.strip_suffix(suffix) {
-            if base == trimmed {
+            if base == effective_default {
                 return requested.to_string();
             }
-            return format!("{trimmed}{suffix}");
+            return format!("{effective_default}{suffix}");
         }
     }
-    trimmed.to_string()
+    effective_default.to_string()
 }
 
 /// Pure candidate planning: extracts model from request body, normalizes it,
@@ -46,7 +61,12 @@ pub fn plan_candidates(
         }
     }
     if candidates.is_empty() {
-        candidates.push(default_model.trim().to_string());
+        let fallback = if default_model.trim().is_empty() {
+            FALLBACK_DEFAULT_MODEL
+        } else {
+            default_model.trim()
+        };
+        candidates.push(fallback.to_string());
     }
     candidates
 }

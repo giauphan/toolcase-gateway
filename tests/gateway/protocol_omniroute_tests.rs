@@ -262,6 +262,56 @@ fn candidate_models_repairs_unknown_model_to_configured_default() {
 }
 
 #[test]
+fn candidate_models_repairs_unknown_model_when_default_empty() {
+    use toolcase_gateway::omniroute::candidate_models;
+
+    let fallbacks: Vec<String> = Vec::new();
+    let empty_default = "";
+
+    // When default_model is empty (default configuration), unknown model IDs
+    // must still be repaired to a known upstream model (claude-3-5-sonnet),
+    // not forwarded verbatim where they 503.
+    assert_eq!(
+        candidate_models(
+            b"{\"model\":\"model-medium-hight\"}",
+            &fallbacks,
+            0,
+            empty_default
+        ),
+        vec!["claude-3-5-sonnet".to_string()]
+    );
+    assert_eq!(
+        candidate_models(
+            b"{\"model\":\"model-only-plan\"}",
+            &fallbacks,
+            0,
+            empty_default
+        ),
+        vec!["claude-3-5-sonnet".to_string()]
+    );
+
+    // Known models are preserved as-is.
+    assert_eq!(
+        candidate_models(b"{\"model\":\"gpt-4o\"}", &fallbacks, 0, empty_default),
+        vec!["gpt-4o".to_string()]
+    );
+    assert_eq!(
+        candidate_models(b"{\"model\":\"claude-3-5-haiku\"}", &fallbacks, 0, empty_default),
+        vec!["claude-3-5-haiku".to_string()]
+    );
+    assert_eq!(
+        candidate_models(b"{\"model\":\"claude-3-5-sonnet-20241022\"}", &fallbacks, 0, empty_default),
+        vec!["claude-3-5-sonnet-20241022".to_string()]
+    );
+
+    // Unknown base with recognized effort suffix keeps effort level.
+    assert_eq!(
+        candidate_models(b"{\"model\":\"weird-high\"}", &fallbacks, 0, empty_default),
+        vec!["claude-3-5-sonnet-high".to_string()]
+    );
+}
+
+#[test]
 fn unknown_model_no_longer_exhausts_fallbacks() {
     // End-to-end: a request carrying an unknown model id is normalized to the
     // configured default, which the upstream accepts, so the operator no longer
