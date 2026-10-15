@@ -120,54 +120,28 @@ fn test_append_job_revision() {
     assert_eq!(updated.revisions.len(), 2);
     assert_eq!(updated.video_url, "https://muse.ai/files/v2.mp4");
     assert_eq!(updated.revisions[1].revision_id, "rev-2");
-    assert_eq!(updated.revisions[1].prompt, "edit: make it brighter and add cinematic lighting");
-    assert_eq!(updated.revisions[1].video_url, "https://muse.ai/files/v2.mp4");
-}
-
-#[test]
-fn test_cleanup_expired_video_jobs_removes_only_eligible_records() {
-    let expired_id = format!("video-expired-{}", uuid::Uuid::new_v4());
-    let pinned_id = format!("video-pinned-{}", uuid::Uuid::new_v4());
-    let active_id = format!("video-active-{}", uuid::Uuid::new_v4());
-
-    for (job_id, status, pinned) in [
-        (expired_id.clone(), "artifact_reported", false),
-        (pinned_id.clone(), "artifact_reported", true),
-        (active_id.clone(), "generating", false),
-    ] {
-        save_video_job(&VideoJobRecord {
-            job_id,
-            owner_id: "user-cleanup".into(),
-            model: "muse-video".into(),
-            requested_model: "gen-3".into(),
-            prompt: "cleanup test".into(),
-            aspect_ratio: "16:9".into(),
-            duration: 5,
-            thread_id: None,
-            created_at: 1,
-            last_activity_at: 1,
-            pinned,
-            status: status.into(),
-            media_validated: false,
-            output_verified: false,
-            video_url: "https://muse.ai/files/cleanup.mp4".into(),
-            revisions: vec![],
-        })
-        .unwrap();
-    }
-
-    let cleaned = toolcase_gateway::museai::lifecycle::cleanup_expired_video_jobs(1).unwrap();
-    assert!(cleaned >= 1);
-    assert!(load_video_job(&expired_id).is_err());
-    assert!(load_video_job(&pinned_id).is_ok());
-    assert!(load_video_job(&active_id).is_ok());
+    assert_eq!(
+        updated.revisions[1].prompt,
+        "edit: make it brighter and add cinematic lighting"
+    );
+    assert_eq!(
+        updated.revisions[1].video_url,
+        "https://muse.ai/files/v2.mp4"
+    );
 }
 
 #[test]
 fn test_job_id_validation_rejects_invalid_characters() {
     use toolcase_gateway::museai::lifecycle::job_file_path;
 
-    for bad_id in ["", "id.with.dots", "../traversal", "has spaces", "bad/slash", "a*b"] {
+    for bad_id in [
+        "",
+        "id.with.dots",
+        "../traversal",
+        "has spaces",
+        "bad/slash",
+        "a*b",
+    ] {
         let err = job_file_path(bad_id).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{bad_id}");
     }

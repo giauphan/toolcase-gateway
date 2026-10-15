@@ -60,7 +60,10 @@ pub fn job_file_path(job_id: &str) -> io::Result<PathBuf> {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid job id"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid job id",
+        ));
     }
     Ok(dir.join(format!("{job_id}.json")))
 }
@@ -160,7 +163,9 @@ pub fn append_job_revision(
     video_url: &str,
     status: &str,
 ) -> io::Result<VideoJobRecord> {
-    let _guard = job_update_lock().lock().unwrap();
+    let _guard = job_update_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let mut record = load_video_job(job_id)?;
     let now = now_secs();
@@ -181,7 +186,9 @@ pub fn append_job_revision(
 }
 
 pub fn update_job_prompt(job_id: &str, prompt: &str) -> io::Result<VideoJobRecord> {
-    let _guard = job_update_lock().lock().unwrap();
+    let _guard = job_update_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let mut record = load_video_job(job_id)?;
     let now = now_secs();
