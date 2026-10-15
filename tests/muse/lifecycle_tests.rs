@@ -123,3 +123,58 @@ fn test_append_job_revision() {
     assert_eq!(updated.revisions[1].prompt, "edit: make it brighter and add cinematic lighting");
     assert_eq!(updated.revisions[1].video_url, "https://muse.ai/files/v2.mp4");
 }
+
+#[test]
+fn test_job_id_validation_rejects_invalid_characters() {
+    use toolcase_gateway::museai::lifecycle::job_file_path;
+
+    for bad_id in ["", "id.with.dots", "../traversal", "has spaces", "bad/slash", "a*b"] {
+        let err = job_file_path(bad_id).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{bad_id}");
+    }
+
+    // Valid IDs succeed
+    assert!(job_file_path("video-123_ABC-xyz").is_ok());
+}
+
+#[test]
+fn test_concurrent_job_updates_are_synchronized() {
+    let job_id = format!("video-concurrent-{}", uuid::Uuid::new_v4());
+    let record = VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: "user-test".into(),
+        model: "muse-video".into(),
+        requested_model: "gen-3".into(),
+        prompt: "base prompt".into(),
+        aspect_ratio: "16:9".into(),
+        duration: 5,
+        thread_id: None,
+        created_at: 1000,
+        last_activity_at: 1000,
+        pinned: false,
+        status: "artifact_reported".into(),
+        media_validated: false,
+        output_verified: false,
+        video_url: "https://muse.ai/files/base.mp4".into(),
+        revisions: vec![],
+    };
+    save_video_job(&record).unwrap();
+
+    let mut handles = vec![];
+    for i in 0..5 {
+        let jid = job_id.clone();
+        handles.push(std::thread::spawn(move || {
+            let prompt = format!("revision {i}");
+            let url = format!("https://muse.ai/files/v{i}.mp4");
+            toolcase_gateway::museai::append_job_revision(&jid, &prompt, &url, "artifact_reported")
+                .unwrap();
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    let final_record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+    assert_eq!(final_record.revisions.len(), 5);
+}

@@ -3,7 +3,13 @@
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn job_update_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VideoRevision {
@@ -49,18 +55,14 @@ pub fn ensure_state_dir() -> io::Result<PathBuf> {
 
 pub fn job_file_path(job_id: &str) -> io::Result<PathBuf> {
     let dir = ensure_state_dir()?;
-    // Sanitize job_id to prevent path traversal
-    let clean_id: String = job_id
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
-    if clean_id.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid job id",
-        ));
+    if job_id.is_empty()
+        || !job_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid job id"));
     }
-    Ok(dir.join(format!("{clean_id}.json")))
+    Ok(dir.join(format!("{job_id}.json")))
 }
 
 pub fn save_video_job(record: &VideoJobRecord) -> io::Result<()> {
@@ -158,6 +160,8 @@ pub fn append_job_revision(
     video_url: &str,
     status: &str,
 ) -> io::Result<VideoJobRecord> {
+    let _guard = job_update_lock().lock().unwrap();
+
     let mut record = load_video_job(job_id)?;
     let now = now_secs();
     let rev_count = record.revisions.len() + 1;
@@ -177,6 +181,8 @@ pub fn append_job_revision(
 }
 
 pub fn update_job_prompt(job_id: &str, prompt: &str) -> io::Result<VideoJobRecord> {
+    let _guard = job_update_lock().lock().unwrap();
+
     let mut record = load_video_job(job_id)?;
     let now = now_secs();
     record.prompt = prompt.to_string();

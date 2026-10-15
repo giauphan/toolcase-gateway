@@ -269,7 +269,7 @@ pub fn build_video_result_with_owner(
         revisions: Vec::new(),
     };
     if let Err(e) = super::lifecycle::save_video_job(&record) {
-        super::lifecycle::debug_log_lifecycle(&format!("persistence skipped for {job_id}: {e}"));
+        eprintln!("[museai_video] failed to persist video job {job_id}: {e}");
     }
 
     Ok(serde_json::json!({

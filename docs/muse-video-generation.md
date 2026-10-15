@@ -77,9 +77,9 @@ Content-Type: application/json
 - Every generated video is stored as `VideoJobRecord` in `.gw_state/video_jobs/{job_id}.json`.
 - The record contains job metadata, model settings, timestamps, persistence state, and revision history.
 
-### Cleanup
-- Thread retention is controlled by `GW_MUSEAI_THREAD_RETENTION_SECS` (default: 86400 seconds = 1 day, or 259200 for 3 days).
-- Video job cleanup is handled by the background worker in `src/providers/museai/lifecycle.rs`.
+### Cleanup & Retention
+- Upstream Muse thread retention is controlled by `GW_MUSEAI_THREAD_RETENTION_SECS` (default: 86400 seconds = 1 day; can be set to 259200 for 3 days). A background thread worker periodically cleans up expired threads.
+- Video job metadata records are persisted under `.gw_state/video_jobs/` and can be evaluated for expiration using `evaluate_job_retention` / `cleanup_expired_video_jobs`. Active or pinned jobs are never deleted.
 
 ### Supported Models
 ```rust

@@ -730,3 +730,23 @@ fn test_put_update_video_prompt_empty_returns_400() {
     );
     assert_eq!(status, 400);
 }
+
+#[test]
+fn test_put_update_video_prompt_invalid_id_returns_400() {
+    let body = serde_json::json!({
+        "prompt": "Valid prompt"
+    })
+    .to_string();
+
+    let (status, response) = request_route(
+        "PUT",
+        "/muse-ai/v1/videos/invalid.id.with.dots",
+        &body,
+        test_config(),
+    );
+    assert_eq!(status, 400);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("invalid job id"));
+}
