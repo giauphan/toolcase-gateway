@@ -10,3 +10,4 @@ scripts/patches/
 gateway.log
 .claude/worktrees
 tests/__pycache__
+.gw_state

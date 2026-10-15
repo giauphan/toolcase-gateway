@@ -9,3 +9,6 @@ mod video_tests;
 
 #[path = "muse/threads_tests.rs"]
 mod threads_tests;
+
+#[path = "muse/lifecycle_tests.rs"]
+mod lifecycle_tests;

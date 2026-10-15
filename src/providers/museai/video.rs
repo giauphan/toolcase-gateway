@@ -54,9 +54,22 @@ pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_js
         ));
     }
 
+    let parent_job_id = body
+        .get("job_id")
+        .or_else(|| body.get("parent_id"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let existing_job = match parent_job_id {
+        Some(id) => Some(super::lifecycle::load_video_job(id)?),
+        None => None,
+    };
+
     let requested_model = body
         .get("model")
         .and_then(|v| v.as_str())
+        .or_else(|| existing_job.as_ref().map(|j| j.requested_model.as_str()))
         .unwrap_or("muse-video");
     if !SUPPORTED_MODELS.contains(&requested_model) {
         return Err(io::Error::new(
@@ -72,6 +85,7 @@ pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_js
     let aspect_ratio = body
         .get("aspect_ratio")
         .and_then(|v| v.as_str())
+        .or_else(|| existing_job.as_ref().map(|j| j.aspect_ratio.as_str()))
         .unwrap_or("16:9");
     if !SUPPORTED_ASPECT_RATIOS.contains(&aspect_ratio) {
         return Err(io::Error::new(
@@ -84,7 +98,7 @@ pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_js
     }
 
     let duration = match body.get("duration") {
-        None => 5,
+        None => existing_job.as_ref().map(|j| j.duration).unwrap_or(5),
         Some(value) => {
             let parsed = value.as_u64().or_else(|| {
                 value
@@ -100,7 +114,14 @@ pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_js
         }
     };
 
-    let full_prompt = build_video_prompt(upstream_model, &prompt, aspect_ratio, duration);
+    let full_prompt = if let Some(ref parent) = existing_job {
+        format!(
+            "Edit this existing video (source: {}): \"{prompt}\". Return a public Google Drive link when ready.",
+            parent.video_url
+        )
+    } else {
+        build_video_prompt(upstream_model, &prompt, aspect_ratio, duration)
+    };
 
     let request_json = serde_json::to_vec(&serde_json::json!({
         "model": "muse",
@@ -124,6 +145,48 @@ pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_js
         .and_then(|c| c.as_str())
         .unwrap_or("");
 
+    let video_url = extract_url_from_text(content);
+    if video_url.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Muse video generation completed without a supported public HTTPS artifact",
+        ));
+    }
+
+    if let Some(parent) = existing_job {
+        let updated = super::lifecycle::append_job_revision(
+            &parent.job_id,
+            &prompt,
+            &video_url,
+            "artifact_reported",
+        )?;
+        let rev_id = updated
+            .revisions
+            .last()
+            .map(|r| r.revision_id.clone())
+            .unwrap_or_else(|| "rev-1".to_string());
+        return Ok(serde_json::json!({
+            "id": updated.job_id,
+            "object": "video.generation",
+            "created": updated.last_activity_at,
+            "provider": "muse_chat",
+            "resolved_provider": "muse_chat",
+            "requested_model": updated.requested_model,
+            "resolved_model": updated.model,
+            "model": updated.model,
+            "prompt": prompt,
+            "requested_aspect_ratio": updated.aspect_ratio,
+            "requested_duration": updated.duration,
+            "status": updated.status,
+            "provider_status": "artifact_url_reported",
+            "output_verified": updated.output_verified,
+            "media_validated": updated.media_validated,
+            "video_url": updated.video_url,
+            "revision_id": rev_id,
+            "revisions": updated.revisions
+        }));
+    }
+
     build_video_result(
         upstream_model,
         requested_model,
@@ -142,6 +205,29 @@ pub fn build_video_result(
     duration: u64,
     content: &str,
 ) -> io::Result<serde_json::Value> {
+    build_video_result_with_owner(
+        model,
+        requested_model,
+        prompt,
+        aspect_ratio,
+        duration,
+        content,
+        "default-owner",
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_video_result_with_owner(
+    model: &str,
+    requested_model: &str,
+    prompt: &str,
+    aspect_ratio: &str,
+    duration: u64,
+    content: &str,
+    owner_id: &str,
+    thread_id: Option<String>,
+) -> io::Result<serde_json::Value> {
     let video_url = extract_url_from_text(content);
     if video_url.is_empty() {
         return Err(io::Error::new(
@@ -158,10 +244,37 @@ pub fn build_video_result(
         "artifact_reported"
     };
 
+    let job_id = format!("video-{}", Uuid::new_v4());
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let record = super::lifecycle::VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: owner_id.to_string(),
+        model: model.to_string(),
+        requested_model: requested_model.to_string(),
+        aspect_ratio: aspect_ratio.to_string(),
+        duration,
+        thread_id: thread_id.clone(),
+        created_at: now,
+        last_activity_at: now,
+        pinned: false,
+        status: status.to_string(),
+        media_validated,
+        output_verified,
+        video_url: video_url.clone(),
+        revisions: Vec::new(),
+    };
+    if let Err(e) = super::lifecycle::save_video_job(&record) {
+        super::lifecycle::debug_log_lifecycle(&format!("persistence skipped for {job_id}: {e}"));
+    }
+
     Ok(serde_json::json!({
-        "id": format!("video-{}", Uuid::new_v4()),
+        "id": job_id,
         "object": "video.generation",
-        "created": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+        "created": now,
         "provider": "muse_chat",
         "resolved_provider": "muse_chat",
         "requested_model": requested_model,

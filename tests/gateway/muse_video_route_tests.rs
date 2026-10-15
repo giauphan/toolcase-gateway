@@ -649,3 +649,45 @@ fn test_video_task_submit_rejects_ssrf_reference_images() {
     assert_eq!(status, 422);
     assert_eq!(response["error"]["code"], "UNSUPPORTED_CAPABILITY");
 }
+
+#[test]
+fn test_edit_video_route_nonexistent_job_returns_404() {
+    let body = serde_json::json!({
+        "job_id": "video-nonexistent-99999",
+        "prompt": "make it brighter with cinematic tone"
+    })
+    .to_string();
+
+    let (status, response) = request_route(
+        "POST",
+        "/muse-ai/v1/create-video",
+        &body,
+        test_config(),
+    );
+    assert_eq!(status, 404);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("video job not found"));
+}
+
+#[test]
+fn test_edit_video_route_empty_prompt_returns_400() {
+    let body = serde_json::json!({
+        "job_id": "video-some-id",
+        "prompt": "   "
+    })
+    .to_string();
+
+    let (status, response) = request_route(
+        "POST",
+        "/muse-ai/v1/create-video",
+        &body,
+        test_config(),
+    );
+    assert_eq!(status, 400);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("prompt must not be empty"));
+}
