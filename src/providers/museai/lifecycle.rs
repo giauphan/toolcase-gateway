@@ -20,6 +20,8 @@ pub struct VideoJobRecord {
     pub owner_id: String,
     pub model: String,
     pub requested_model: String,
+    #[serde(default)]
+    pub prompt: String,
     pub aspect_ratio: String,
     pub duration: u64,
     pub thread_id: Option<String>,
@@ -170,6 +172,15 @@ pub fn append_job_revision(
     record.last_activity_at = now;
     record.video_url = video_url.to_string();
     record.status = status.to_string();
+    save_video_job(&record)?;
+    Ok(record)
+}
+
+pub fn update_job_prompt(job_id: &str, prompt: &str) -> io::Result<VideoJobRecord> {
+    let mut record = load_video_job(job_id)?;
+    let now = now_secs();
+    record.prompt = prompt.to_string();
+    record.last_activity_at = now;
     save_video_job(&record)?;
     Ok(record)
 }

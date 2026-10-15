@@ -200,6 +200,21 @@ fn route_request_impl(
         };
     }
 
+    if clean_path.starts_with("/muse-ai/v1/videos/") {
+        let job_id = clean_path
+            .strip_prefix("/muse-ai/v1/videos/")
+            .unwrap_or("");
+        if request.method.eq_ignore_ascii_case("put") {
+            return crate::museai::handle_update_video_prompt(client, job_id, &request.body);
+        }
+        return write_error(
+            client,
+            405,
+            "Method Not Allowed",
+            "video update only supports PUT",
+        );
+    }
+
     if clean_path.starts_with("/muse-ai/v1/threads/") {
         return if request.method.eq_ignore_ascii_case("delete") {
             let thread_id = clean_path.split('/').next_back().unwrap_or("");

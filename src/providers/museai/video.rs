@@ -255,6 +255,7 @@ pub fn build_video_result_with_owner(
         owner_id: owner_id.to_string(),
         model: model.to_string(),
         requested_model: requested_model.to_string(),
+        prompt: prompt.to_string(),
         aspect_ratio: aspect_ratio.to_string(),
         duration,
         thread_id: thread_id.clone(),

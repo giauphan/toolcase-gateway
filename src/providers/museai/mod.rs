@@ -11,7 +11,8 @@ pub mod video;
 
 pub use chat::request_museai_chat_completion;
 pub use handlers::{
-    handle_create_video, handle_museai_thread_cleanup, handle_museai_v1, write_chat_completion,
+    handle_create_video, handle_museai_thread_cleanup, handle_museai_v1, handle_update_video_prompt,
+    write_chat_completion,
 };
 pub use lifecycle::{
     append_job_revision, list_video_jobs, load_video_job, save_video_job, VideoJobRecord,

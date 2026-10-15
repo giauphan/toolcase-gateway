@@ -156,3 +156,62 @@ pub fn handle_museai_thread_cleanup(
         ),
     }
 }
+
+pub fn handle_update_video_prompt(
+    client: &mut TcpStream,
+    job_id: &str,
+    request_body: &[u8],
+) -> io::Result<()> {
+    let body: serde_json::Value = match serde_json::from_slice(request_body) {
+        Ok(v) => v,
+        Err(e) => {
+            return crate::http::write_error(
+                client,
+                400,
+                "Bad Request",
+                &format!("Invalid JSON payload: {e}"),
+            );
+        }
+    };
+
+    let prompt = match body.get("prompt").and_then(|v| v.as_str()) {
+        Some(p) if !p.trim().is_empty() => p.trim(),
+        _ => {
+            return crate::http::write_error(
+                client,
+                400,
+                "Bad Request",
+                "missing or empty 'prompt' field",
+            );
+        }
+    };
+
+    match crate::providers::museai::lifecycle::update_job_prompt(job_id, prompt) {
+        Ok(record) => {
+            let response = serde_json::json!({
+                "id": record.job_id,
+                "object": "video.generation",
+                "updated_at": record.last_activity_at,
+                "prompt": record.prompt,
+                "status": "updated"
+            });
+            let response_str = serde_json::to_string(&response)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            client.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_str.len(),
+                    response_str
+                )
+                .as_bytes(),
+            )?;
+            client.flush()
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            crate::http::write_error(client, 404, "Not Found", &format!("video job not found: {e}"))
+        }
+        Err(e) => {
+            crate::http::write_error(client, 500, "Internal Server Error", &e.to_string())
+        }
+    }
+}

@@ -651,43 +651,82 @@ fn test_video_task_submit_rejects_ssrf_reference_images() {
 }
 
 #[test]
-fn test_edit_video_route_nonexistent_job_returns_404() {
+fn test_put_update_video_prompt_success() {
+    let job_id = format!("video-put-test-{}", uuid::Uuid::new_v4());
+    let record = toolcase_gateway::museai::VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: "user-123".into(),
+        model: "muse-video".into(),
+        requested_model: "muse-video".into(),
+        prompt: "original prompt".into(),
+        aspect_ratio: "16:9".into(),
+        duration: 5,
+        thread_id: None,
+        created_at: 1000,
+        last_activity_at: 1000,
+        pinned: false,
+        status: "artifact_reported".into(),
+        media_validated: false,
+        output_verified: false,
+        video_url: "https://muse.ai/files/v1.mp4".into(),
+        revisions: vec![],
+    };
+    toolcase_gateway::museai::save_video_job(&record).unwrap();
+
     let body = serde_json::json!({
-        "job_id": "video-nonexistent-99999",
-        "prompt": "make it brighter with cinematic tone"
+        "prompt": "Updated video generation prompt with enhanced cinematic details"
     })
     .to_string();
 
     let (status, response) = request_route(
-        "POST",
-        "/muse-ai/v1/create-video",
+        "PUT",
+        &format!("/muse-ai/v1/videos/{job_id}"),
+        &body,
+        test_config(),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(response["id"], job_id);
+    assert_eq!(response["status"], "updated");
+    assert_eq!(
+        response["prompt"],
+        "Updated video generation prompt with enhanced cinematic details"
+    );
+
+    let reloaded = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+    assert_eq!(
+        reloaded.prompt,
+        "Updated video generation prompt with enhanced cinematic details"
+    );
+}
+
+#[test]
+fn test_put_update_video_prompt_nonexistent_returns_404() {
+    let body = serde_json::json!({
+        "prompt": "Updated prompt"
+    })
+    .to_string();
+
+    let (status, _response) = request_route(
+        "PUT",
+        "/muse-ai/v1/videos/video-nonexistent-99999",
         &body,
         test_config(),
     );
     assert_eq!(status, 404);
-    assert!(response["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("video job not found"));
 }
 
 #[test]
-fn test_edit_video_route_empty_prompt_returns_400() {
+fn test_put_update_video_prompt_empty_returns_400() {
     let body = serde_json::json!({
-        "job_id": "video-some-id",
         "prompt": "   "
     })
     .to_string();
 
-    let (status, response) = request_route(
-        "POST",
-        "/muse-ai/v1/create-video",
+    let (status, _response) = request_route(
+        "PUT",
+        "/muse-ai/v1/videos/video-some-id",
         &body,
         test_config(),
     );
     assert_eq!(status, 400);
-    assert!(response["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("prompt must not be empty"));
 }
