@@ -33,6 +33,17 @@ pub fn build_video_prompt(model: &str, prompt: &str, aspect_ratio: &str, duratio
 }
 
 pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
+    create_video_with_completion(request_body, config, request_museai_chat_completion)
+}
+
+pub fn create_video_with_completion<F>(
+    request_body: &[u8],
+    config: &Config,
+    request_completion: F,
+) -> io::Result<serde_json::Value>
+where
+    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
+{
     let body: serde_json::Value = if request_body.is_empty() {
         serde_json::json!({})
     } else {
@@ -131,7 +142,7 @@ pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_js
     }))
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    let completion = request_museai_chat_completion(&request_json, config, true)?;
+    let completion = request_completion(&request_json, config, true)?;
 
     let completion_json: serde_json::Value = serde_json::from_str(&completion)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

@@ -651,6 +651,27 @@ fn test_video_task_submit_rejects_ssrf_reference_images() {
 }
 
 #[test]
+fn test_create_video_parent_job_not_found_returns_404() {
+    let body = serde_json::json!({
+        "job_id": "video-missing-parent-12345",
+        "prompt": "make it brighter"
+    })
+    .to_string();
+
+    let (status, response) = request_route(
+        "POST",
+        "/muse-ai/v1/create-video",
+        &body,
+        test_config(),
+    );
+    assert_eq!(status, 404);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("video job not found"));
+}
+
+#[test]
 fn test_put_update_video_prompt_success() {
     let job_id = format!("video-put-test-{}", uuid::Uuid::new_v4());
     let record = toolcase_gateway::museai::VideoJobRecord {

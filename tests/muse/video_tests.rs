@@ -178,6 +178,125 @@ fn test_unverified_artifact_is_not_reported_as_completed() {
 }
 
 #[test]
+fn test_create_video_parent_id_alias_appends_revision() {
+    let job_id = format!("video-api-parent-edit-{}", uuid::Uuid::new_v4());
+    let record = toolcase_gateway::museai::VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: "user-test".into(),
+        model: "muse-video".into(),
+        requested_model: "gen-3".into(),
+        prompt: "original prompt".into(),
+        aspect_ratio: "16:9".into(),
+        duration: 5,
+        thread_id: None,
+        created_at: 1000,
+        last_activity_at: 1000,
+        pinned: false,
+        status: "artifact_reported".into(),
+        media_validated: false,
+        output_verified: false,
+        video_url: "https://muse.ai/files/parent-v1.mp4".into(),
+        revisions: vec![],
+    };
+    toolcase_gateway::museai::save_video_job(&record).unwrap();
+
+    let request = serde_json::json!({"parent_id": job_id, "prompt": "new prompt"});
+    let result = toolcase_gateway::museai::video::create_video_with_completion(
+        &serde_json::to_vec(&request).unwrap(),
+        &test_config(),
+        |_request, _config, _wait_for_artifact| {
+            Ok(serde_json::json!({
+                "choices": [{"message": {"content": "https://muse.ai/files/parent-v2.mp4"}}]
+            })
+            .to_string())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result["id"], record.job_id);
+    assert_eq!(result["video_url"], "https://muse.ai/files/parent-v2.mp4");
+    assert_eq!(result["revisions"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn test_create_video_parent_job_not_found_returns_not_found() {
+    let request = serde_json::json!({
+        "job_id": format!("video-missing-{}", uuid::Uuid::new_v4()),
+        "prompt": "new prompt"
+    });
+    let error = toolcase_gateway::museai::video::create_video_with_completion(
+        &serde_json::to_vec(&request).unwrap(),
+        &test_config(),
+        |_request, _config, _wait_for_artifact| {
+            panic!("provider must not be called for missing parent job")
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+}
+
+#[test]
+fn test_create_video_parent_job_request_appends_revision() {
+    let job_id = format!("video-api-edit-{}", uuid::Uuid::new_v4());
+    let record = toolcase_gateway::museai::VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: "user-test".into(),
+        model: "muse-video".into(),
+        requested_model: "gen-3".into(),
+        prompt: "original prompt".into(),
+        aspect_ratio: "16:9".into(),
+        duration: 5,
+        thread_id: Some("thread-original".into()),
+        created_at: 1000,
+        last_activity_at: 1000,
+        pinned: false,
+        status: "artifact_reported".into(),
+        media_validated: false,
+        output_verified: false,
+        video_url: "https://muse.ai/files/v1.mp4".into(),
+        revisions: vec![toolcase_gateway::museai::VideoRevision {
+            revision_id: "rev-1".into(),
+            prompt: "original prompt".into(),
+            created_at: 1000,
+            video_url: "https://muse.ai/files/v1.mp4".into(),
+            status: "artifact_reported".into(),
+        }],
+    };
+    toolcase_gateway::museai::save_video_job(&record).unwrap();
+
+    let request = serde_json::json!({
+        "job_id": job_id,
+        "prompt": "make it brighter"
+    });
+    let config = test_config();
+    let result = toolcase_gateway::museai::video::create_video_with_completion(
+        &serde_json::to_vec(&request).unwrap(),
+        &config,
+        |_request, _config, _wait_for_artifact| {
+            Ok(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": "Updated video: https://muse.ai/files/v2.mp4"
+                    }
+                }]
+            })
+            .to_string())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result["id"], record.job_id);
+    assert_eq!(result["revision_id"], "rev-2");
+    assert_eq!(result["video_url"], "https://muse.ai/files/v2.mp4");
+    assert_eq!(result["revisions"].as_array().unwrap().len(), 2);
+
+    let saved = toolcase_gateway::museai::load_video_job(&record.job_id).unwrap();
+    assert_eq!(saved.video_url, "https://muse.ai/files/v2.mp4");
+    assert_eq!(saved.revisions.len(), 2);
+}
+
+#[test]
 fn test_session_readiness_requires_running_vm_state() {
     validate_muse_session_readiness(&serde_json::json!({"vm_state":"RUNNING"})).unwrap();
 
