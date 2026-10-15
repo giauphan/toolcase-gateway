@@ -178,6 +178,71 @@ fn test_unverified_artifact_is_not_reported_as_completed() {
 }
 
 #[test]
+fn test_create_edit_prompt_update_pipeline_preserves_video_history() {
+    let initial_request = serde_json::json!({
+        "prompt": "a paper boat crossing a moonlit lake",
+        "model": "gen-3",
+        "aspect_ratio": "16:9",
+        "duration": 5
+    });
+    let initial_result = toolcase_gateway::museai::video::create_video_with_completion(
+        &serde_json::to_vec(&initial_request).unwrap(),
+        &test_config(),
+        |request, _config, _wait_for_artifact| {
+            let request = String::from_utf8_lossy(request);
+            assert!(request.contains("a paper boat crossing a moonlit lake"));
+            Ok(serde_json::json!({
+                "choices": [{"message": {"content": "https://muse.ai/files/pipeline-v1.mp4"}}]
+            })
+            .to_string())
+        },
+    )
+    .unwrap();
+    let job_id = initial_result["id"].as_str().unwrap().to_string();
+    assert_eq!(initial_result["video_url"], "https://muse.ai/files/pipeline-v1.mp4");
+
+    let edit_request = serde_json::json!({
+        "job_id": job_id,
+        "prompt": "add warm lantern light and gentle ripples"
+    });
+    let edited_result = toolcase_gateway::museai::video::create_video_with_completion(
+        &serde_json::to_vec(&edit_request).unwrap(),
+        &test_config(),
+        |request, _config, _wait_for_artifact| {
+            let request = String::from_utf8_lossy(request);
+            assert!(request.contains("https://muse.ai/files/pipeline-v1.mp4"));
+            assert!(request.contains("add warm lantern light and gentle ripples"));
+            Ok(serde_json::json!({
+                "choices": [{"message": {"content": "https://muse.ai/files/pipeline-v2.mp4"}}]
+            })
+            .to_string())
+        },
+    )
+    .unwrap();
+    assert_eq!(edited_result["id"], job_id);
+    assert_eq!(edited_result["revision_id"], "rev-1");
+    assert_eq!(edited_result["video_url"], "https://muse.ai/files/pipeline-v2.mp4");
+
+    let updated = toolcase_gateway::museai::lifecycle::update_job_prompt(
+        &job_id,
+        "store this prompt without regenerating the artifact",
+    )
+    .unwrap();
+    assert_eq!(updated.prompt, "store this prompt without regenerating the artifact");
+    assert_eq!(updated.video_url, "https://muse.ai/files/pipeline-v2.mp4");
+    assert_eq!(updated.revisions.len(), 1);
+    assert_eq!(
+        updated.revisions[0].prompt,
+        "add warm lantern light and gentle ripples"
+    );
+
+    let persisted = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+    assert_eq!(persisted.prompt, "store this prompt without regenerating the artifact");
+    assert_eq!(persisted.video_url, "https://muse.ai/files/pipeline-v2.mp4");
+    assert_eq!(persisted.revisions.len(), 1);
+}
+
+#[test]
 fn test_create_video_parent_id_alias_appends_revision() {
     let job_id = format!("video-api-parent-edit-{}", uuid::Uuid::new_v4());
     let record = toolcase_gateway::museai::VideoJobRecord {

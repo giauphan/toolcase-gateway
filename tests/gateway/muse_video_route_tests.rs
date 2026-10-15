@@ -712,12 +712,15 @@ fn test_put_update_video_prompt_success() {
         response["prompt"],
         "Updated video generation prompt with enhanced cinematic details"
     );
+    assert!(response.get("video_url").is_none());
 
     let reloaded = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
     assert_eq!(
         reloaded.prompt,
         "Updated video generation prompt with enhanced cinematic details"
     );
+    assert_eq!(reloaded.video_url, "https://muse.ai/files/v1.mp4");
+    assert!(reloaded.revisions.is_empty());
 }
 
 #[test]
