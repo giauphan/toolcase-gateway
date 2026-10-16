@@ -11,6 +11,7 @@ use toolcase_gateway::museai::transport::MuseWebSocket;
 use uuid::Uuid;
 
 fn live_capture_config() -> Config {
+    let _ = dotenvy::dotenv();
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let har_bytes = std::fs::read(manifest.join("target/muse.ai.har"))
         .expect("live Muse HAR capture is required");
@@ -250,6 +251,123 @@ fn test_thread_cleanup_route_dispatch() {
     assert_eq!(json["status"], "deleted");
 
     handle.join().unwrap();
+}
+
+fn live_http_request(
+    method: &str,
+    path: &str,
+    body: &str,
+    config: Config,
+) -> (u16, serde_json::Value) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let store =
+        toolcase_gateway::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let handle = std::thread::spawn(move || {
+        let (client, _) = listener.accept().unwrap();
+        toolcase_gateway::routes::route_request(client, &store).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = toolcase_gateway::http::read_response_head(&mut client).unwrap();
+    let mut response_body = head.buffered_body;
+    if let Some(length) = toolcase_gateway::http::header_value(&head.headers, "content-length")
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        while response_body.len() < length {
+            toolcase_gateway::http::read_more(&mut client, &mut response_body).unwrap();
+        }
+        response_body.truncate(length);
+    }
+    handle.join().unwrap();
+    (
+        head.status,
+        serde_json::from_slice(&response_body).unwrap_or_else(|_| serde_json::json!({})),
+    )
+}
+
+#[test]
+fn test_live_http_video_create_edit_prompt_update_pipeline() {
+    if std::env::var("MUSE_LIVE_HTTP_PIPELINE").ok().as_deref() != Some("1") {
+        return;
+    }
+
+    let config = live_capture_config();
+    let create_body = serde_json::json!({
+        "prompt": "A small orange fox walks through a quiet moonlit forest, cinematic camera movement, no text, no logos.",
+        "model": "muse-video",
+        "aspect_ratio": "16:9",
+        "duration": 5
+    })
+    .to_string();
+    let (status, created) = live_http_request(
+        "POST",
+        "/muse-ai/v1/create-video",
+        &create_body,
+        config.clone(),
+    );
+    assert_eq!(status, 200, "live create returned HTTP {status}");
+    assert_eq!(created["object"], "video.generation");
+    assert_eq!(created["status"], "artifact_reported");
+    assert_eq!(created["provider_status"], "artifact_url_reported");
+    assert_eq!(created["output_verified"], false);
+    assert_eq!(created["media_validated"], false);
+    let first_url = created["video_url"].as_str().unwrap();
+    assert!(toolcase_gateway::museai::video::is_supported_video_url(
+        first_url
+    ));
+    let job_id = created["id"].as_str().unwrap().to_owned();
+    println!("Created video artifact: {first_url}");
+
+    let edit_body = serde_json::json!({
+        "job_id": job_id,
+        "prompt": "Add warm lantern light, gentle fog, and a slow camera orbit."
+    })
+    .to_string();
+    let (status, edited) =
+        live_http_request("POST", "/muse-ai/v1/create-video", &edit_body, config);
+    assert_eq!(status, 200, "live edit returned HTTP {status}");
+    assert_eq!(edited["object"], "video.generation");
+    assert_eq!(edited["id"], job_id);
+    assert_eq!(edited["status"], "artifact_reported");
+    assert_eq!(edited["revision_id"], "rev-1");
+    let second_url = edited["video_url"].as_str().unwrap();
+    assert!(toolcase_gateway::museai::video::is_supported_video_url(
+        second_url
+    ));
+    assert_ne!(first_url, second_url);
+    println!("Edited video artifact: {second_url}");
+
+    let prompt_body = serde_json::json!({
+        "prompt": "Store this final prompt without generating another artifact."
+    })
+    .to_string();
+    let (status, updated) = live_http_request(
+        "PUT",
+        &format!("/muse-ai/v1/videos/{job_id}"),
+        &prompt_body,
+        live_capture_config(),
+    );
+    assert_eq!(status, 200, "live prompt update returned HTTP {status}");
+    assert_eq!(updated["id"], job_id);
+    assert_eq!(updated["status"], "updated");
+    assert_eq!(
+        updated["prompt"],
+        "Store this final prompt without generating another artifact."
+    );
+    assert!(updated.get("video_url").is_none());
+
+    let persisted = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+    assert_eq!(persisted.video_url, second_url);
+    assert_eq!(persisted.revisions.len(), 1);
 }
 
 fn parse_cookie_from_header_dump(bytes: &[u8]) -> Option<String> {

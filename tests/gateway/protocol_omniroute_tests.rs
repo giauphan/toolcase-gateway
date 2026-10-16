@@ -296,11 +296,21 @@ fn candidate_models_repairs_unknown_model_when_default_empty() {
         vec!["gpt-4o".to_string()]
     );
     assert_eq!(
-        candidate_models(b"{\"model\":\"claude-3-5-haiku\"}", &fallbacks, 0, empty_default),
+        candidate_models(
+            b"{\"model\":\"claude-3-5-haiku\"}",
+            &fallbacks,
+            0,
+            empty_default
+        ),
         vec!["claude-3-5-haiku".to_string()]
     );
     assert_eq!(
-        candidate_models(b"{\"model\":\"claude-3-5-sonnet-20241022\"}", &fallbacks, 0, empty_default),
+        candidate_models(
+            b"{\"model\":\"claude-3-5-sonnet-20241022\"}",
+            &fallbacks,
+            0,
+            empty_default
+        ),
         vec!["claude-3-5-sonnet-20241022".to_string()]
     );
 

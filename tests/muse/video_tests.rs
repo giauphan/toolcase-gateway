@@ -199,7 +199,10 @@ fn test_create_edit_prompt_update_pipeline_preserves_video_history() {
     )
     .unwrap();
     let job_id = initial_result["id"].as_str().unwrap().to_string();
-    assert_eq!(initial_result["video_url"], "https://muse.ai/files/pipeline-v1.mp4");
+    assert_eq!(
+        initial_result["video_url"],
+        "https://muse.ai/files/pipeline-v1.mp4"
+    );
 
     let edit_request = serde_json::json!({
         "job_id": job_id,
@@ -221,14 +224,20 @@ fn test_create_edit_prompt_update_pipeline_preserves_video_history() {
     .unwrap();
     assert_eq!(edited_result["id"], job_id);
     assert_eq!(edited_result["revision_id"], "rev-1");
-    assert_eq!(edited_result["video_url"], "https://muse.ai/files/pipeline-v2.mp4");
+    assert_eq!(
+        edited_result["video_url"],
+        "https://muse.ai/files/pipeline-v2.mp4"
+    );
 
     let updated = toolcase_gateway::museai::lifecycle::update_job_prompt(
         &job_id,
         "store this prompt without regenerating the artifact",
     )
     .unwrap();
-    assert_eq!(updated.prompt, "store this prompt without regenerating the artifact");
+    assert_eq!(
+        updated.prompt,
+        "store this prompt without regenerating the artifact"
+    );
     assert_eq!(updated.video_url, "https://muse.ai/files/pipeline-v2.mp4");
     assert_eq!(updated.revisions.len(), 1);
     assert_eq!(
@@ -237,7 +246,10 @@ fn test_create_edit_prompt_update_pipeline_preserves_video_history() {
     );
 
     let persisted = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
-    assert_eq!(persisted.prompt, "store this prompt without regenerating the artifact");
+    assert_eq!(
+        persisted.prompt,
+        "store this prompt without regenerating the artifact"
+    );
     assert_eq!(persisted.video_url, "https://muse.ai/files/pipeline-v2.mp4");
     assert_eq!(persisted.revisions.len(), 1);
 }

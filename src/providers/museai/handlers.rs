@@ -207,14 +207,15 @@ pub fn handle_update_video_prompt(
             )?;
             client.flush()
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            crate::http::write_error(client, 404, "Not Found", &format!("video job not found: {e}"))
-        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => crate::http::write_error(
+            client,
+            404,
+            "Not Found",
+            &format!("video job not found: {e}"),
+        ),
         Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
             crate::http::write_error(client, 400, "Bad Request", &format!("invalid job id: {e}"))
         }
-        Err(e) => {
-            crate::http::write_error(client, 500, "Internal Server Error", &e.to_string())
-        }
+        Err(e) => crate::http::write_error(client, 500, "Internal Server Error", &e.to_string()),
     }
 }

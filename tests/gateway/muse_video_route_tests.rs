@@ -658,12 +658,8 @@ fn test_create_video_parent_job_not_found_returns_404() {
     })
     .to_string();
 
-    let (status, response) = request_route(
-        "POST",
-        "/muse-ai/v1/create-video",
-        &body,
-        test_config(),
-    );
+    let (status, response) =
+        request_route("POST", "/muse-ai/v1/create-video", &body, test_config());
     assert_eq!(status, 404);
     assert!(response["error"]["message"]
         .as_str()
