@@ -12,3 +12,15 @@ mod threads_tests;
 
 #[path = "muse/lifecycle_tests.rs"]
 mod lifecycle_tests;
+
+#[path = "muse/approval_protocol_tests.rs"]
+mod approval_protocol_tests;
+
+#[path = "muse/approval_policy_tests.rs"]
+mod approval_policy_tests;
+
+#[path = "muse/approval_coordinator_tests.rs"]
+mod approval_coordinator_tests;
+
+#[path = "muse/approval_integration_tests.rs"]
+mod approval_integration_tests;

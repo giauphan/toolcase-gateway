@@ -111,11 +111,10 @@ Fresh chat requests use a new draft identity and validate the returned isolated
 thread acknowledgement. The gateway subscribes to that acknowledged session,
 parses bounded newline-delimited JSON across frame boundaries, and excludes
 user echoes and explicitly different sessions from assistant output. Pending
-approvals are matched to the requested session; an applicable Muse permission
-prompt fails fast as HTTP 409 Conflict (`MuseApprovalRequired`) on
-`POST /muse-ai/v1/create-video`. The gateway never automatically approves it.
-An acknowledgement, partial text, timeout, or reset is not successful
-completion.
+approvals are matched to the requested session; by default (`GW_MUSE_APPROVAL_MODE=off`),
+an applicable Muse permission prompt fails fast as HTTP 409 Conflict
+(`MuseApprovalRequired`) on `POST /muse-ai/v1/create-video`. An acknowledgement,
+partial text, timeout, or reset is not successful completion.
 
 After WebSocket connection, Noise reads and writes share a 360-second operation
 deadline, of which the final 300 seconds are reserved for a bounded wait for a
@@ -123,6 +122,36 @@ delayed `delta.presentation` video artifact. Live commands also require an
 external timeout to bound connection setup. Live failures suppress private
 response content and credential-bearing URLs; debug output reports allowlisted
 event categories rather than raw frames.
+
+### Muse Sentinel Headless Approval Security Model
+
+The headless Muse Sentinel auto-approval coordinator allows automated resolution of pre-authorized, scoped approvals during video generation without browser automation:
+
+1. **Default Off (Fail-Closed)**:
+   The approval subsystem defaults to `mode = "off"`. In this mode, any pending approval immediately yields HTTP 409 Conflict (`MuseApprovalRequired`), advising manual browser approval. Modes are:
+   - `off`: No auto-approval; fail-closed.
+   - `observe`: Logs pending approvals without issuing write decisions.
+   - `scoped_auto` (or `on`): Auto-approves only matching, pre-authorized, server-offered decisions.
+
+2. **Strict Scope and Session Correlation**:
+   Approvals must match the active Muse session (`thread_id` or `session_scope_id`) and `vm_id`. Cross-thread, cross-VM, or cross-account approvals are rejected and left pending for user action.
+
+3. **Type and Destination Whitelisting**:
+   Only explicitly allowed non-connector approval types (`GW_MUSE_APPROVAL_ALLOWED_TYPES`, default `"network"`) are eligible. Connector approvals always require manual authorization, including Google Drive permission changes and public sharing, even if `connector` and `google_drive` appear in the configured allowlists. Sensitive actions (e.g., `outgoing_media`, purchases, messaging, credential access) are rejected by default. An explicit `GW_MUSE_APPROVAL_ALLOWED_DESTINATIONS` allowlist is required; an empty allowlist approves nothing.
+
+4. **Server-Offered Decision Constraint**:
+   Decisions must be explicitly offered in `decision_options` by the Muse server. `allow_once` is preferred by default (`GW_MUSE_APPROVAL_PREFER_ALLOW_ONCE=true`). Persistent grants (`allow_always`) require an affirmative opt-in (`GW_MUSE_APPROVAL_ALLOW_ALWAYS=true`) and must be present in the server's options.
+
+5. **Mandatory Post-Decision Verification**:
+   The coordinator does not treat HTTP 200/204 or a vanished card as success. It explicitly reads the approval status from Sentinel (`GET /approvals/{id}`) and requires `status == "approved"`.
+
+6. **Idempotency and Anti-Duplication**:
+   Video generation tasks write durable state in `.gw_state/video_jobs/` prior to upstream submission. Retries using the same `idempotency_key` / `submission_key` return existing job state rather than submitting duplicate paid generation prompts.
+
+7. **Rollback Instructions**:
+   To immediately disable auto-approval without service disruption:
+   - Set `GW_MUSE_APPROVAL_MODE=off` in `.env` or system environment.
+   - Restart the gateway process. All pending or incoming approvals will immediately fail-closed and return HTTP 409 for manual user resolution. Existing job records and history are preserved.
 
 Normal tests do not contact Muse. Run individual live tests explicitly:
 

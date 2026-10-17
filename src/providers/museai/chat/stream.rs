@@ -10,6 +10,9 @@ pub struct MuseChatStream {
     pub session_id: Option<String>,
     pub text: String,
     pub completed: bool,
+    pub approved_approval_ids: Vec<String>,
+    #[allow(clippy::type_complexity)]
+    pub approval_handler: Option<Box<dyn FnMut(&str, &serde_json::Value) -> io::Result<bool>>>,
 }
 
 impl MuseChatStream {
@@ -124,22 +127,115 @@ impl MuseChatStream {
         };
         debug_log(&format!("Chat event category={category}"));
         if event == "approvals.snapshot" {
-            let requires_approval = payload
+            let pending_approvals = payload
                 .get("pending_approvals")
-                .and_then(|value| value.as_array())
-                .is_some_and(|approvals| {
-                    approvals.iter().any(|approval| {
-                        ["thread_id", "session_scope_id"].iter().any(|key| {
-                            approval["scope"][key]
-                                .as_str()
-                                .is_some_and(|id| self.session_id.as_deref() == Some(id))
+                .and_then(|value| value.as_array());
+
+            let has_unapproved = pending_approvals.is_some_and(|approvals| {
+                approvals.iter().any(|approval| {
+                    let matches_scope = ["thread_id", "session_scope_id"].iter().any(|key| {
+                        approval["scope"][key]
+                            .as_str()
+                            .is_some_and(|id| self.session_id.as_deref() == Some(id))
+                    });
+                    if !matches_scope {
+                        return false;
+                    }
+                    match approval.get("approval_id").and_then(|id| id.as_str()) {
+                        Some(id) => !self
+                            .approved_approval_ids
+                            .iter()
+                            .any(|approved| approved == id),
+                        None => true,
+                    }
+                })
+            });
+
+            if !has_unapproved {
+                debug_log(
+                    "Approval snapshot contains no unapproved requests for this session; continuing stream",
+                );
+                return Ok(());
+            }
+
+            let has_missing_approval_id = pending_approvals.is_some_and(|approvals| {
+                approvals.iter().any(|approval| {
+                    let matches_scope = ["thread_id", "session_scope_id"].iter().any(|key| {
+                        approval["scope"][key]
+                            .as_str()
+                            .is_some_and(|id| self.session_id.as_deref() == Some(id))
+                    });
+                    matches_scope
+                        && approval
+                            .get("approval_id")
+                            .and_then(|id| id.as_str())
+                            .is_none()
+                })
+            });
+
+            if has_missing_approval_id {
+                debug_log(
+                    "Approval snapshot contains pending scoped approval without approval_id; failing closed"
+                );
+                return Err(io::Error::other(MuseApprovalRequired(
+                    "Scoped Muse permission approval requires manual intervention (missing approval_id)"
+                        .to_string(),
+                )));
+            }
+
+            let new_scoped_approval_ids: Vec<String> = pending_approvals
+                .map(|approvals| {
+                    approvals
+                        .iter()
+                        .filter_map(|approval| {
+                            let matches_scope =
+                                ["thread_id", "session_scope_id"].iter().any(|key| {
+                                    approval["scope"][key]
+                                        .as_str()
+                                        .is_some_and(|id| self.session_id.as_deref() == Some(id))
+                                });
+                            if !matches_scope {
+                                return None;
+                            }
+                            let id = approval.get("approval_id").and_then(|id| id.as_str())?;
+                            if self.approved_approval_ids.iter().any(|app| app == id) {
+                                None
+                            } else {
+                                Some(id.to_string())
+                            }
                         })
-                    })
-                });
-            debug_log(&format!(
-                "Approval snapshot requires_approval={requires_approval}"
-            ));
-            if requires_approval {
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            debug_log("Approval snapshot requires_approval=true");
+            if let Some(ref mut handler) = self.approval_handler {
+                let sid = self.session_id.as_deref().unwrap_or("");
+                match handler(sid, record) {
+                    Ok(true) => {
+                        for approval_id in new_scoped_approval_ids {
+                            if !self.approved_approval_ids.contains(&approval_id) {
+                                self.approved_approval_ids.push(approval_id);
+                            }
+                        }
+                        debug_log(
+                            "Scoped Muse permission approval auto-approved and confirmed; continuing stream",
+                        );
+                        return Ok(());
+                    }
+                    Ok(false) => {
+                        debug_log("Scoped Muse permission approval requires manual intervention");
+                        return Err(io::Error::other(MuseApprovalRequired(
+                            "Scoped Muse permission approval requires manual intervention"
+                                .to_string(),
+                        )));
+                    }
+                    Err(e) => {
+                        debug_log(&format!("Scoped Muse approval handling error: {e}"));
+                        return Err(io::Error::other(MuseApprovalRequired(e.to_string())));
+                    }
+                }
+            } else {
                 debug_log("Scoped Muse permission approval is pending");
                 return Err(io::Error::other(MuseApprovalRequired(
                     "Scoped Muse permission approval is pending".to_string(),

@@ -72,7 +72,9 @@ fn test_video_prompt_avoids_unsupported_capability_claims() {
     }
     assert!(prompt.contains("a dancing cat"));
     assert!(prompt.contains("if video generation is available"));
-    assert!(prompt.contains("public Google Drive link"));
+    assert!(prompt.contains("video artifact link"));
+    assert!(!prompt.contains("Google Drive"));
+    assert!(!prompt.contains("public"));
 }
 
 #[test]
@@ -274,6 +276,7 @@ fn test_create_video_parent_id_alias_appends_revision() {
         output_verified: false,
         video_url: "https://muse.ai/files/parent-v1.mp4".into(),
         revisions: vec![],
+        ..Default::default()
     };
     toolcase_gateway::museai::save_video_job(&record).unwrap();
 
@@ -339,6 +342,7 @@ fn test_create_video_parent_job_request_appends_revision() {
             video_url: "https://muse.ai/files/v1.mp4".into(),
             status: "artifact_reported".into(),
         }],
+        ..Default::default()
     };
     toolcase_gateway::museai::save_video_job(&record).unwrap();
 

@@ -370,6 +370,121 @@ fn test_live_http_video_create_edit_prompt_update_pipeline() {
     assert_eq!(persisted.revisions.len(), 1);
 }
 
+#[test]
+fn test_live_scoped_auto_approval_video_link() {
+    let _ = dotenvy::dotenv();
+
+    if std::env::var("MUSE_LIVE_SCOPED_AUTO_APPROVAL")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
+        return;
+    }
+    assert_eq!(
+        std::env::var("MUSE_LIVE_TEST").ok().as_deref(),
+        Some("1"),
+        "live generation opt-in required"
+    );
+    let mode = toolcase_gateway::config::parse_muse_approval_mode(
+        &std::env::var("GW_MUSE_APPROVAL_MODE").unwrap_or_default(),
+    );
+    assert_eq!(mode, toolcase_gateway::config::MuseApprovalMode::ScopedAuto);
+    let destination = std::env::var("GW_MUSE_APPROVAL_ALLOWED_DESTINATIONS").unwrap_or_default();
+    assert_eq!(
+        destination, "muse.ai",
+        "live approval destination must be muse.ai"
+    );
+    let allowed_types = std::env::var("GW_MUSE_APPROVAL_ALLOWED_TYPES").unwrap_or_default();
+    assert_eq!(
+        allowed_types, "network",
+        "live approval type must be network"
+    );
+    assert_ne!(
+        std::env::var("GW_MUSE_APPROVAL_ALLOW_ALWAYS")
+            .ok()
+            .as_deref(),
+        Some("true")
+    );
+    assert!(
+        !std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/muse-live-owned-session.json")
+            .exists(),
+        "owned session exists; inspect original session, do not generate twice"
+    );
+    let mut config = live_capture_config();
+    config.muse_approval.mode = mode;
+    config.muse_approval.allowed_types = allowed_types
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+    config.muse_approval.allowed_destinations = destination
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+    config.muse_approval.allow_always = false;
+    config.muse_approval.max_decisions_per_job = 3;
+    config.museai_auto_cleanup_threads = false;
+    let prompt = std::env::var("MUSE_LIVE_VIDEO_PROMPT")
+        .ok()
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| {
+            "A single white square rotating slowly on a black background, 3D cartoon style"
+                .to_string()
+        });
+
+    let idempotency_key = std::env::var("MUSE_LIVE_IDEMPOTENCY_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .unwrap_or_else(|| format!("muse-scoped-auto-live-proof-{}", uuid::Uuid::new_v4()));
+
+    let request = serde_json::json!({
+        "prompt": prompt,
+        "model": "muse-video",
+        "idempotency_key": idempotency_key
+    });
+    let (status, result) = live_http_request(
+        "POST",
+        "/muse-ai/v1/create-video",
+        &request.to_string(),
+        config,
+    );
+    assert_eq!(
+        status, 200,
+        "live video creation did not complete without 409: {result}"
+    );
+    assert_eq!(result["status"], "artifact_reported");
+    let url = result["video_url"].as_str().unwrap_or("");
+    assert!(
+        toolcase_gateway::museai::video::is_supported_video_url(url),
+        "no supported video artifact reported"
+    );
+    println!("Live scoped auto video artifact: {url}");
+}
+
+#[test]
+fn test_live_sentinel_read_only_approvals() {
+    if std::env::var("MUSE_LIVE_SENTINEL_PROBE").ok().as_deref() != Some("1") {
+        return;
+    }
+
+    let config = live_capture_config();
+    use toolcase_gateway::museai::approval::client::{MuseSentinelClient, SentinelClient};
+    let mut client = MuseSentinelClient::connect(&config)
+        .unwrap_or_else(|_| panic!("Live Sentinel connection failed (private details suppressed)"));
+    let approvals = client
+        .list_approvals()
+        .unwrap_or_else(|_| panic!("Live Sentinel list failed (private details suppressed)"));
+    println!(
+        "Live Sentinel read-only probe succeeded: count={} approvals={approvals:?}",
+        approvals.len()
+    );
+}
+
 fn parse_cookie_from_header_dump(bytes: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(bytes);
     let lines: Vec<&str> = text.lines().collect();

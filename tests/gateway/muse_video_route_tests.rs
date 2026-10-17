@@ -298,7 +298,9 @@ fn test_create_video_prompt_is_capability_neutral() {
         toolcase_gateway::museai::build_video_prompt("muse-video", "a fox skating", "16:9", 5);
     assert!(prompt.contains("a fox skating"));
     assert!(prompt.contains("video generation is available"));
-    assert!(prompt.contains("public Google Drive link"));
+    assert!(prompt.contains("video artifact link"));
+    assert!(!prompt.contains("Google Drive"));
+    assert!(!prompt.contains("public"));
     assert!(!prompt.contains("Muse Video"));
     assert!(!prompt.contains("Requested duration"));
     assert!(!prompt.contains("Requested aspect ratio"));
@@ -687,6 +689,7 @@ fn test_put_update_video_prompt_success() {
         output_verified: false,
         video_url: "https://muse.ai/files/v1.mp4".into(),
         revisions: vec![],
+        ..Default::default()
     };
     toolcase_gateway::museai::save_video_job(&record).unwrap();
 
@@ -769,4 +772,67 @@ fn test_put_update_video_prompt_invalid_id_returns_400() {
         .as_str()
         .unwrap()
         .contains("invalid job id"));
+}
+
+#[test]
+fn test_get_video_job_status_success() {
+    let job_id = format!("video-get-test-{}", uuid::Uuid::new_v4());
+    let record = toolcase_gateway::museai::VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: "user-get".into(),
+        model: "muse-video".into(),
+        requested_model: "muse-video".into(),
+        prompt: "get video test prompt".into(),
+        aspect_ratio: "16:9".into(),
+        duration: 5,
+        thread_id: Some("thread-xyz".into()),
+        created_at: 1000,
+        last_activity_at: 1000,
+        pinned: false,
+        status: "artifact_reported".into(),
+        media_validated: false,
+        output_verified: false,
+        video_url: "https://muse.ai/files/get-v1.mp4".into(),
+        revisions: vec![],
+        approval_status: Some("approved".into()),
+        approval_id: Some("app-123".into()),
+        ..Default::default()
+    };
+    toolcase_gateway::museai::save_video_job(&record).unwrap();
+
+    let (status, response) = request_route(
+        "GET",
+        &format!("/muse-ai/v1/videos/{job_id}"),
+        "",
+        test_config(),
+    );
+
+    assert_eq!(status, 200);
+    assert_eq!(response["id"], job_id);
+    assert_eq!(response["status"], "artifact_reported");
+    assert_eq!(response["approval_status"], "approved");
+    assert_eq!(response["approval_id"], "app-123");
+    assert_eq!(response["video_url"], "https://muse.ai/files/get-v1.mp4");
+}
+
+#[test]
+fn test_get_video_job_nonexistent_returns_404() {
+    let (status, _response) = request_route(
+        "GET",
+        "/muse-ai/v1/videos/video-nonexistent-88888",
+        "",
+        test_config(),
+    );
+    assert_eq!(status, 404);
+}
+
+#[test]
+fn test_video_route_unsupported_method_returns_405() {
+    let (status, _response) = request_route(
+        "DELETE",
+        "/muse-ai/v1/videos/video-any-id",
+        "",
+        test_config(),
+    );
+    assert_eq!(status, 405);
 }

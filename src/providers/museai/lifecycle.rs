@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn job_update_lock() -> &'static Mutex<()> {
+pub fn job_update_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
@@ -20,7 +20,7 @@ pub struct VideoRevision {
     pub status: String,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct VideoJobRecord {
     pub job_id: String,
     pub owner_id: String,
@@ -39,6 +39,14 @@ pub struct VideoJobRecord {
     pub output_verified: bool,
     pub video_url: String,
     pub revisions: Vec<VideoRevision>,
+    #[serde(default)]
+    pub approval_status: Option<String>,
+    #[serde(default)]
+    pub approval_id: Option<String>,
+    #[serde(default)]
+    pub submission_key: Option<String>,
+    #[serde(default)]
+    pub last_checked_at: Option<u64>,
 }
 
 pub fn state_dir() -> PathBuf {
@@ -78,6 +86,50 @@ pub fn save_video_job(record: &VideoJobRecord) -> io::Result<()> {
     Ok(())
 }
 
+pub fn update_video_job(
+    job_id: &str,
+    status: &str,
+    approval_status: Option<&str>,
+    thread_id: Option<&str>,
+) -> io::Result<()> {
+    let _guard = job_update_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut record = load_video_job(job_id)?;
+    record.status = status.to_string();
+    record.approval_status = approval_status.map(str::to_string);
+    if let Some(tid) = thread_id {
+        record.thread_id = Some(tid.to_string());
+    }
+    record.last_activity_at = now_secs();
+    record.last_checked_at = Some(record.last_activity_at);
+    save_video_job(&record)
+}
+
+pub const STALE_SUBMITTING_SECS: u64 = 300;
+
+pub fn is_submitting_stale(record: &VideoJobRecord, now: u64) -> bool {
+    if record.status != "submitting" {
+        return false;
+    }
+    let ref_time = record.last_checked_at.unwrap_or(record.created_at);
+    if ref_time == 0 {
+        return false;
+    }
+    now.saturating_sub(ref_time) >= STALE_SUBMITTING_SECS
+}
+
+pub fn recover_stale_submitting_job(record: &mut VideoJobRecord, now: u64) -> bool {
+    if is_submitting_stale(record, now) {
+        record.status = "submission_unknown".to_string();
+        record.last_activity_at = now;
+        record.last_checked_at = Some(now);
+        true
+    } else {
+        false
+    }
+}
+
 pub fn load_video_job(job_id: &str) -> io::Result<VideoJobRecord> {
     let path = job_file_path(job_id)?;
     if !path.exists() {
@@ -87,30 +139,65 @@ pub fn load_video_job(job_id: &str) -> io::Result<VideoJobRecord> {
         ));
     }
     let data = fs::read_to_string(path)?;
-    let record: VideoJobRecord =
+    let mut record: VideoJobRecord =
         serde_json::from_str(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let now = now_secs();
+    if recover_stale_submitting_job(&mut record, now) {
+        let _ = save_video_job(&record);
+    }
     Ok(record)
 }
 
 pub fn list_video_jobs() -> io::Result<Vec<VideoJobRecord>> {
-    let dir = match ensure_state_dir() {
-        Ok(d) => d,
-        Err(_) => return Ok(Vec::new()),
-    };
+    scan_video_jobs()
+}
+
+fn scan_video_jobs() -> io::Result<Vec<VideoJobRecord>> {
+    let dir = ensure_state_dir()?;
     let mut jobs = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                if let Ok(data) = fs::read_to_string(&path) {
-                    if let Ok(record) = serde_json::from_str::<VideoJobRecord>(&data) {
-                        jobs.push(record);
-                    }
-                }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            match fs::read_to_string(&path).and_then(|data| {
+                serde_json::from_str::<VideoJobRecord>(&data).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "Invalid video job record")
+                })
+            }) {
+                Ok(record) => jobs.push(record),
+                Err(_) => eprintln!("[museai_lifecycle] Skipping unreadable video job record"),
             }
         }
     }
     Ok(jobs)
+}
+
+pub fn reserve_video_job(record: &VideoJobRecord) -> io::Result<Option<VideoJobRecord>> {
+    let _guard = job_update_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    if let Some(submission_key) = record.submission_key.as_deref() {
+        if let Some(existing) = scan_video_jobs()?
+            .into_iter()
+            .find(|job| job.submission_key.as_deref() == Some(submission_key))
+        {
+            if existing.status != "failed" {
+                return Ok(Some(existing));
+            }
+
+            let old_path = job_file_path(&existing.job_id)?;
+            let _ = fs::remove_file(old_path);
+        }
+    }
+
+    if job_file_path(&record.job_id)?.try_exists()? {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "video job id already exists",
+        ));
+    }
+    save_video_job(record)?;
+    Ok(None)
 }
 
 pub fn now_secs() -> u64 {
@@ -132,9 +219,8 @@ pub fn evaluate_job_retention(record: &VideoJobRecord, now: u64, ttl_secs: u64) 
     }
     // Respect active/pending/in-flight states
     match record.status.as_str() {
-        "queued" | "submitting" | "generating" | "validating" | "approval_required" => {
-            return false
-        }
+        "queued" | "submitting" | "generating" | "validating" | "approval_pending"
+        | "approval_required" => return false,
         _ => {}
     }
     let age = now.saturating_sub(record.last_activity_at);

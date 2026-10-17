@@ -3,6 +3,7 @@
 use std::io;
 
 pub const SERVICE_DAEMON: u64 = 0;
+pub const SERVICE_SENTINEL: u64 = 1;
 pub const MAX_TRANSPORT_CHUNK_BYTES: usize = 65_489;
 
 #[derive(Debug, PartialEq)]

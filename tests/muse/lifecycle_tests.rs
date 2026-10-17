@@ -1,5 +1,6 @@
 use toolcase_gateway::museai::{
-    list_video_jobs, load_video_job, save_video_job, VideoJobRecord, VideoRevision,
+    list_video_jobs, load_video_job, reserve_video_job, save_video_job, VideoJobRecord,
+    VideoRevision,
 };
 
 #[test]
@@ -28,6 +29,7 @@ fn test_video_job_persistence_and_revisions() {
             video_url: "https://muse.ai/files/test.mp4".into(),
             status: "artifact_reported".into(),
         }],
+        ..Default::default()
     };
 
     save_video_job(&record).unwrap();
@@ -39,6 +41,57 @@ fn test_video_job_persistence_and_revisions() {
 
     let jobs = list_video_jobs().unwrap();
     assert!(jobs.iter().any(|j| j.job_id == job_id));
+}
+
+#[test]
+fn reserve_video_job_returns_existing_record_for_duplicate_submission_key() {
+    let existing_id = format!("video-reservation-existing-{}", uuid::Uuid::new_v4());
+    let duplicate_id = format!("video-reservation-duplicate-{}", uuid::Uuid::new_v4());
+    let key = format!("submission-{}", uuid::Uuid::new_v4());
+    let existing = VideoJobRecord {
+        job_id: existing_id.clone(),
+        submission_key: Some(key.clone()),
+        status: "submitting".into(),
+        ..Default::default()
+    };
+    let duplicate = VideoJobRecord {
+        job_id: duplicate_id.clone(),
+        submission_key: Some(key),
+        status: "submitting".into(),
+        ..Default::default()
+    };
+
+    reserve_video_job(&existing).unwrap();
+    let found = reserve_video_job(&duplicate).unwrap().unwrap();
+
+    assert_eq!(found.job_id, existing_id);
+    assert!(load_video_job(&duplicate_id).is_err());
+}
+
+#[test]
+fn concurrent_video_job_reservations_are_deduplicated() {
+    let key = format!("concurrent-submission-{}", uuid::Uuid::new_v4());
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let key = key.clone();
+            std::thread::spawn(move || {
+                let record = VideoJobRecord {
+                    job_id: format!("video-reservation-{}", uuid::Uuid::new_v4()),
+                    submission_key: Some(key),
+                    status: "submitting".into(),
+                    ..Default::default()
+                };
+                reserve_video_job(&record).unwrap().is_none()
+            })
+        })
+        .collect();
+
+    let newly_reserved = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .filter(|reserved| *reserved)
+        .count();
+    assert_eq!(newly_reserved, 1);
 }
 
 #[test]
@@ -61,6 +114,7 @@ fn test_retention_cleanup_rules() {
         output_verified: false,
         video_url: "https://muse.ai/files/old.mp4".into(),
         revisions: vec![],
+        ..Default::default()
     };
 
     // Unpinned, old -> should expire for 1-day TTL (86400)
@@ -104,6 +158,7 @@ fn test_append_job_revision() {
             video_url: "https://muse.ai/files/v1.mp4".into(),
             status: "artifact_reported".into(),
         }],
+        ..Default::default()
     };
 
     save_video_job(&record).unwrap();
@@ -170,6 +225,7 @@ fn test_concurrent_job_updates_are_synchronized() {
         output_verified: false,
         video_url: "https://muse.ai/files/base.mp4".into(),
         revisions: vec![],
+        ..Default::default()
     };
     save_video_job(&record).unwrap();
 
@@ -190,4 +246,137 @@ fn test_concurrent_job_updates_are_synchronized() {
 
     let final_record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
     assert_eq!(final_record.revisions.len(), 5);
+}
+
+#[test]
+fn test_submitting_record_stale_detection_and_recovery() {
+    use toolcase_gateway::museai::{is_submitting_stale, recover_stale_submitting_job};
+
+    let now = 1_000_000_u64;
+
+    // Stale record (> 300s since last_checked_at)
+    let mut stale_record = VideoJobRecord {
+        job_id: "video-stale-submitting".into(),
+        status: "submitting".into(),
+        created_at: now - 500,
+        last_checked_at: Some(now - 400),
+        ..Default::default()
+    };
+    assert!(is_submitting_stale(&stale_record, now));
+    assert!(recover_stale_submitting_job(&mut stale_record, now));
+    assert_eq!(stale_record.status, "submission_unknown");
+    assert_eq!(stale_record.last_checked_at, Some(now));
+
+    // Active record (< 300s)
+    let mut active_record = VideoJobRecord {
+        job_id: "video-active-submitting".into(),
+        status: "submitting".into(),
+        created_at: now - 60,
+        last_checked_at: Some(now - 60),
+        ..Default::default()
+    };
+    assert!(!is_submitting_stale(&active_record, now));
+    assert!(!recover_stale_submitting_job(&mut active_record, now));
+    assert_eq!(active_record.status, "submitting");
+
+    // Non-submitting status is never submitting-stale
+    let mut completed_record = VideoJobRecord {
+        job_id: "video-completed".into(),
+        status: "completed".into(),
+        created_at: now - 5000,
+        last_checked_at: Some(now - 5000),
+        ..Default::default()
+    };
+    assert!(!is_submitting_stale(&completed_record, now));
+    assert!(!recover_stale_submitting_job(&mut completed_record, now));
+}
+
+#[test]
+fn test_load_video_job_recovers_stale_submitting_record() {
+    let job_id = format!("video-stale-load-{}", uuid::Uuid::new_v4());
+    let now = toolcase_gateway::museai::lifecycle::now_secs();
+
+    let stale = VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: "user-stale".into(),
+        status: "submitting".into(),
+        created_at: now.saturating_sub(600),
+        last_activity_at: now.saturating_sub(600),
+        last_checked_at: Some(now.saturating_sub(600)),
+        ..Default::default()
+    };
+    save_video_job(&stale).unwrap();
+
+    let loaded = load_video_job(&job_id).unwrap();
+    assert_eq!(loaded.status, "submission_unknown");
+
+    // Verify it was updated on disk as well
+    let reloaded = load_video_job(&job_id).unwrap();
+    assert_eq!(reloaded.status, "submission_unknown");
+}
+
+#[test]
+fn test_stale_submitting_retry_does_not_block_with_would_block() {
+    let idempotency_key = format!("idem-stale-{}", uuid::Uuid::new_v4());
+    let job_id = format!("video-stale-retry-{}", uuid::Uuid::new_v4());
+    let now = toolcase_gateway::museai::lifecycle::now_secs();
+
+    save_video_job(&VideoJobRecord {
+        job_id,
+        status: "submitting".into(),
+        submission_key: Some(idempotency_key.clone()),
+        created_at: now.saturating_sub(500),
+        last_activity_at: now.saturating_sub(500),
+        last_checked_at: Some(now.saturating_sub(500)),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let req = serde_json::json!({
+        "prompt": "prompt with stale submitting key",
+        "idempotency_key": idempotency_key,
+    });
+
+    let config = toolcase_gateway::config::Config::default();
+    let err = toolcase_gateway::museai::video::create_video_with_completion(
+        &serde_json::to_vec(&req).unwrap(),
+        &config,
+        |_body, _cfg, _wait| Ok("{}".into()),
+    )
+    .unwrap_err();
+
+    // Must NOT be WouldBlock ("generation in progress")
+    assert_ne!(err.kind(), std::io::ErrorKind::WouldBlock);
+    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    assert!(err.to_string().contains("submission_unknown"));
+}
+
+#[test]
+fn test_status_update_failure_is_propagated_on_completion_error() {
+    let job_id = format!("video-update-fail-{}", uuid::Uuid::new_v4());
+    let req = serde_json::json!({
+        "id": job_id.clone(),
+        "prompt": "status update failure propagation test",
+    });
+
+    let config = toolcase_gateway::config::Config::default();
+    let err = toolcase_gateway::museai::video::create_video_with_completion(
+        &serde_json::to_vec(&req).unwrap(),
+        &config,
+        |_body, _cfg, _wait| {
+            // Delete the reserved job file before completion returns error,
+            // so update_video_job will fail with NotFound
+            let path = toolcase_gateway::museai::lifecycle::job_file_path(&job_id).unwrap();
+            let _ = std::fs::remove_file(path);
+            Err(std::io::Error::other("upstream simulated timeout"))
+        },
+    )
+    .unwrap_err();
+
+    // Verify the error is propagated and mentions failure to update status
+    assert!(
+        err.to_string()
+            .contains("failed to update video job status"),
+        "error must mention status update failure: {err}"
+    );
 }

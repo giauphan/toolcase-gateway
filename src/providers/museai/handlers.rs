@@ -104,6 +104,7 @@ pub fn handle_create_video(
                 io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
                 io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
                 io::ErrorKind::NotFound => (404, "Not Found"),
+                io::ErrorKind::WouldBlock | io::ErrorKind::AlreadyExists => (409, "Conflict"),
                 io::ErrorKind::Unsupported => (501, "Not Implemented"),
                 io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
                 _ => (502, "Bad Gateway"),
@@ -194,6 +195,54 @@ pub fn handle_update_video_prompt(
                 "updated_at": record.last_activity_at,
                 "prompt": record.prompt,
                 "status": "updated"
+            });
+            let response_str = serde_json::to_string(&response)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            client.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response_str.len(),
+                    response_str
+                )
+                .as_bytes(),
+            )?;
+            client.flush()
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => crate::http::write_error(
+            client,
+            404,
+            "Not Found",
+            &format!("video job not found: {e}"),
+        ),
+        Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
+            crate::http::write_error(client, 400, "Bad Request", &format!("invalid job id: {e}"))
+        }
+        Err(e) => crate::http::write_error(client, 500, "Internal Server Error", &e.to_string()),
+    }
+}
+
+pub fn handle_get_video(client: &mut TcpStream, job_id: &str) -> io::Result<()> {
+    match crate::providers::museai::lifecycle::load_video_job(job_id) {
+        Ok(record) => {
+            let response = serde_json::json!({
+                "id": record.job_id,
+                "object": "video.generation",
+                "created": record.created_at,
+                "provider": "muse_chat",
+                "status": record.status,
+                "approval_status": record.approval_status,
+                "approval_id": record.approval_id,
+                "output_verified": record.output_verified,
+                "media_validated": record.media_validated,
+                "video_url": record.video_url,
+                "prompt": record.prompt,
+                "model": record.model,
+                "requested_model": record.requested_model,
+                "aspect_ratio": record.aspect_ratio,
+                "duration": record.duration,
+                "thread_id": record.thread_id,
+                "revisions": record.revisions,
+                "last_activity_at": record.last_activity_at,
             });
             let response_str = serde_json::to_string(&response)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

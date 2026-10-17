@@ -125,6 +125,27 @@ pub fn request_museai_chat_completion(
             if std::env::var("MUSE_LIVE_TEST").ok().as_deref() == Some("1") {
                 crate::test_helpers::save_live_owned_session(session_id)?;
             }
+
+            if config.muse_approval.mode == crate::config::MuseApprovalMode::ScopedAuto {
+                let mut coordinator = crate::providers::museai::approval::ApprovalCoordinator::new(
+                    &config, session_id,
+                );
+                stream.approval_handler = Some(Box::new(move |_sid, record| {
+                    match coordinator.handle_approval_snapshot(record) {
+                        Ok(crate::providers::museai::approval::CoordinateResult::Approved {
+                            ..
+                        }) => Ok(true),
+                        Ok(
+                            crate::providers::museai::approval::CoordinateResult::ManualRequired {
+                                reason,
+                                ..
+                            },
+                        ) => Err(io::Error::other(reason)),
+                        Err(e) => Err(e),
+                    }
+                }));
+            }
+
             let subscription = serde_json::json!({
                 "session_id": session_id,
                 "after_stream_seq": 0,
@@ -196,7 +217,7 @@ pub fn request_museai_chat_completion(
             let _ = crate::providers::museai::delete_muse_thread(base_origin, &thread_id, &config);
         } else {
             crate::providers::museai::register_thread(
-                thread_id,
+                thread_id.clone(),
                 base_origin.to_string(),
                 config.clone(),
             );
@@ -214,6 +235,8 @@ pub fn request_museai_chat_completion(
         "object": "chat.completion",
         "created": created,
         "model": "muse",
+        "thread_id": thread_id,
+        "session_id": thread_id,
         "choices": [
             {
                 "index": 0,

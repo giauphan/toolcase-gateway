@@ -61,6 +61,46 @@ pub enum ModelTier {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MuseApprovalMode {
+    Off,
+    Observe,
+    ScopedAuto,
+}
+
+pub fn parse_muse_approval_mode(value: &str) -> MuseApprovalMode {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "observe" => MuseApprovalMode::Observe,
+        "on" | "scoped_auto" => MuseApprovalMode::ScopedAuto,
+        _ => MuseApprovalMode::Off,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MuseApprovalConfig {
+    pub mode: MuseApprovalMode,
+    pub allowed_types: Vec<String>,
+    pub allowed_destinations: Vec<String>,
+    pub prefer_allow_once: bool,
+    pub allow_always: bool,
+    pub max_decisions_per_job: usize,
+    pub approval_timeout_secs: u64,
+}
+
+impl Default for MuseApprovalConfig {
+    fn default() -> Self {
+        Self {
+            mode: MuseApprovalMode::Off,
+            allowed_types: vec!["network".to_string()],
+            allowed_destinations: Vec::new(),
+            prefer_allow_once: true,
+            allow_always: false,
+            max_decisions_per_job: 3,
+            approval_timeout_secs: 30,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub target_host: String,
@@ -84,6 +124,7 @@ pub struct Config {
     pub jev_enabled: bool,
     pub jev_shadow_mode: bool,
     pub default_tier: ModelTier,
+    pub muse_approval: MuseApprovalConfig,
 }
 
 impl Default for Config {
@@ -110,6 +151,7 @@ impl Default for Config {
             jev_enabled: false,
             jev_shadow_mode: true,
             default_tier: ModelTier::Strong,
+            muse_approval: MuseApprovalConfig::default(),
         }
     }
 }

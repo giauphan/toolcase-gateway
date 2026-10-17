@@ -36,6 +36,7 @@ fn cleanup_expired_video_jobs_removes_only_eligible_records() {
             output_verified: false,
             video_url: "https://muse.ai/files/cleanup.mp4".into(),
             revisions: vec![],
+            ..Default::default()
         })
         .unwrap();
     }

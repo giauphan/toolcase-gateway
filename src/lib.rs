@@ -75,6 +75,42 @@ pub fn run() -> io::Result<()> {
             "strong" => crate::config::ModelTier::Strong,
             _ => crate::config::ModelTier::Strong,
         },
+        muse_approval: {
+            let mode =
+                crate::config::parse_muse_approval_mode(&env_or("GW_MUSE_APPROVAL_MODE", "off"));
+            let allowed_types = env_or("GW_MUSE_APPROVAL_ALLOWED_TYPES", "network")
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let allowed_destinations = env_or("GW_MUSE_APPROVAL_ALLOWED_DESTINATIONS", "")
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let prefer_allow_once =
+                env_or("GW_MUSE_APPROVAL_PREFER_ALLOW_ONCE", "true").eq_ignore_ascii_case("true");
+            let allow_always =
+                env_or("GW_MUSE_APPROVAL_ALLOW_ALWAYS", "false").eq_ignore_ascii_case("true");
+            let max_decisions = env_or("GW_MUSE_APPROVAL_MAX_DECISIONS", "3")
+                .parse()
+                .unwrap_or(3);
+            let timeout_secs = env_or("GW_MUSE_APPROVAL_TIMEOUT_SECS", "30")
+                .parse()
+                .unwrap_or(30);
+
+            crate::config::MuseApprovalConfig {
+                mode,
+                allowed_types,
+                allowed_destinations,
+                prefer_allow_once,
+                allow_always,
+                max_decisions_per_job: max_decisions,
+                approval_timeout_secs: timeout_secs,
+            }
+        },
     };
     let store = ConfigStore::new_with_limits(
         config,

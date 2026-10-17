@@ -39,4 +39,7 @@ pub fn log_owned_record_schema(record: &serde_json::Value) {
         .map(|map| map.keys().map(String::as_str).collect())
         .unwrap_or_default();
     println!("live owned record schema: event={event} status={status} keys={keys:?}");
+    if event == "approvals.snapshot" {
+        println!("approvals.snapshot payload: {payload}");
+    }
 }

@@ -28,7 +28,7 @@ pub fn is_muse_video_alias(model: &str) -> bool {
 pub fn build_video_prompt(model: &str, prompt: &str, aspect_ratio: &str, duration: u64) -> String {
     let _ = (model, aspect_ratio, duration);
     format!(
-        "Create a video from this description if video generation is available: \"{prompt}\". Return a public Google Drive link when ready."
+        "Create a video from this description if video generation is available: \"{prompt}\". Return a video artifact link when ready. Do not change sharing permissions."
     )
 }
 
@@ -76,6 +76,13 @@ where
         Some(id) => Some(super::lifecycle::load_video_job(id)?),
         None => None,
     };
+
+    let submission_key = body
+        .get("idempotency_key")
+        .or_else(|| body.get("submission_key"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let requested_model = body
         .get("model")
@@ -142,10 +149,110 @@ where
     }))
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    let completion = request_completion(&request_json, config, true)?;
+    let allocated_job_id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("video-{}", Uuid::new_v4()));
 
-    let completion_json: serde_json::Value = serde_json::from_str(&completion)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    if existing_job.is_none() {
+        let init_record = super::lifecycle::VideoJobRecord {
+            job_id: allocated_job_id.clone(),
+            owner_id: "default-owner".to_string(),
+            model: upstream_model.to_string(),
+            requested_model: requested_model.to_string(),
+            prompt: prompt.clone(),
+            aspect_ratio: aspect_ratio.to_string(),
+            duration,
+            thread_id: None,
+            created_at: now,
+            last_activity_at: now,
+            pinned: false,
+            status: "submitting".to_string(),
+            media_validated: false,
+            output_verified: false,
+            video_url: String::new(),
+            revisions: Vec::new(),
+            approval_status: None,
+            approval_id: None,
+            submission_key: submission_key.map(str::to_string),
+            last_checked_at: Some(now),
+        };
+
+        if let Some(existing) = super::lifecycle::reserve_video_job(&init_record)? {
+            return video_job_response(existing);
+        }
+    }
+
+    let completion = match request_completion(&request_json, config, true) {
+        Ok(c) => c,
+        Err(e) => {
+            if existing_job.is_none() {
+                let (status, approval_status) = if e
+                    .get_ref()
+                    .and_then(|err| {
+                        err.downcast_ref::<crate::providers::museai::MuseApprovalRequired>()
+                    })
+                    .is_some()
+                {
+                    ("approval_required", Some("manual_required"))
+                } else if matches!(
+                    e.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::UnexpectedEof
+                ) {
+                    ("submission_unknown", None)
+                } else {
+                    ("failed", None)
+                };
+                if let Err(update_err) = super::lifecycle::update_video_job(
+                    &allocated_job_id,
+                    status,
+                    approval_status,
+                    None,
+                ) {
+                    super::lifecycle::debug_log_lifecycle(&format!(
+                        "Failed to update job status after completion error: {update_err}"
+                    ));
+                    return Err(io::Error::new(
+                        update_err.kind(),
+                        format!(
+                            "failed to update video job status to '{status}': {update_err} (completion error: {e})"
+                        ),
+                    ));
+                }
+            }
+            return Err(e);
+        }
+    };
+
+    let completion_json: serde_json::Value = match serde_json::from_str(&completion) {
+        Ok(json) => json,
+        Err(e) => {
+            if existing_job.is_none() {
+                if let Err(update_err) =
+                    super::lifecycle::update_video_job(&allocated_job_id, "failed", None, None)
+                {
+                    super::lifecycle::debug_log_lifecycle(&format!(
+                        "Failed to update job status after JSON parse error: {update_err}"
+                    ));
+                    return Err(io::Error::new(
+                        update_err.kind(),
+                        format!(
+                            "failed to update video job status to 'failed': {update_err} (parse error: {e})"
+                        ),
+                    ));
+                }
+            }
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e));
+        }
+    };
 
     let content = completion_json
         .get("choices")
@@ -156,8 +263,32 @@ where
         .and_then(|c| c.as_str())
         .unwrap_or("");
 
+    let thread_id = completion_json
+        .get("thread_id")
+        .or_else(|| completion_json.get("session_id"))
+        .and_then(|t| t.as_str())
+        .map(str::to_string);
+
     let video_url = extract_url_from_text(content);
     if video_url.is_empty() {
+        if existing_job.is_none() {
+            if let Err(update_err) = super::lifecycle::update_video_job(
+                &allocated_job_id,
+                "failed",
+                None,
+                thread_id.as_deref(),
+            ) {
+                super::lifecycle::debug_log_lifecycle(&format!(
+                    "Failed to update job status after empty video url: {update_err}"
+                ));
+                return Err(io::Error::new(
+                    update_err.kind(),
+                    format!(
+                        "failed to update video job status to 'failed': {update_err} (missing video url)"
+                    ),
+                ));
+            }
+        }
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "Muse video generation completed without a supported public HTTPS artifact",
@@ -198,14 +329,115 @@ where
         }));
     }
 
-    build_video_result(
+    build_video_result_with_job_id(
+        allocated_job_id,
         upstream_model,
         requested_model,
         &prompt,
         aspect_ratio,
         duration,
         content,
+        "default-owner",
+        thread_id,
+        submission_key.map(str::to_string),
     )
+}
+
+fn video_job_response(existing: super::lifecycle::VideoJobRecord) -> io::Result<serde_json::Value> {
+    if existing.status == "approval_required" {
+        return Err(io::Error::other(crate::providers::museai::MuseApprovalRequired(
+            format!(
+                "The current Muse thread '{}' is awaiting a user decision; do not resubmit the video prompt.",
+                existing.thread_id.as_deref().unwrap_or("unknown")
+            ),
+        )));
+    }
+
+    if existing.status == "artifact_reported" || existing.status == "completed" {
+        let rev_id = existing
+            .revisions
+            .last()
+            .map(|r| r.revision_id.clone())
+            .unwrap_or_else(|| "rev-1".to_string());
+        return Ok(serde_json::json!({
+            "id": existing.job_id,
+            "object": "video.generation",
+            "created": existing.created_at,
+            "provider": "muse_chat",
+            "resolved_provider": "muse_chat",
+            "requested_model": existing.requested_model,
+            "resolved_model": existing.model,
+            "model": existing.model,
+            "prompt": existing.prompt,
+            "requested_aspect_ratio": existing.aspect_ratio,
+            "requested_duration": existing.duration,
+            "status": existing.status,
+            "approval_status": existing.approval_status,
+            "approval_id": existing.approval_id,
+            "provider_status": "artifact_url_reported",
+            "output_verified": existing.output_verified,
+            "media_validated": existing.media_validated,
+            "video_url": existing.video_url,
+            "revision_id": rev_id,
+            "revisions": existing.revisions
+        }));
+    }
+
+    if existing.status == "submitting" {
+        let now = super::lifecycle::now_secs();
+        if super::lifecycle::is_submitting_stale(&existing, now) {
+            let mut updated = existing.clone();
+            super::lifecycle::recover_stale_submitting_job(&mut updated, now);
+            let _ = super::lifecycle::save_video_job(&updated);
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "video generation submission timed out (status=submission_unknown, job={}); retryable",
+                    updated.job_id
+                ),
+            ));
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!("video generation in progress (status={})", existing.status),
+        ));
+    }
+
+    if existing.status == "submission_unknown" {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "video generation submission status is unknown (job_id={}); previous submission timed out or interrupted, retryable",
+                existing.job_id
+            ),
+        ));
+    }
+
+    if existing.status == "failed" {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "video job previously failed; retry should create a new job",
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "id": existing.job_id,
+        "object": "video.generation",
+        "created": existing.created_at,
+        "provider": "muse_chat",
+        "resolved_provider": "muse_chat",
+        "requested_model": existing.requested_model,
+        "resolved_model": existing.model,
+        "model": existing.model,
+        "prompt": existing.prompt,
+        "requested_aspect_ratio": existing.aspect_ratio,
+        "requested_duration": existing.duration,
+        "status": existing.status,
+        "approval_status": existing.approval_status,
+        "approval_id": existing.approval_id,
+        "video_url": "",
+        "revisions": existing.revisions
+    }))
 }
 
 pub fn build_video_result(
@@ -239,6 +471,34 @@ pub fn build_video_result_with_owner(
     owner_id: &str,
     thread_id: Option<String>,
 ) -> io::Result<serde_json::Value> {
+    let job_id = format!("video-{}", Uuid::new_v4());
+    build_video_result_with_job_id(
+        job_id,
+        model,
+        requested_model,
+        prompt,
+        aspect_ratio,
+        duration,
+        content,
+        owner_id,
+        thread_id,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_video_result_with_job_id(
+    job_id: String,
+    model: &str,
+    requested_model: &str,
+    prompt: &str,
+    aspect_ratio: &str,
+    duration: u64,
+    content: &str,
+    owner_id: &str,
+    thread_id: Option<String>,
+    submission_key: Option<String>,
+) -> io::Result<serde_json::Value> {
     let video_url = extract_url_from_text(content);
     if video_url.is_empty() {
         return Err(io::Error::new(
@@ -255,11 +515,14 @@ pub fn build_video_result_with_owner(
         "artifact_reported"
     };
 
-    let job_id = format!("video-{}", Uuid::new_v4());
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+
+    let created_at = super::lifecycle::load_video_job(&job_id)
+        .map(|existing| existing.created_at)
+        .unwrap_or(now);
 
     let record = super::lifecycle::VideoJobRecord {
         job_id: job_id.clone(),
@@ -269,8 +532,8 @@ pub fn build_video_result_with_owner(
         prompt: prompt.to_string(),
         aspect_ratio: aspect_ratio.to_string(),
         duration,
-        thread_id: thread_id.clone(),
-        created_at: now,
+        thread_id,
+        created_at,
         last_activity_at: now,
         pinned: false,
         status: status.to_string(),
@@ -278,6 +541,10 @@ pub fn build_video_result_with_owner(
         output_verified,
         video_url: video_url.clone(),
         revisions: Vec::new(),
+        approval_status: None,
+        approval_id: None,
+        submission_key,
+        last_checked_at: Some(now),
     };
     if let Err(e) = super::lifecycle::save_video_job(&record) {
         eprintln!("[museai_video] failed to persist video job {job_id}: {e}");
@@ -286,7 +553,7 @@ pub fn build_video_result_with_owner(
     Ok(serde_json::json!({
         "id": job_id,
         "object": "video.generation",
-        "created": now,
+        "created": created_at,
         "provider": "muse_chat",
         "resolved_provider": "muse_chat",
         "requested_model": requested_model,

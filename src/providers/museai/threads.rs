@@ -62,11 +62,11 @@ pub fn delete_muse_thread(base_url: &str, thread_id: &str, config: &Config) -> i
 
     match req.call() {
         Ok(_) => {
-            debug_log(&format!("Successfully cleaned up thread: {thread_id}"));
+            debug_log("Successfully cleaned up thread");
             Ok(())
         }
-        Err(e) => {
-            debug_log(&format!("Note: Failed to clean up thread {thread_id}: {e}"));
+        Err(_e) => {
+            debug_log("Note: Failed to clean up thread");
             Ok(())
         }
     }

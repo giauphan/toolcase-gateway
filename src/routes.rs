@@ -205,11 +205,14 @@ fn route_request_impl(
         if request.method.eq_ignore_ascii_case("put") {
             return crate::museai::handle_update_video_prompt(client, job_id, &request.body);
         }
+        if request.method.eq_ignore_ascii_case("get") {
+            return crate::museai::handle_get_video(client, job_id);
+        }
         return write_error(
             client,
             405,
             "Method Not Allowed",
-            "video update only supports PUT",
+            "video route only supports GET and PUT",
         );
     }
 
