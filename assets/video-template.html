@@ -123,6 +123,8 @@ pre{margin:0}
     </div>
 
     <div class="row" style="margin-top:14px">
+      <video id="video-player" controls style="display:none;width:100%;max-height:500px;border-radius:8px;background:#000"></video>
+      <a id="video-download" href="" download style="display:none;margin-top:8px;font-weight:700;color:var(--accent)">Download video</a>
       <div class="mono" id="video-url" style="display:none;"></div>
       <div id="raw" style="margin-top:10px"></div>
       <div class="err-box" id="errbox"></div>
@@ -179,6 +181,26 @@ pre{margin:0}
     ].join("\n");
   }
 
+  function duration(){return parseInt(document.getElementById("duration").value,10)||10}
+
+  function showVideo(url){
+    var player=document.getElementById("video-player");
+    var download=document.getElementById("video-download");
+    player.src=url;
+    download.href=url;
+    player.style.display="block";
+    download.style.display="inline-block";
+  }
+
+  function hideVideo(){
+    var player=document.getElementById("video-player");
+    var download=document.getElementById("video-download");
+    player.removeAttribute("src");
+    player.load();
+    player.style.display="none";
+    download.style.display="none";
+  }
+
   function render(){
     document.getElementById("settings-preview").textContent=JSON.stringify({model:state.model, aspect_ratio:state.aspect, duration:duration()}, null, 2);
     document.getElementById("preview").textContent=buildPrompt();
@@ -221,7 +243,69 @@ pre{margin:0}
     box.textContent="";
   }
 
+  var polling=null;
+  function stopPolling(){
+    if(polling){clearTimeout(polling);polling=null;}
+  }
+
+  function showResult(d){
+    var raw=document.getElementById("raw");
+    var urlEl=document.getElementById("video-url");
+    raw.innerHTML="";
+    urlEl.style.display="none";
+    hideVideo();
+    if(d && (d.status==="completed" || d.status==="artifact_reported") && d.video_url){
+      var verified=d.media_validated===true;
+      setStatus(verified?"Done.":"Artifact URL returned; media not validated.",verified?"ok":"busy");
+      showVideo(d.video_url);
+      urlEl.textContent=d.video_url;
+      urlEl.style.display="block";
+      return true;
+    }
+    return false;
+  }
+
+  function pollVideo(id, go){
+    stopPolling();
+    function check(){
+      fetch("/muse-ai/v1/videos/"+encodeURIComponent(id)).then(function(r){
+        return r.json().then(function(d){return {ok:r.ok,status:r.status,data:d};});
+      }).then(function(res){
+        var d=res.data;
+        if(!res.ok){
+          if(res.status===404){
+            polling=setTimeout(check,1000);
+            return;
+          }
+          go.disabled=false;
+          setStatus("","");
+          setError(d && d.error && d.error.message ? d.error.message : "Unable to check video status.");
+          return;
+        }
+        if(showResult(d)){
+          go.disabled=false;
+          stopPolling();
+          return;
+        }
+        if(d.status==="failed" || d.status==="approval_required" || d.status==="submission_unknown"){
+          go.disabled=false;
+          setStatus("","");
+          setError(d.status==="approval_required" ? "Video generation requires approval." : "Video generation did not finish.");
+          return;
+        }
+        setStatus("Generating…", "busy");
+        polling=setTimeout(check,5000);
+      }).catch(function(e){
+        go.disabled=false;
+        setStatus("","");
+        setError(String(e));
+      });
+    }
+    check();
+  }
+
   document.getElementById("go").addEventListener("click", function(){
+    stopPolling();
     clearError();
     var go=document.getElementById("go");
     var topic=document.getElementById("topic").value.trim();
@@ -243,18 +327,24 @@ pre{margin:0}
       duration: duration()
     };
 
+    var id="video-"+(Date.now().toString(36))+"-"+Math.random().toString(36).slice(2);
+    body.id=id;
     fetch("/muse-ai/v1/create-video", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify(body)
     }).then(function(r){
       return r.json().then(function(d){
-        return {ok:r.ok, data:d};
+        return {ok:r.ok, status:r.status, data:d};
       });
     }).then(function(res){
-      go.disabled=false;
-
       if(!res.ok){
+        if(res.status===409){
+          setStatus("Checking existing video job…", "busy");
+          pollVideo(id,go);
+          return;
+        }
+        go.disabled=false;
         setStatus("", "");
         var msg=res.data && res.data.error && res.data.error.message ? res.data.error.message : "Request failed.";
         setError(msg);
@@ -262,21 +352,16 @@ pre{margin:0}
       }
 
       var d=res.data;
-      var raw=document.getElementById("raw");
-      raw.innerHTML="";
-      var urlEl=document.getElementById("video-url");
-      urlEl.style.display="none";
-
-      if(d && (d.status==="completed" || d.status==="artifact_reported") && d.video_url){
-        var verified = d.media_validated===true;
-        setStatus(verified ? "Done." : "Artifact URL returned; media not validated.", verified ? "ok" : "busy");
-        urlEl.textContent=d.video_url;
-        urlEl.style.display="block";
+      if(showResult(d)){
+        go.disabled=false;
+      } else if(d && (d.id || id) && (d.status==="submitting" || d.status==="generating" || d.status==="queued")){
+        setStatus("Video is processing…", "busy");
+        pollVideo(d.id || id,go);
       } else {
-        setStatus("Pending.", "busy");
-        var pre=document.createElement("pre");
-        pre.textContent=JSON.stringify(d,null,2);
-        raw.appendChild(pre);
+        go.disabled=false;
+        setStatus("", "");
+        var message=d && d.error && d.error.message ? d.error.message : "Video generation did not return a video.";
+        setError(message);
       }
     }).catch(function(e){
       go.disabled=false;

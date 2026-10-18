@@ -55,3 +55,23 @@ fn video_template_surfaces_unverified_media_boundary() {
     assert!(html.contains("Artifact URL returned; media not validated."));
     assert!(html.contains("d.media_validated===true"));
 }
+
+#[test]
+fn video_template_reads_selected_duration_before_submission() {
+    let html = include_str!("../../assets/video-template.html");
+    assert!(html.contains(
+        "function duration(){return parseInt(document.getElementById(\"duration\").value,10)||10}"
+    ));
+}
+
+#[test]
+fn video_template_renders_returned_artifact_as_playable_downloadable_media() {
+    let html = include_str!("../../assets/video-template.html");
+    assert!(html.contains("<video id=\"video-player\" controls"));
+    assert!(html.contains("<a id=\"video-download\" href=\"\" download"));
+    assert!(html.contains("player.src=url"));
+    assert!(html.contains("download.href=url"));
+    assert!(html.contains("showVideo(d.video_url)"));
+    assert!(html.contains("video-player"));
+    assert!(html.contains("video-download"));
+}
