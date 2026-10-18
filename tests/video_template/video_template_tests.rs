@@ -75,3 +75,15 @@ fn video_template_renders_returned_artifact_as_playable_downloadable_media() {
     assert!(html.contains("video-player"));
     assert!(html.contains("video-download"));
 }
+
+#[test]
+fn video_template_tracks_processing_state_and_polls_job_lifecycle() {
+    let html = include_str!("../../assets/video-template.html");
+    assert!(html.contains("pollVideo"));
+    assert!(html.contains("/muse-ai/v1/videos/"));
+    assert!(html.contains("Video is processing…"));
+    assert!(html.contains("d.status===\"submitting\""));
+    assert!(html.contains("d.status===\"generating\""));
+    assert!(html.contains("d.status===\"queued\""));
+    assert!(html.contains("pollVideo(d.id || id,go)"));
+}

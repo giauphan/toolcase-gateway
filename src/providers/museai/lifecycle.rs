@@ -265,6 +265,7 @@ pub fn append_job_revision(
     };
     record.revisions.push(revision);
     record.last_activity_at = now;
+    record.prompt = new_prompt.to_string();
     record.video_url = video_url.to_string();
     record.status = status.to_string();
     save_video_job(&record)?;

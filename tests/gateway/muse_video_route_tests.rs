@@ -148,6 +148,53 @@ fn test_create_video_route() {
 }
 
 #[test]
+fn test_create_video_route_returns_submitting_and_persists_job() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let job_id = format!("video-route-test-{}", uuid::Uuid::new_v4());
+
+    let handle = thread::spawn({
+        let job_id = job_id.clone();
+        move || {
+            let config = test_config();
+            let (mut client, _) = listener.accept().unwrap();
+            let req = serde_json::json!({
+                "id": job_id,
+                "prompt": "a cartoon cat playing guitar",
+                "model": "muse-video",
+                "aspect_ratio": "16:9",
+                "duration": 5
+            });
+            let bytes = serde_json::to_vec(&req).unwrap();
+            toolcase_gateway::museai::handle_create_video(&mut client, &bytes, &config).unwrap();
+        }
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+
+    let mut body = head.buffered_body;
+    let length = header_value(&head.headers, "content-length")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    while body.len() < length {
+        read_more(&mut client, &mut body).unwrap();
+    }
+    handle.join().unwrap();
+
+    let json: serde_json::Value = serde_json::from_slice(&body[..length]).unwrap();
+    assert_eq!(json["id"], job_id);
+    assert_eq!(json["status"], "submitting");
+    let record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+    assert_eq!(record.job_id, job_id);
+    if let Ok(path) = toolcase_gateway::museai::lifecycle::job_file_path(&job_id) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
 fn test_spawn_muse_thread_maps_404_to_not_found() {
     let mock_muse = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = mock_muse.local_addr().unwrap().port();
@@ -835,4 +882,71 @@ fn test_video_route_unsupported_method_returns_405() {
         test_config(),
     );
     assert_eq!(status, 405);
+}
+
+#[test]
+fn test_curl_api_lifecycle_workflow_for_video_template() {
+    let job_id = format!("video-ui-workflow-{}", uuid::Uuid::new_v4());
+    let now = toolcase_gateway::museai::lifecycle::now_secs();
+    let init_record = toolcase_gateway::museai::VideoJobRecord {
+        job_id: job_id.clone(),
+        owner_id: "default-owner".to_string(),
+        model: "muse-video".to_string(),
+        requested_model: "muse-video".to_string(),
+        prompt: "A cozy bakery at dawn".to_string(),
+        aspect_ratio: "9:16".to_string(),
+        duration: 10,
+        thread_id: None,
+        created_at: now,
+        last_activity_at: now,
+        pinned: false,
+        status: "submitting".to_string(),
+        media_validated: false,
+        output_verified: false,
+        video_url: String::new(),
+        revisions: Vec::new(),
+        approval_status: None,
+        approval_id: None,
+        submission_key: None,
+        last_checked_at: Some(now),
+    };
+    toolcase_gateway::museai::save_video_job(&init_record).unwrap();
+
+    let (status, polling_resp) = request_route(
+        "GET",
+        &format!("/muse-ai/v1/videos/{job_id}"),
+        "",
+        test_config(),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(polling_resp["id"], job_id);
+    assert_eq!(polling_resp["status"], "submitting");
+    assert_eq!(polling_resp["video_url"], "");
+
+    let artifact_url = "https://muse.ai/files/completed-video.mp4";
+    let completed_record = toolcase_gateway::museai::VideoJobRecord {
+        status: "completed".to_string(),
+        media_validated: true,
+        output_verified: true,
+        video_url: artifact_url.to_string(),
+        last_activity_at: 1010,
+        ..init_record.clone()
+    };
+    toolcase_gateway::museai::save_video_job(&completed_record).unwrap();
+
+    let (status, final_resp) = request_route(
+        "GET",
+        &format!("/muse-ai/v1/videos/{job_id}"),
+        "",
+        test_config(),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(final_resp["id"], job_id);
+    assert_eq!(final_resp["status"], "completed");
+    assert_eq!(final_resp["media_validated"], true);
+    assert_eq!(final_resp["video_url"], artifact_url);
+
+    if let Ok(path) = toolcase_gateway::museai::lifecycle::job_file_path(&job_id) {
+        let _ = std::fs::remove_file(path);
+    }
 }

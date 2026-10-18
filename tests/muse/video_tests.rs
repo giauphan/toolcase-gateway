@@ -257,6 +257,109 @@ fn test_create_edit_prompt_update_pipeline_preserves_video_history() {
 }
 
 #[test]
+fn test_submit_video_returns_pending_before_provider_finishes() {
+    let job_id = format!("video-async-{}", uuid::Uuid::new_v4());
+    let request = serde_json::json!({
+        "id": job_id,
+        "prompt": "a paper boat crossing a moonlit lake",
+        "model": "muse-video",
+        "aspect_ratio": "16:9",
+        "duration": 5
+    });
+    let started = std::time::Instant::now();
+    let response = toolcase_gateway::museai::video::submit_video_with_completion(
+        &serde_json::to_vec(&request).unwrap(),
+        &test_config(),
+        |_request, _config, _wait_for_artifact| {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            Ok(serde_json::json!({
+                "choices": [{"message": {"content": "https://muse.ai/files/async.mp4"}}]
+            })
+            .to_string())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(response["id"], job_id);
+    assert_eq!(response["status"], "submitting");
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(250),
+        "submit_video_with_completion should return immediately"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+        if record.status == "artifact_reported" {
+            assert_eq!(record.video_url, "https://muse.ai/files/async.mp4");
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "provider worker did not finish"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn test_submit_video_persists_provider_failure() {
+    let job_id = format!("video-async-failure-{}", uuid::Uuid::new_v4());
+    let request = serde_json::json!({"id": job_id, "prompt": "a paper boat"});
+    let response = toolcase_gateway::museai::video::submit_video_with_completion(
+        &serde_json::to_vec(&request).unwrap(),
+        &test_config(),
+        |_request, _config, _wait_for_artifact| Err(std::io::Error::other("provider failed")),
+    )
+    .unwrap();
+    assert_eq!(response["status"], "submitting");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+        if record.status == "failed" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "provider failure was not persisted"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn test_submit_video_persists_approval_required() {
+    let job_id = format!("video-async-approval-{}", uuid::Uuid::new_v4());
+    let request = serde_json::json!({"id": job_id, "prompt": "a paper boat"});
+    let response = toolcase_gateway::museai::video::submit_video_with_completion(
+        &serde_json::to_vec(&request).unwrap(),
+        &test_config(),
+        |_request, _config, _wait_for_artifact| {
+            Err(std::io::Error::other(
+                toolcase_gateway::museai::MuseApprovalRequired("approval required".into()),
+            ))
+        },
+    )
+    .unwrap();
+    assert_eq!(response["status"], "submitting");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+        if record.status == "approval_required" {
+            assert_eq!(record.approval_status.as_deref(), Some("manual_required"));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "approval state was not persisted"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
 fn test_create_video_parent_id_alias_appends_revision() {
     let job_id = format!("video-api-parent-edit-{}", uuid::Uuid::new_v4());
     let record = toolcase_gateway::museai::VideoJobRecord {

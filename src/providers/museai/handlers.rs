@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::providers::museai::transport::send_museai_request;
-use crate::providers::museai::video::create_video;
+use crate::providers::museai::video::submit_video;
 use crate::providers::museai::MuseApprovalRequired;
 use std::io::{self, Write};
 use std::net::TcpStream;
@@ -71,7 +71,7 @@ pub fn handle_create_video(
     request_body: &[u8],
     config: &Config,
 ) -> io::Result<()> {
-    match create_video(request_body, config) {
+    match submit_video(request_body, config) {
         Ok(result) => {
             let response_str = serde_json::to_string(&result)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

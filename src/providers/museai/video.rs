@@ -4,46 +4,27 @@ use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-pub const SUPPORTED_MODELS: [&str; 10] = [
-    "muse",
-    "muse-video",
-    "gen-3",
-    "gen-2",
-    "kling",
-    "gen-4",
-    "gen-4.5",
-    "gen-4-turbo",
-    "aleph-2.0",
-    "ruby",
-];
-pub const SUPPORTED_ASPECT_RATIOS: [&str; 5] = ["16:9", "9:16", "1:1", "5:4", "4:3"];
-
-pub fn is_muse_video_alias(model: &str) -> bool {
-    matches!(
-        model,
-        "gen-3" | "gen-2" | "kling" | "gen-4" | "gen-4.5" | "gen-4-turbo" | "aleph-2.0" | "ruby"
-    )
-}
-
-pub fn build_video_prompt(model: &str, prompt: &str, aspect_ratio: &str, duration: u64) -> String {
-    let _ = (model, aspect_ratio, duration);
-    format!(
-        "Create a video from this description if video generation is available: \"{prompt}\". Return a video artifact link when ready. Do not change sharing permissions."
-    )
-}
+mod url;
+pub use url::*;
 
 pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
     create_video_with_completion(request_body, config, request_museai_chat_completion)
 }
 
-pub fn create_video_with_completion<F>(
-    request_body: &[u8],
-    config: &Config,
-    request_completion: F,
-) -> io::Result<serde_json::Value>
-where
-    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
-{
+pub struct ValidatedVideoRequest {
+    pub allocated_job_id: String,
+    pub prompt: String,
+    pub upstream_model: String,
+    pub requested_model: String,
+    pub aspect_ratio: String,
+    pub duration: u64,
+    pub existing_job: Option<super::lifecycle::VideoJobRecord>,
+    pub submission_key: Option<String>,
+    pub request_json: Vec<u8>,
+    pub now: u64,
+}
+
+pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<ValidatedVideoRequest> {
     let body: serde_json::Value = if request_body.is_empty() {
         serde_json::json!({})
     } else {
@@ -82,14 +63,16 @@ where
         .or_else(|| body.get("submission_key"))
         .and_then(|v| v.as_str())
         .map(str::trim)
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
 
     let requested_model = body
         .get("model")
         .and_then(|v| v.as_str())
-        .or_else(|| existing_job.as_ref().map(|j| j.requested_model.as_str()))
-        .unwrap_or("muse-video");
-    if !SUPPORTED_MODELS.contains(&requested_model) {
+        .map(str::to_string)
+        .or_else(|| existing_job.as_ref().map(|j| j.requested_model.clone()))
+        .unwrap_or_else(|| "muse-video".to_string());
+    if !SUPPORTED_MODELS.contains(&requested_model.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
@@ -98,14 +81,15 @@ where
             ),
         ));
     }
-    let upstream_model = normalize_video_model(requested_model);
+    let upstream_model = normalize_video_model(&requested_model).to_string();
 
     let aspect_ratio = body
         .get("aspect_ratio")
         .and_then(|v| v.as_str())
-        .or_else(|| existing_job.as_ref().map(|j| j.aspect_ratio.as_str()))
-        .unwrap_or("16:9");
-    if !SUPPORTED_ASPECT_RATIOS.contains(&aspect_ratio) {
+        .map(str::to_string)
+        .or_else(|| existing_job.as_ref().map(|j| j.aspect_ratio.clone()))
+        .unwrap_or_else(|| "16:9".to_string());
+    if !SUPPORTED_ASPECT_RATIOS.contains(&aspect_ratio.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
@@ -138,7 +122,7 @@ where
             parent.video_url
         )
     } else {
-        build_video_prompt(upstream_model, &prompt, aspect_ratio, duration)
+        build_video_prompt(&upstream_model, &prompt, &aspect_ratio, duration)
     };
 
     let request_json = serde_json::to_vec(&serde_json::json!({
@@ -162,39 +146,57 @@ where
         .unwrap_or_default()
         .as_secs();
 
-    if existing_job.is_none() {
-        let init_record = super::lifecycle::VideoJobRecord {
-            job_id: allocated_job_id.clone(),
-            owner_id: "default-owner".to_string(),
-            model: upstream_model.to_string(),
-            requested_model: requested_model.to_string(),
-            prompt: prompt.clone(),
-            aspect_ratio: aspect_ratio.to_string(),
-            duration,
-            thread_id: None,
-            created_at: now,
-            last_activity_at: now,
-            pinned: false,
-            status: "submitting".to_string(),
-            media_validated: false,
-            output_verified: false,
-            video_url: String::new(),
-            revisions: Vec::new(),
-            approval_status: None,
-            approval_id: None,
-            submission_key: submission_key.map(str::to_string),
-            last_checked_at: Some(now),
-        };
+    Ok(ValidatedVideoRequest {
+        allocated_job_id,
+        prompt,
+        upstream_model,
+        requested_model,
+        aspect_ratio,
+        duration,
+        existing_job,
+        submission_key,
+        request_json,
+        now,
+    })
+}
 
-        if let Some(existing) = super::lifecycle::reserve_video_job(&init_record)? {
-            return video_job_response(existing);
-        }
+fn create_init_job_record(req: &ValidatedVideoRequest) -> super::lifecycle::VideoJobRecord {
+    super::lifecycle::VideoJobRecord {
+        job_id: req.allocated_job_id.clone(),
+        owner_id: "default-owner".to_string(),
+        model: req.upstream_model.to_string(),
+        requested_model: req.requested_model.clone(),
+        prompt: req.prompt.clone(),
+        aspect_ratio: req.aspect_ratio.clone(),
+        duration: req.duration,
+        thread_id: None,
+        created_at: req.now,
+        last_activity_at: req.now,
+        pinned: false,
+        status: "submitting".to_string(),
+        media_validated: false,
+        output_verified: false,
+        video_url: String::new(),
+        revisions: Vec::new(),
+        approval_status: None,
+        approval_id: None,
+        submission_key: req.submission_key.clone(),
+        last_checked_at: Some(req.now),
     }
+}
 
-    let completion = match request_completion(&request_json, config, true) {
+fn finish_video_request<F>(
+    req: ValidatedVideoRequest,
+    config: &Config,
+    request_completion: F,
+) -> io::Result<serde_json::Value>
+where
+    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
+{
+    let completion = match request_completion(&req.request_json, config, true) {
         Ok(c) => c,
         Err(e) => {
-            if existing_job.is_none() {
+            if req.existing_job.is_none() {
                 let (status, approval_status) = if e
                     .get_ref()
                     .and_then(|err| {
@@ -212,7 +214,7 @@ where
                     ("failed", None)
                 };
                 if let Err(update_err) = super::lifecycle::update_video_job(
-                    &allocated_job_id,
+                    &req.allocated_job_id,
                     status,
                     approval_status,
                     None,
@@ -235,9 +237,9 @@ where
     let completion_json: serde_json::Value = match serde_json::from_str(&completion) {
         Ok(json) => json,
         Err(e) => {
-            if existing_job.is_none() {
+            if req.existing_job.is_none() {
                 if let Err(update_err) =
-                    super::lifecycle::update_video_job(&allocated_job_id, "failed", None, None)
+                    super::lifecycle::update_video_job(&req.allocated_job_id, "failed", None, None)
                 {
                     super::lifecycle::debug_log_lifecycle(&format!(
                         "Failed to update job status after JSON parse error: {update_err}"
@@ -271,9 +273,9 @@ where
 
     let video_url = extract_url_from_text(content);
     if video_url.is_empty() {
-        if existing_job.is_none() {
+        if req.existing_job.is_none() {
             if let Err(update_err) = super::lifecycle::update_video_job(
-                &allocated_job_id,
+                &req.allocated_job_id,
                 "failed",
                 None,
                 thread_id.as_deref(),
@@ -295,10 +297,10 @@ where
         ));
     }
 
-    if let Some(parent) = existing_job {
+    if let Some(parent) = req.existing_job {
         let updated = super::lifecycle::append_job_revision(
             &parent.job_id,
-            &prompt,
+            &req.prompt,
             &video_url,
             "artifact_reported",
         )?;
@@ -316,7 +318,7 @@ where
             "requested_model": updated.requested_model,
             "resolved_model": updated.model,
             "model": updated.model,
-            "prompt": prompt,
+            "prompt": req.prompt,
             "requested_aspect_ratio": updated.aspect_ratio,
             "requested_duration": updated.duration,
             "status": updated.status,
@@ -330,17 +332,87 @@ where
     }
 
     build_video_result_with_job_id(
-        allocated_job_id,
-        upstream_model,
-        requested_model,
-        &prompt,
-        aspect_ratio,
-        duration,
+        req.allocated_job_id,
+        &req.upstream_model,
+        &req.requested_model,
+        &req.prompt,
+        &req.aspect_ratio,
+        req.duration,
         content,
         "default-owner",
         thread_id,
-        submission_key.map(str::to_string),
+        req.submission_key,
     )
+}
+
+pub fn create_video_with_completion<F>(
+    request_body: &[u8],
+    config: &Config,
+    request_completion: F,
+) -> io::Result<serde_json::Value>
+where
+    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
+{
+    let req = parse_and_validate_video_request(request_body)?;
+
+    if req.existing_job.is_none() {
+        let init_record = create_init_job_record(&req);
+        if let Some(existing) = super::lifecycle::reserve_video_job(&init_record)? {
+            return video_job_response(existing);
+        }
+    }
+
+    finish_video_request(req, config, request_completion)
+}
+
+pub fn submit_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
+    submit_video_with_completion(request_body, config, request_museai_chat_completion)
+}
+
+pub fn submit_video_with_completion<F>(
+    request_body: &[u8],
+    config: &Config,
+    request_completion: F,
+) -> io::Result<serde_json::Value>
+where
+    F: Fn(&[u8], &Config, bool) -> io::Result<String> + Send + Sync + 'static,
+{
+    let req = parse_and_validate_video_request(request_body)?;
+
+    if req.existing_job.is_some() {
+        return finish_video_request(req, config, request_completion);
+    }
+
+    let init_record = create_init_job_record(&req);
+    if let Some(existing) = super::lifecycle::reserve_video_job(&init_record)? {
+        return video_job_response(existing);
+    }
+
+    let response = serde_json::json!({
+        "id": req.allocated_job_id,
+        "object": "video.generation",
+        "created": req.now,
+        "provider": "muse_chat",
+        "resolved_provider": "muse_chat",
+        "requested_model": req.requested_model,
+        "resolved_model": req.upstream_model,
+        "model": req.upstream_model,
+        "prompt": req.prompt,
+        "requested_aspect_ratio": req.aspect_ratio,
+        "requested_duration": req.duration,
+        "status": "submitting",
+        "approval_status": serde_json::Value::Null,
+        "approval_id": serde_json::Value::Null,
+        "video_url": "",
+        "revisions": []
+    });
+
+    let config_clone = config.clone();
+    std::thread::spawn(move || {
+        let _ = finish_video_request(req, &config_clone, request_completion);
+    });
+
+    Ok(response)
 }
 
 fn video_job_response(existing: super::lifecycle::VideoJobRecord) -> io::Result<serde_json::Value> {
@@ -520,11 +592,15 @@ pub fn build_video_result_with_job_id(
         .unwrap_or_default()
         .as_secs();
 
+    let _guard = super::lifecycle::job_update_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
     let created_at = super::lifecycle::load_video_job(&job_id)
         .map(|existing| existing.created_at)
         .unwrap_or(now);
 
-    let record = super::lifecycle::VideoJobRecord {
+    let mut record = super::lifecycle::VideoJobRecord {
         job_id: job_id.clone(),
         owner_id: owner_id.to_string(),
         model: model.to_string(),
@@ -546,6 +622,16 @@ pub fn build_video_result_with_job_id(
         submission_key,
         last_checked_at: Some(now),
     };
+
+    if let Ok(existing) = super::lifecycle::load_video_job(&job_id) {
+        record.pinned = existing.pinned;
+        record.revisions = existing.revisions;
+        record.approval_status = existing.approval_status;
+        record.approval_id = existing.approval_id;
+        record.submission_key = existing.submission_key;
+        record.prompt = prompt.to_string();
+        record.status = status.to_string();
+    }
     if let Err(e) = super::lifecycle::save_video_job(&record) {
         eprintln!("[museai_video] failed to persist video job {job_id}: {e}");
     }
@@ -568,104 +654,4 @@ pub fn build_video_result_with_job_id(
         "media_validated": media_validated,
         "video_url": video_url
     }))
-}
-
-pub fn extract_url_from_text(text: &str) -> String {
-    let urls: Vec<&str> = text
-        .split_whitespace()
-        .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
-        .collect();
-    for url in &urls {
-        let cleaned = trim_trailing_punct(url);
-        if is_google_drive_file_path(cleaned) {
-            return cleaned.to_string();
-        }
-    }
-    for url in &urls {
-        let cleaned = trim_trailing_punct(url);
-        if is_supported_video_url(cleaned) {
-            return cleaned.to_string();
-        }
-    }
-    String::new()
-}
-
-pub fn is_supported_video_url(url: &str) -> bool {
-    url.starts_with("https://")
-        && (is_muse_files_url(url)
-            || (is_google_drive_host(url) && is_google_drive_file_path(url))
-            || (has_supported_video_extension(url) && !is_spoofed_host(url)))
-}
-
-pub fn is_muse_files_url(url: &str) -> bool {
-    url.starts_with("https://")
-        && url_authority(url) == "muse.ai"
-        && url
-            .strip_prefix("https://")
-            .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
-            .is_some_and(|path| path.starts_with("files/") && has_supported_video_extension(url))
-}
-
-fn is_spoofed_host(url: &str) -> bool {
-    let authority = url_authority(url);
-    let dots = authority.matches('.').count();
-    let base = authority
-        .split('.')
-        .rev()
-        .take(2)
-        .collect::<Vec<_>>()
-        .join(".");
-    base == "ai" || dots != 2
-}
-
-pub fn has_supported_video_extension(url: &str) -> bool {
-    let path = url
-        .strip_prefix("https://")
-        .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .split('#')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    path.ends_with(".mp4") || path.ends_with(".mov") || path.ends_with(".webm")
-}
-
-pub fn is_google_drive_host(url: &str) -> bool {
-    let authority = url_authority(url);
-    matches!(authority, "drive.google.com" | "docs.google.com")
-}
-
-pub fn is_google_drive_file_path(url: &str) -> bool {
-    url.starts_with("https://")
-        && is_google_drive_host(url)
-        && url
-            .strip_prefix("https://")
-            .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
-            .is_some_and(|path| path.starts_with("file/") || path.starts_with("uc?"))
-}
-
-pub fn url_authority(url: &str) -> &str {
-    url.strip_prefix("https://")
-        .and_then(|rest| rest.split('/').next())
-        .and_then(|host| host.split('?').next())
-        .and_then(|host| host.split('#').next())
-        .unwrap_or("")
-}
-
-pub fn trim_trailing_punct(s: &str) -> &str {
-    s.trim_matches([
-        '"', '\'', ',', ';', ')', '}', '(', '{', ']', '[', '\\', '\n', '\r', ' ',
-    ])
-}
-
-pub fn normalize_video_model(model: &str) -> &str {
-    match model {
-        "muse-video" | "muse" => "muse-video",
-        "gen-3" | "gen-2" | "kling" | "gen-4" | "gen-4.5" | "gen-4-turbo" | "aleph-2.0"
-        | "ruby" => "muse-video",
-        _ => model,
-    }
 }
