@@ -532,6 +532,7 @@ fn reserved_feature_routes_never_fall_through_to_omniroute() {
     assert_eq!(routed_status("POST", "/muse-config"), 405);
     assert_eq!(routed_status("POST", "/video-template"), 405);
     assert_eq!(routed_status("POST", "/gateway-config/dashboard"), 405);
+    assert_eq!(routed_status("GET", "/api/v1/dashboard/muse-config"), 405);
 }
 
 #[test]

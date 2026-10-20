@@ -128,6 +128,59 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
   <div class="card">
     <h2>
+      <span>Muse AI Subsystem Configuration</span>
+      <span class="tag idle" id="muse-badge">Defaults</span>
+    </h2>
+    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
+      Manage endpoints, VM ID, and session credentials for the Muse AI pipeline. Leave token or cookie fields blank to retain current values.
+    </p>
+
+    <form id="muse-form">
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-muse-base">Muse AI Base URL</label>
+          <input type="text" id="cfg-muse-base" name="base_url" placeholder="https://muse.ai">
+        </div>
+        <div class="field-group">
+          <label for="cfg-muse-ws">Noise WebSocket URL</label>
+          <input type="text" id="cfg-muse-ws" name="ws_url" placeholder="wss://hatch.metaaivm.com/v1/noise">
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label for="cfg-muse-vmid">Target VM ID</label>
+        <input type="text" id="cfg-muse-vmid" name="vm_id" placeholder="vm-xxxxxxxx">
+      </div>
+
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-muse-token">Access Token (Bearer)</label>
+          <input type="text" id="cfg-muse-token" name="access_token" placeholder="Leave blank to retain current">
+          <div class="hint" id="hint-token">Current: not set</div>
+        </div>
+        <div class="field-group">
+          <label for="cfg-muse-notary">Notary Token</label>
+          <input type="text" id="cfg-muse-notary" name="notary_token" placeholder="Leave blank to retain current">
+          <div class="hint" id="hint-notary">Current: not set</div>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label for="cfg-muse-cookie">Session Cookie</label>
+        <textarea id="cfg-muse-cookie" name="cookie" rows="2" placeholder="Leave blank to retain current session cookie..."></textarea>
+        <div class="hint" id="hint-cookie">Current: not set</div>
+      </div>
+
+      <div class="btns">
+        <button id="save-muse-btn" type="submit">Save Muse AI Settings</button>
+      </div>
+      <div class="ok-box" id="muse-ok-msg"></div>
+      <div class="err-box" id="muse-err-msg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>
       <span>Jev AI Provider Multi-Account Pool</span>
       <span class="tag ok" id="jev-count-badge">0 accounts</span>
     </h2>
@@ -187,6 +240,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const jevDesc = document.getElementById('jev-desc');
   const museStatus = document.getElementById('muse-status');
   const museDesc = document.getElementById('muse-desc');
+  const museBadge = document.getElementById('muse-badge');
 
   const cfgForm = document.getElementById('config-form');
   const cfgHost = document.getElementById('cfg-host');
@@ -197,6 +251,20 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const saveCfgBtn = document.getElementById('save-cfg-btn');
   const cfgOkMsg = document.getElementById('cfg-ok-msg');
   const cfgErrMsg = document.getElementById('cfg-err-msg');
+
+  const museForm = document.getElementById('muse-form');
+  const cfgMuseBase = document.getElementById('cfg-muse-base');
+  const cfgMuseWs = document.getElementById('cfg-muse-ws');
+  const cfgMuseVmid = document.getElementById('cfg-muse-vmid');
+  const cfgMuseToken = document.getElementById('cfg-muse-token');
+  const cfgMuseNotary = document.getElementById('cfg-muse-notary');
+  const cfgMuseCookie = document.getElementById('cfg-muse-cookie');
+  const saveMuseBtn = document.getElementById('save-muse-btn');
+  const museOkMsg = document.getElementById('muse-ok-msg');
+  const museErrMsg = document.getElementById('muse-err-msg');
+  const hintToken = document.getElementById('hint-token');
+  const hintNotary = document.getElementById('hint-notary');
+  const hintCookie = document.getElementById('hint-cookie');
 
   const addForm = document.getElementById('add-form');
   const keysInput = document.getElementById('keys-input');
@@ -246,6 +314,16 @@ button:disabled{opacity:.5;cursor:not-allowed}
       if (p.museai) {
         museStatus.textContent = p.museai.configured ? 'Configured' : 'Defaults';
         museDesc.textContent = p.museai.base_url || 'https://muse.ai';
+        if (museBadge) {
+          museBadge.textContent = p.museai.configured ? 'Configured' : 'Defaults';
+          museBadge.className = 'tag ' + (p.museai.configured ? 'ok' : 'idle');
+        }
+        if (cfgMuseBase && !cfgMuseBase.matches(':focus')) cfgMuseBase.value = p.museai.base_url || 'https://muse.ai';
+        if (cfgMuseWs && !cfgMuseWs.matches(':focus')) cfgMuseWs.value = p.museai.ws_url || '';
+        if (cfgMuseVmid && !cfgMuseVmid.matches(':focus')) cfgMuseVmid.value = p.museai.vm_id || '';
+        if (hintToken) hintToken.textContent = p.museai.has_access_token ? ('Current: ' + (p.museai.masked_access_token || 'configured')) : 'Current: not set';
+        if (hintNotary) hintNotary.textContent = p.museai.has_notary_token ? ('Current: ' + (p.museai.masked_notary_token || 'configured')) : 'Current: not set';
+        if (hintCookie) hintCookie.textContent = p.museai.has_cookie ? ('Current: ' + (p.museai.masked_cookie || 'configured')) : 'Current: not set';
       }
     }
   }
@@ -330,6 +408,59 @@ button:disabled{opacity:.5;cursor:not-allowed}
         saveCfgBtn.textContent = 'Save Gateway Settings';
         cfgErrMsg.textContent = 'Network or server error: ' + err.message;
         cfgErrMsg.style.display = 'block';
+      });
+    });
+  }
+
+  if (museForm) {
+    museForm.addEventListener('submit', function(ev) {
+      ev.preventDefault();
+      museOkMsg.style.display = 'none';
+      museErrMsg.style.display = 'none';
+
+      const payload = {
+        base_url: cfgMuseBase.value.trim(),
+        ws_url: cfgMuseWs.value.trim(),
+        vm_id: cfgMuseVmid.value.trim()
+      };
+      if (cfgMuseToken.value.trim()) payload.access_token = cfgMuseToken.value.trim();
+      if (cfgMuseNotary.value.trim()) payload.notary_token = cfgMuseNotary.value.trim();
+      if (cfgMuseCookie.value.trim()) payload.cookie = cfgMuseCookie.value.trim();
+
+      saveMuseBtn.disabled = true;
+      saveMuseBtn.textContent = 'Saving...';
+
+      fetch('/api/v1/dashboard/muse-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(function(res) {
+        return res.json().then(function(json) {
+          return { ok: res.ok, status: res.status, data: json };
+        });
+      })
+      .then(function(res) {
+        saveMuseBtn.disabled = false;
+        saveMuseBtn.textContent = 'Save Muse AI Settings';
+
+        if (!res.ok) {
+          museErrMsg.textContent = res.data && res.data.message ? res.data.message : ('Error updating Muse AI config (HTTP ' + res.status + ')');
+          museErrMsg.style.display = 'block';
+        } else {
+          cfgMuseToken.value = '';
+          cfgMuseNotary.value = '';
+          cfgMuseCookie.value = '';
+          museOkMsg.textContent = res.data.message || 'Muse AI configuration updated and saved.';
+          museOkMsg.style.display = 'block';
+          loadOverview();
+        }
+      })
+      .catch(function(err) {
+        saveMuseBtn.disabled = false;
+        saveMuseBtn.textContent = 'Save Muse AI Settings';
+        museErrMsg.textContent = 'Network or server error: ' + err.message;
+        museErrMsg.style.display = 'block';
       });
     });
   }

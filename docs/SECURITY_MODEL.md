@@ -125,7 +125,7 @@ event categories rather than raw frames.
 
 ### Dashboard & Provider Multi-Account Ingestion Security Model
 
-The provider management dashboard at `/gateway-config/dashboard` and API endpoints (`GET /api/v1/dashboard/overview`, `POST /api/v1/dashboard/accounts`) manage runtime credentials and provider pools:
+The provider management dashboard at `/gateway-config/dashboard` and API endpoints (`GET /api/v1/dashboard/overview`, `POST /api/v1/dashboard/accounts`, `POST /api/v1/dashboard/config`, `POST /api/v1/dashboard/muse-config`) manage runtime credentials and provider pools:
 
 1. **Credential Masking**: All read responses and overview displays mask API keys and secrets. Only the prefix and suffix (`sk-glm...d74b`) or redaction tokens (`***`) are exposed. Full plaintext keys are never returned in read responses.
 2. **Safe Persistence**: Key persistence writes updated `.env` configuration files using atomic replacement with restricted file permissions (`0600` on Unix), preventing credential theft or file corruption during process termination.

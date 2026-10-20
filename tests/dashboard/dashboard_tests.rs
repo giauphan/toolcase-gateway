@@ -77,8 +77,10 @@ fn dashboard_html_structure_and_assets() {
     assert!(html.contains("MuseAI Subsystem"));
     assert!(html.contains("Jev AI Provider Multi-Account Pool"));
     assert!(html.contains("Add Multi API Keys / Accounts"));
+    assert!(html.contains("Muse AI Subsystem Configuration"));
     assert!(html.contains("/api/v1/dashboard/overview"));
     assert!(html.contains("/api/v1/dashboard/accounts"));
+    assert!(html.contains("/api/v1/dashboard/muse-config"));
 }
 
 #[test]
@@ -281,6 +283,8 @@ fn dashboard_cors_preflight_supported() {
         "/gateway-config/dashboard",
         "/api/v1/dashboard/overview",
         "/api/v1/dashboard/accounts",
+        "/api/v1/dashboard/config",
+        "/api/v1/dashboard/muse-config",
     ] {
         let (head, _) = request_gateway("OPTIONS", path, b"", &store);
         assert_eq!(head.status, 200, "OPTIONS {path} must return 200");

@@ -192,6 +192,18 @@ pub struct PersistentConfig {
     pub jev_api_keys: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jev_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_cookie: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_ws_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_notary_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_vm_id: Option<String>,
 }
 
 impl PersistentConfig {
@@ -204,6 +216,15 @@ impl PersistentConfig {
             io_timeout_secs: config.io_timeout.map(|d| d.as_secs()),
             jev_api_keys: Some(config.jev_api_keys.clone()),
             jev_base_url: Some(config.jev_base_url.clone()),
+            museai_base_url: (!config.museai_base_url.is_empty())
+                .then(|| config.museai_base_url.clone()),
+            museai_cookie: (!config.museai_cookie.is_empty()).then(|| config.museai_cookie.clone()),
+            museai_ws_url: (!config.museai_ws_url.is_empty()).then(|| config.museai_ws_url.clone()),
+            museai_access_token: (!config.museai_access_token.is_empty())
+                .then(|| config.museai_access_token.clone()),
+            museai_notary_token: (!config.museai_notary_token.is_empty())
+                .then(|| config.museai_notary_token.clone()),
+            museai_vm_id: (!config.museai_vm_id.is_empty()).then(|| config.museai_vm_id.clone()),
         }
     }
 
@@ -228,6 +249,24 @@ impl PersistentConfig {
         }
         if let Some(ref url) = self.jev_base_url {
             config.jev_base_url = url.clone();
+        }
+        if let Some(ref url) = self.museai_base_url {
+            config.museai_base_url = url.clone();
+        }
+        if let Some(ref cookie) = self.museai_cookie {
+            config.museai_cookie = cookie.clone();
+        }
+        if let Some(ref ws) = self.museai_ws_url {
+            config.museai_ws_url = ws.clone();
+        }
+        if let Some(ref token) = self.museai_access_token {
+            config.museai_access_token = token.clone();
+        }
+        if let Some(ref token) = self.museai_notary_token {
+            config.museai_notary_token = token.clone();
+        }
+        if let Some(ref vm) = self.museai_vm_id {
+            config.museai_vm_id = vm.clone();
         }
     }
 }

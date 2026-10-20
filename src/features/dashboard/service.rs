@@ -69,7 +69,15 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
             "museai": {
                 "name": "Muse AI Subsystem",
                 "base_url": config.museai_base_url,
+                "ws_url": config.museai_ws_url,
+                "vm_id": config.museai_vm_id,
                 "configured": !config.museai_cookie.is_empty() || !config.museai_access_token.is_empty(),
+                "masked_cookie": mask_key(&config.museai_cookie),
+                "masked_access_token": mask_key(&config.museai_access_token),
+                "masked_notary_token": mask_key(&config.museai_notary_token),
+                "has_cookie": !config.museai_cookie.is_empty(),
+                "has_access_token": !config.museai_access_token.is_empty(),
+                "has_notary_token": !config.museai_notary_token.is_empty(),
             }
         }
     });
