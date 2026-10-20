@@ -73,12 +73,8 @@ The endpoint expects a JSON payload containing exactly two top-level components 
       ]
     },
     "needs_escalation": {
-      "type": "boolean",
-      "instructions": "Does this request require direct escalation to a team lead or manager?",
-      "criteria": {
-        "true": "The customer threatens legal action, a VIP account has been mischarged more than once, or extreme distress is expressed.",
-        "false": "Standard operational refund request manageable through frontline workflows."
-      }
+      "type": "noul",
+      "instructions": "Does this request require direct escalation to a team lead or manager?"
     }
   }
 }
@@ -89,12 +85,16 @@ The endpoint expects a JSON payload containing exactly two top-level components 
 
 ### Supported Question Types & Capacity Limits
 
-| Type | Description | Criteria Format |
-| :--- | :--- | :--- |
-| `choice` | Multi-class categorical classification | Object mapping each candidate category to its semantic definition. |
-| `score` | Calibrated integer scoring scale (e.g. 0–3, 0–4) | Array of anchor strings defining each discrete score level. |
-| `boolean` | Binary determination | Object with `"true"` and `"false"` keys defining criteria for each outcome. |
-| `noul` / `options` | Backward-compatibility aliases for `boolean` and `choice` | Supports existing legacy prompt pipelines. |
+Jev strictly supports exactly three question types:
+
+| Type | Description | Criteria Format | Example Return |
+| :--- | :--- | :--- | :--- |
+| `noul` | Binary determination (Yes/No, True/False) | None required. Simply provide `instructions`. | `{"noul": 0.88}` (probability between 0.0 and 1.0) |
+| `choice` | Categorical classification | Object mapping each candidate label to its semantic definition. | `{"choice": "billing", "probabilities": {...}, "confidence": 1.0}` |
+| `score` | Calibrated integer scoring scale (e.g. 0–3, 0–4) | Array of anchor strings defining each discrete score level. | `{"score": 2.05, "probabilities": {...}, "confidence": 0.87}` |
+
+> [!WARNING]
+> Do not use `"type": "boolean"`. Jev uses `"type": "noul"` for binary/boolean questions. If you need explicit custom criteria for binary states, use `"type": "choice"` with two candidate keys (e.g. `"escalate"` and `"standard"`).
 
 > [!NOTE]
 > **Batching Limits**: Jev supports evaluating up to **20 questions simultaneously** per request across a context of up to 32,000 tokens (100,000 characters). All questions in the batch are processed in a single pass without adding compounding sequential latency.
@@ -129,7 +129,7 @@ Never combine multiple evaluation criteria into a single question (e.g., avoid *
 
 - **Question 1 (`choice`):** Department assignment (`technical`, `billing`, `account`).
 - **Question 2 (`score`):** Operational severity (`severity` on a 0–3 or 0–4 rubric).
-- **Question 3 (`boolean`):** Regulatory or compliance risk (`compliance_risk`).
+- **Question 3 (`noul`):** Regulatory or compliance risk (`compliance_risk`).
 
 Decomposition allows the parallel sampler to compute independent probability distributions for each axis without cross-intent contamination.
 
@@ -275,12 +275,8 @@ curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
         ]
       },
       "needs_escalation": {
-        "type": "boolean",
-        "instructions": "Does this request require direct escalation to a team lead or manager?",
-        "criteria": {
-          "true": "The customer threatens legal action, a VIP account has been mischarged more than once, or extreme distress is expressed.",
-          "false": "Standard operational refund request manageable through frontline workflows."
-        }
+        "type": "noul",
+        "instructions": "Does this request require direct escalation to a team lead or manager?"
       }
     }
   }'

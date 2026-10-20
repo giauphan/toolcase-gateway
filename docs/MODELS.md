@@ -163,12 +163,8 @@ curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
         ]
       },
       "needs_escalation": {
-        "type": "boolean",
-        "instructions": "Does this request require direct escalation to a manager?",
-        "criteria": {
-          "true": "Customer threatens legal action, multiple mischarges, or extreme distress.",
-          "false": "Standard operational refund request manageable by frontline workflow."
-        }
+        "type": "noul",
+        "instructions": "Does this request require direct escalation to a manager?"
       }
     }
   }'
