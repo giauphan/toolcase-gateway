@@ -20,7 +20,7 @@ and never falls through to the generic OmniRoute proxy.
 | `/muse-ai/v1/config/har` | Muse configuration | `POST` |
 | `/muse-config` | Muse configuration UI | `GET` |
 | `/video-template[/<name>]` | Video template UI | `GET` |
-| `/dashboard` | Provider & multi-account dashboard UI | `GET` |
+| `/gateway-config/dashboard` | Provider & multi-account dashboard UI | `GET` |
 | `/api/v1/dashboard/overview` | Dashboard overview & masked status | `GET` |
 | `/api/v1/dashboard/config` | Standalone gateway config update | `POST` |
 | `/api/v1/dashboard/accounts` | Dynamic provider account ingestion | `POST` |

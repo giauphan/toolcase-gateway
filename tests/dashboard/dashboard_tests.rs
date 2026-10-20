@@ -85,21 +85,27 @@ fn dashboard_html_structure_and_assets() {
 fn dashboard_page_route_serves_html_and_rejects_post() {
     let store = ConfigStore::new(test_config(), PathBuf::from(".env.test_dashboard"));
 
-    // GET /dashboard
-    let (head, body) = request_gateway("GET", "/dashboard", b"", &store);
+    // GET /gateway-config/dashboard
+    let (head, body) = request_gateway("GET", "/gateway-config/dashboard", b"", &store);
     assert_eq!(head.status, 200);
     let content_type = header_value(&head.headers, "content-type").unwrap();
     assert!(content_type.contains("text/html"));
     let body_str = String::from_utf8_lossy(&body);
     assert!(body_str.contains("Gateway Dashboard"));
 
-    // GET /dashboard/ (with trailing slash)
-    let (head_slash, body_slash) = request_gateway("GET", "/dashboard/", b"", &store);
+    // GET /gateway-config/dashboard/ (with trailing slash)
+    let (head_slash, body_slash) =
+        request_gateway("GET", "/gateway-config/dashboard/", b"", &store);
     assert_eq!(head_slash.status, 200);
     assert!(String::from_utf8_lossy(&body_slash).contains("Gateway Dashboard"));
 
-    // POST /dashboard -> 405 Method Not Allowed
-    let (head_post, _) = request_gateway("POST", "/dashboard", b"", &store);
+    // GET /dashboard (backward-compatible alias)
+    let (head_alias, body_alias) = request_gateway("GET", "/dashboard", b"", &store);
+    assert_eq!(head_alias.status, 200);
+    assert!(String::from_utf8_lossy(&body_alias).contains("Gateway Dashboard"));
+
+    // POST /gateway-config/dashboard -> 405 Method Not Allowed
+    let (head_post, _) = request_gateway("POST", "/gateway-config/dashboard", b"", &store);
     assert_eq!(head_post.status, 405);
 }
 
@@ -277,6 +283,7 @@ fn dashboard_accounts_case_insensitive_provider_aliases() {
 fn dashboard_cors_preflight_supported() {
     let store = ConfigStore::new(test_config(), PathBuf::from(".env.test_dashboard"));
     for path in [
+        "/gateway-config/dashboard",
         "/dashboard",
         "/api/v1/dashboard/overview",
         "/api/v1/dashboard/accounts",

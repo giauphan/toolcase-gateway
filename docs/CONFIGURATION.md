@@ -1,6 +1,6 @@
 # Configuration
 
-Initial gateway configuration is read from environment variables and `.env` at startup. When modified through the Dashboard UI (`/dashboard`), configuration changes are persisted directly to a dedicated standalone JSON configuration file (`gateway_config.json`, or configured via `GW_CONFIG_FILE`), leaving `.env` untouched.
+Initial gateway configuration is read from environment variables and `.env` at startup. When modified through the Dashboard UI (`/gateway-config/dashboard`), configuration changes are persisted directly to a dedicated standalone JSON configuration file (`gateway_config.json`, or configured via `GW_CONFIG_FILE`), leaving `.env` untouched.
 
 ## Reference
 
