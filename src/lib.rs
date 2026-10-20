@@ -111,6 +111,10 @@ pub fn run() -> io::Result<()> {
                 approval_timeout_secs: timeout_secs,
             }
         },
+        default_video_prompt: env_or(
+            "MUSE_LIVE_VIDEO_PROMPT",
+            "A colorful butterfly landing gently on a blooming sunflower, macro video",
+        ),
     };
     let mut config = config;
     let config_file = crate::config::resolve_config_file();

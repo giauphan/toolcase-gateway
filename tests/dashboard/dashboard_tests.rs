@@ -78,6 +78,8 @@ fn dashboard_html_structure_and_assets() {
     assert!(html.contains("Jev AI Provider Multi-Account Pool"));
     assert!(html.contains("Add Multi API Keys / Accounts"));
     assert!(html.contains("Muse AI Subsystem Configuration"));
+    assert!(html.contains("Muse Sentinel Approval Mode"));
+    assert!(html.contains("Default Video Prompt"));
     assert!(html.contains("/api/v1/dashboard/overview"));
     assert!(html.contains("/api/v1/dashboard/accounts"));
     assert!(html.contains("/api/v1/dashboard/muse-config"));

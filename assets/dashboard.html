@@ -171,6 +171,40 @@ button:disabled{opacity:.5;cursor:not-allowed}
         <div class="hint" id="hint-cookie">Current: not set</div>
       </div>
 
+      <div class="field-group">
+        <label for="cfg-muse-video-prompt">Default Video Prompt</label>
+        <textarea id="cfg-muse-video-prompt" name="default_video_prompt" rows="2" placeholder="A colorful butterfly landing gently on a blooming sunflower, macro video"></textarea>
+        <div class="hint">Fallback prompt used when none is provided in video creation requests.</div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-muse-approval-mode">Muse Sentinel Approval Mode</label>
+          <select id="cfg-muse-approval-mode" name="approval_mode">
+            <option value="off">Off (Fail-Closed, prompt manual browser approval)</option>
+            <option value="observe">Observe (Log decisions without auto-approving)</option>
+            <option value="on">On (Headless auto-approval for allowed destinations)</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label for="cfg-muse-approval-destinations">Allowed Approval Destinations</label>
+          <input type="text" id="cfg-muse-approval-destinations" name="allowed_destinations" placeholder="muse.ai, api.muse.ai">
+          <div class="hint">Comma-separated host patterns permitted for auto-approval.</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-muse-approval-types">Allowed Decision Types</label>
+          <input type="text" id="cfg-muse-approval-types" name="allowed_types" placeholder="network">
+          <div class="hint">Comma-separated decision categories (e.g. network).</div>
+        </div>
+        <div class="field-group">
+          <label for="cfg-muse-approval-timeout">Approval Timeout (seconds)</label>
+          <input type="number" id="cfg-muse-approval-timeout" name="timeout_secs" placeholder="30" min="1" max="3600">
+        </div>
+      </div>
+
       <div class="btns">
         <button id="save-muse-btn" type="submit">Save Muse AI Settings</button>
       </div>
@@ -265,6 +299,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const hintToken = document.getElementById('hint-token');
   const hintNotary = document.getElementById('hint-notary');
   const hintCookie = document.getElementById('hint-cookie');
+  const cfgMuseVideoPrompt = document.getElementById('cfg-muse-video-prompt');
+  const cfgMuseApprovalMode = document.getElementById('cfg-muse-approval-mode');
+  const cfgMuseApprovalDestinations = document.getElementById('cfg-muse-approval-destinations');
+  const cfgMuseApprovalTypes = document.getElementById('cfg-muse-approval-types');
+  const cfgMuseApprovalTimeout = document.getElementById('cfg-muse-approval-timeout');
 
   const addForm = document.getElementById('add-form');
   const keysInput = document.getElementById('keys-input');
@@ -324,6 +363,22 @@ button:disabled{opacity:.5;cursor:not-allowed}
         if (hintToken) hintToken.textContent = p.museai.has_access_token ? ('Current: ' + (p.museai.masked_access_token || 'configured')) : 'Current: not set';
         if (hintNotary) hintNotary.textContent = p.museai.has_notary_token ? ('Current: ' + (p.museai.masked_notary_token || 'configured')) : 'Current: not set';
         if (hintCookie) hintCookie.textContent = p.museai.has_cookie ? ('Current: ' + (p.museai.masked_cookie || 'configured')) : 'Current: not set';
+        if (cfgMuseVideoPrompt && !cfgMuseVideoPrompt.matches(':focus')) {
+          cfgMuseVideoPrompt.value = p.museai.default_video_prompt || '';
+        }
+        if (p.museai.approval) {
+          const app = p.museai.approval;
+          if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = app.mode || 'off';
+          if (cfgMuseApprovalDestinations && !cfgMuseApprovalDestinations.matches(':focus')) {
+            cfgMuseApprovalDestinations.value = app.allowed_destinations ? app.allowed_destinations.join(', ') : '';
+          }
+          if (cfgMuseApprovalTypes && !cfgMuseApprovalTypes.matches(':focus')) {
+            cfgMuseApprovalTypes.value = app.allowed_types ? app.allowed_types.join(', ') : '';
+          }
+          if (cfgMuseApprovalTimeout && !cfgMuseApprovalTimeout.matches(':focus')) {
+            cfgMuseApprovalTimeout.value = app.timeout_secs != null ? app.timeout_secs : 30;
+          }
+        }
       }
     }
   }
@@ -421,7 +476,18 @@ button:disabled{opacity:.5;cursor:not-allowed}
       const payload = {
         base_url: cfgMuseBase.value.trim(),
         ws_url: cfgMuseWs.value.trim(),
-        vm_id: cfgMuseVmid.value.trim()
+        vm_id: cfgMuseVmid.value.trim(),
+        default_video_prompt: cfgMuseVideoPrompt ? cfgMuseVideoPrompt.value.trim() : '',
+        approval_mode: cfgMuseApprovalMode ? cfgMuseApprovalMode.value : 'off',
+        allowed_destinations: cfgMuseApprovalDestinations && cfgMuseApprovalDestinations.value.trim()
+          ? cfgMuseApprovalDestinations.value.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; })
+          : [],
+        allowed_types: cfgMuseApprovalTypes && cfgMuseApprovalTypes.value.trim()
+          ? cfgMuseApprovalTypes.value.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; })
+          : [],
+        timeout_secs: cfgMuseApprovalTimeout && parseInt(cfgMuseApprovalTimeout.value, 10) > 0
+          ? parseInt(cfgMuseApprovalTimeout.value, 10)
+          : 30
       };
       if (cfgMuseToken.value.trim()) payload.access_token = cfgMuseToken.value.trim();
       if (cfgMuseNotary.value.trim()) payload.notary_token = cfgMuseNotary.value.trim();

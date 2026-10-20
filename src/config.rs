@@ -88,10 +88,27 @@ pub enum MuseApprovalMode {
     ScopedAuto,
 }
 
+impl MuseApprovalMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Observe => "observe",
+            Self::ScopedAuto => "on",
+        }
+    }
+}
+
+pub fn is_valid_muse_approval_mode(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "off" | "observe" | "on" | "scoped_auto" | "scoped-auto"
+    )
+}
+
 pub fn parse_muse_approval_mode(value: &str) -> MuseApprovalMode {
     match value.trim().to_ascii_lowercase().as_str() {
         "observe" => MuseApprovalMode::Observe,
-        "on" | "scoped_auto" => MuseApprovalMode::ScopedAuto,
+        "on" | "scoped_auto" | "scoped-auto" => MuseApprovalMode::ScopedAuto,
         _ => MuseApprovalMode::Off,
     }
 }
@@ -145,6 +162,7 @@ pub struct Config {
     pub jev_shadow_mode: bool,
     pub default_tier: ModelTier,
     pub muse_approval: MuseApprovalConfig,
+    pub default_video_prompt: String,
 }
 
 impl Default for Config {
@@ -172,6 +190,8 @@ impl Default for Config {
             jev_shadow_mode: true,
             default_tier: ModelTier::Strong,
             muse_approval: MuseApprovalConfig::default(),
+            default_video_prompt:
+                "A colorful butterfly landing gently on a blooming sunflower, macro video".into(),
         }
     }
 }
@@ -204,6 +224,22 @@ pub struct PersistentConfig {
     pub museai_notary_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub museai_vm_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_video_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_approval_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_approval_allowed_types: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_approval_allowed_destinations: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_approval_prefer_allow_once: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_approval_allow_always: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_approval_max_decisions: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_approval_timeout_secs: Option<u64>,
 }
 
 impl PersistentConfig {
@@ -225,6 +261,17 @@ impl PersistentConfig {
             museai_notary_token: (!config.museai_notary_token.is_empty())
                 .then(|| config.museai_notary_token.clone()),
             museai_vm_id: (!config.museai_vm_id.is_empty()).then(|| config.museai_vm_id.clone()),
+            default_video_prompt: (!config.default_video_prompt.is_empty())
+                .then(|| config.default_video_prompt.clone()),
+            muse_approval_mode: Some(config.muse_approval.mode.as_str().to_string()),
+            muse_approval_allowed_types: Some(config.muse_approval.allowed_types.clone()),
+            muse_approval_allowed_destinations: Some(
+                config.muse_approval.allowed_destinations.clone(),
+            ),
+            muse_approval_prefer_allow_once: Some(config.muse_approval.prefer_allow_once),
+            muse_approval_allow_always: Some(config.muse_approval.allow_always),
+            muse_approval_max_decisions: Some(config.muse_approval.max_decisions_per_job),
+            muse_approval_timeout_secs: Some(config.muse_approval.approval_timeout_secs),
         }
     }
 
@@ -267,6 +314,30 @@ impl PersistentConfig {
         }
         if let Some(ref vm) = self.museai_vm_id {
             config.museai_vm_id = vm.clone();
+        }
+        if let Some(ref prompt) = self.default_video_prompt {
+            config.default_video_prompt = prompt.clone();
+        }
+        if let Some(ref mode) = self.muse_approval_mode {
+            config.muse_approval.mode = parse_muse_approval_mode(mode);
+        }
+        if let Some(ref types) = self.muse_approval_allowed_types {
+            config.muse_approval.allowed_types = types.clone();
+        }
+        if let Some(ref dests) = self.muse_approval_allowed_destinations {
+            config.muse_approval.allowed_destinations = dests.clone();
+        }
+        if let Some(prefer) = self.muse_approval_prefer_allow_once {
+            config.muse_approval.prefer_allow_once = prefer;
+        }
+        if let Some(always) = self.muse_approval_allow_always {
+            config.muse_approval.allow_always = always;
+        }
+        if let Some(max) = self.muse_approval_max_decisions {
+            config.muse_approval.max_decisions_per_job = max;
+        }
+        if let Some(timeout) = self.muse_approval_timeout_secs {
+            config.muse_approval.approval_timeout_secs = timeout;
         }
     }
 }

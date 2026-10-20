@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::net::TcpStream;
 
-use crate::config::ConfigStore;
+use crate::config::{is_valid_muse_approval_mode, parse_muse_approval_mode, ConfigStore};
 use crate::http::write_error;
 
 use super::service::mask_key;
@@ -14,6 +14,14 @@ pub struct UpdateMuseConfigPayload {
     pub access_token: Option<String>,
     pub notary_token: Option<String>,
     pub cookie: Option<String>,
+    pub default_video_prompt: Option<String>,
+    pub approval_mode: Option<String>,
+    pub allowed_destinations: Option<Vec<String>>,
+    pub allowed_types: Option<Vec<String>>,
+    pub prefer_allow_once: Option<bool>,
+    pub allow_always: Option<bool>,
+    pub max_decisions: Option<usize>,
+    pub timeout_secs: Option<u64>,
 }
 
 pub fn handle_update_muse_config(
@@ -55,6 +63,18 @@ pub fn handle_update_muse_config(
         }
     }
 
+    if let Some(ref mode) = payload.approval_mode {
+        let trimmed = mode.trim();
+        if !trimmed.is_empty() && !is_valid_muse_approval_mode(trimmed) {
+            return write_error(
+                client,
+                400,
+                "Bad Request",
+                "approval_mode must be one of: 'off', 'observe', 'on'",
+            );
+        }
+    }
+
     {
         let mut conf = store.write_guard();
         if let Some(base) = payload.base_url {
@@ -90,6 +110,44 @@ pub fn handle_update_muse_config(
                 conf.museai_cookie = trimmed.to_string();
             }
         }
+        if let Some(prompt) = payload.default_video_prompt {
+            let trimmed = prompt.trim();
+            if !trimmed.is_empty() {
+                conf.default_video_prompt = trimmed.to_string();
+            }
+        }
+        if let Some(mode) = payload.approval_mode {
+            let trimmed = mode.trim();
+            if !trimmed.is_empty() {
+                conf.muse_approval.mode = parse_muse_approval_mode(trimmed);
+            }
+        }
+        if let Some(dests) = payload.allowed_destinations {
+            conf.muse_approval.allowed_destinations = dests
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        if let Some(types) = payload.allowed_types {
+            conf.muse_approval.allowed_types = types
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        if let Some(pref) = payload.prefer_allow_once {
+            conf.muse_approval.prefer_allow_once = pref;
+        }
+        if let Some(always) = payload.allow_always {
+            conf.muse_approval.allow_always = always;
+        }
+        if let Some(max) = payload.max_decisions {
+            conf.muse_approval.max_decisions_per_job = max;
+        }
+        if let Some(timeout) = payload.timeout_secs {
+            conf.muse_approval.approval_timeout_secs = timeout;
+        }
     }
 
     let _ = store.save_to_persistent_file();
@@ -109,6 +167,16 @@ pub fn handle_update_muse_config(
             "has_cookie": !snapshot.museai_cookie.is_empty(),
             "has_access_token": !snapshot.museai_access_token.is_empty(),
             "has_notary_token": !snapshot.museai_notary_token.is_empty(),
+            "default_video_prompt": snapshot.default_video_prompt,
+            "approval": {
+                "mode": snapshot.muse_approval.mode.as_str(),
+                "allowed_destinations": snapshot.muse_approval.allowed_destinations,
+                "allowed_types": snapshot.muse_approval.allowed_types,
+                "prefer_allow_once": snapshot.muse_approval.prefer_allow_once,
+                "allow_always": snapshot.muse_approval.allow_always,
+                "max_decisions": snapshot.muse_approval.max_decisions_per_job,
+                "timeout_secs": snapshot.muse_approval.approval_timeout_secs,
+            },
             "config_storage": store.config_file.file_name().unwrap_or_default().to_string_lossy(),
         }
     });

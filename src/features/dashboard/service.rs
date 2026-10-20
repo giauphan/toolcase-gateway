@@ -78,6 +78,16 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
                 "has_cookie": !config.museai_cookie.is_empty(),
                 "has_access_token": !config.museai_access_token.is_empty(),
                 "has_notary_token": !config.museai_notary_token.is_empty(),
+                "default_video_prompt": config.default_video_prompt,
+                "approval": {
+                    "mode": config.muse_approval.mode.as_str(),
+                    "allowed_destinations": config.muse_approval.allowed_destinations,
+                    "allowed_types": config.muse_approval.allowed_types,
+                    "prefer_allow_once": config.muse_approval.prefer_allow_once,
+                    "allow_always": config.muse_approval.allow_always,
+                    "max_decisions": config.muse_approval.max_decisions_per_job,
+                    "timeout_secs": config.muse_approval.approval_timeout_secs,
+                },
             }
         }
     });

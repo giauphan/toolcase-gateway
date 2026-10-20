@@ -83,6 +83,14 @@ fn test_persistent_config_save_load_round_trip() {
         museai_access_token: Some("token-abc".into()),
         museai_notary_token: Some("notary-xyz".into()),
         museai_vm_id: Some("vm-999".into()),
+        default_video_prompt: Some("Custom butterfly video prompt".into()),
+        muse_approval_mode: Some("on".into()),
+        muse_approval_allowed_types: Some(vec!["network".into()]),
+        muse_approval_allowed_destinations: Some(vec!["muse.ai".into()]),
+        muse_approval_prefer_allow_once: Some(true),
+        muse_approval_allow_always: Some(false),
+        muse_approval_max_decisions: Some(5),
+        muse_approval_timeout_secs: Some(60),
     };
 
     save_persistent_config(&tmp_file, &original).unwrap();
@@ -107,6 +115,17 @@ fn test_persistent_config_save_load_round_trip() {
     assert_eq!(cfg.museai_access_token, "token-abc");
     assert_eq!(cfg.museai_notary_token, "notary-xyz");
     assert_eq!(cfg.museai_vm_id, "vm-999");
+    assert_eq!(cfg.default_video_prompt, "Custom butterfly video prompt");
+    assert_eq!(
+        cfg.muse_approval.mode,
+        toolcase_gateway::config::MuseApprovalMode::ScopedAuto
+    );
+    assert_eq!(cfg.muse_approval.allowed_types, vec!["network"]);
+    assert_eq!(cfg.muse_approval.allowed_destinations, vec!["muse.ai"]);
+    assert!(cfg.muse_approval.prefer_allow_once);
+    assert!(!cfg.muse_approval.allow_always);
+    assert_eq!(cfg.muse_approval.max_decisions_per_job, 5);
+    assert_eq!(cfg.muse_approval.approval_timeout_secs, 60);
 
     let _ = fs::remove_file(tmp_file);
 }
@@ -276,7 +295,12 @@ fn test_dashboard_update_muse_config_api_and_json_persistence() {
         "vm_id": "vm-xyz-123",
         "access_token": "sk-secret-token-abcdef123456",
         "notary_token": "notary-secret-7890",
-        "cookie": "session=auth-cookie-value"
+        "cookie": "session=auth-cookie-value",
+        "default_video_prompt": "Updated dynamic video prompt",
+        "approval_mode": "on",
+        "allowed_destinations": ["muse.ai", "api.muse.ai"],
+        "allowed_types": ["network"],
+        "timeout_secs": 45
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
 
@@ -304,6 +328,20 @@ fn test_dashboard_update_muse_config_api_and_json_persistence() {
     assert_eq!(json["museai"]["has_notary_token"], true);
     assert_eq!(json["museai"]["has_cookie"], true);
     assert_eq!(json["museai"]["masked_access_token"], "sk-sec...3456");
+    assert_eq!(
+        json["museai"]["default_video_prompt"],
+        "Updated dynamic video prompt"
+    );
+    assert_eq!(json["museai"]["approval"]["mode"], "on");
+    assert_eq!(
+        json["museai"]["approval"]["allowed_destinations"],
+        serde_json::json!(["muse.ai", "api.muse.ai"])
+    );
+    assert_eq!(
+        json["museai"]["approval"]["allowed_types"],
+        serde_json::json!(["network"])
+    );
+    assert_eq!(json["museai"]["approval"]["timeout_secs"], 45);
 
     // In-memory store snapshot updated
     let snapshot = store.snapshot();
@@ -316,6 +354,20 @@ fn test_dashboard_update_muse_config_api_and_json_persistence() {
     assert_eq!(snapshot.museai_access_token, "sk-secret-token-abcdef123456");
     assert_eq!(snapshot.museai_notary_token, "notary-secret-7890");
     assert_eq!(snapshot.museai_cookie, "session=auth-cookie-value");
+    assert_eq!(
+        snapshot.default_video_prompt,
+        "Updated dynamic video prompt"
+    );
+    assert_eq!(
+        snapshot.muse_approval.mode,
+        toolcase_gateway::config::MuseApprovalMode::ScopedAuto
+    );
+    assert_eq!(
+        snapshot.muse_approval.allowed_destinations,
+        vec!["muse.ai", "api.muse.ai"]
+    );
+    assert_eq!(snapshot.muse_approval.allowed_types, vec!["network"]);
+    assert_eq!(snapshot.muse_approval.approval_timeout_secs, 45);
 
     // Persisted to standalone JSON file
     assert!(tmp_json.exists());
@@ -337,6 +389,20 @@ fn test_dashboard_update_muse_config_api_and_json_persistence() {
         loaded.museai_cookie.as_deref(),
         Some("session=auth-cookie-value")
     );
+    assert_eq!(
+        loaded.default_video_prompt.as_deref(),
+        Some("Updated dynamic video prompt")
+    );
+    assert_eq!(loaded.muse_approval_mode.as_deref(), Some("on"));
+    assert_eq!(
+        loaded.muse_approval_allowed_destinations,
+        Some(vec!["muse.ai".into(), "api.muse.ai".into()])
+    );
+    assert_eq!(
+        loaded.muse_approval_allowed_types,
+        Some(vec!["network".into()])
+    );
+    assert_eq!(loaded.muse_approval_timeout_secs, Some(45));
 
     // .env remains untouched
     let env_after = fs::read_to_string(&tmp_env).unwrap();
@@ -395,6 +461,12 @@ fn test_dashboard_update_muse_config_validation_and_secrets_preservation() {
     let bad_ws = br#"{"ws_url":"http://not-a-websocket"}"#;
     let (head_bad_ws, _) = request_gateway("POST", "/api/v1/dashboard/muse-config", bad_ws, &store);
     assert_eq!(head_bad_ws.status, 400);
+
+    // Invalid approval_mode
+    let bad_mode = br#"{"approval_mode":"super-allow-everything"}"#;
+    let (head_bad_mode, _) =
+        request_gateway("POST", "/api/v1/dashboard/muse-config", bad_mode, &store);
+    assert_eq!(head_bad_mode.status, 400);
 
     // Invalid JSON
     let (head_bad_json, _) = request_gateway(
