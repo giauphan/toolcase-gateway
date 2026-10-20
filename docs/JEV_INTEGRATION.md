@@ -287,29 +287,51 @@ curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
 
 ```json
 {
-  "request_id": "req-98234-abcd",
+  "id": "dec_a91d217f3cee804fc3fd6ba4",
   "model": "jev-1.13",
-  "status": "completed",
-  "results": {
+  "model_version": "jev-1.13-20260917",
+  "provider": "jev-ai.org",
+  "answers": {
     "category": {
+      "type": "choice",
       "choice": "billing",
-      "probability": 0.98,
-      "reasoning": "Duplicate charges directly concern billing and financial transactions."
+      "probabilities": {
+        "billing": 1.0,
+        "technical": 0.0,
+        "account": 0.0
+      },
+      "confidence": 1.0
     },
     "urgency": {
-      "score": 2.0,
-      "confidence": 0.92,
-      "reasoning": "Involves an active financial hold-up on the customer's account."
+      "type": "score",
+      "score": 2.09,
+      "legend": {
+        "0": "0: Routine question or informational inquiry; no disruption.",
+        "1": "1: Degraded experience, but core functionality remains usable.",
+        "2": "2: Blocks core workflow or involves pending financial hold-ups.",
+        "3": "3: Critical operational stoppage or severe risk of active loss."
+      },
+      "probabilities": {
+        "0": 0.0,
+        "1": 0.07,
+        "2": 0.76,
+        "3": 0.17
+      },
+      "confidence": 0.76
     },
     "needs_escalation": {
-      "boolean": false,
-      "probability": 0.12,
-      "reasoning": "First occurrence for a VIP customer; frontline billing can issue an immediate refund."
+      "type": "noul",
+      "noul": 0.12
     }
   },
   "usage": {
-    "billed_credits": 1
-  }
+    "input_tokens": 498,
+    "output_tokens": 53,
+    "charged_tokens": 0,
+    "charged_credits": 1,
+    "wallet": "credits"
+  },
+  "latency_ms": 364
 }
 ```
 
@@ -332,7 +354,28 @@ Response:
       "id": "jev-1.13",
       "object": "model",
       "type": "decision",
-      "owned_by": "jev"
+      "endpoint": "/api/v1/systemone",
+      "question_types": ["noul", "choice", "score"],
+      "limits": {
+        "context_tokens": 32000,
+        "max_questions": 20,
+        "max_state_chars": 100000,
+        "min_choice_labels": 2,
+        "max_choice_labels": 24,
+        "min_score_tiers": 2,
+        "max_score_tiers": 10
+      },
+      "billing": {
+        "credits_per_call_without_tokens": 1,
+        "failed_requests_billed": false
+      }
+    },
+    {
+      "id": "jev-latest",
+      "object": "model",
+      "type": "decision",
+      "endpoint": "/api/v1/systemone",
+      "rolling": true
     }
   ]
 }
