@@ -1,166 +1,145 @@
-# Configuration
+# Configuration Reference
 
-Initial gateway configuration is read from environment variables and `.env` at startup. When modified through the Dashboard UI (`/gateway-config/dashboard`), configuration changes are persisted directly to a dedicated standalone JSON configuration file (`gateway_config.json`, or configured via `GW_CONFIG_FILE`), leaving `.env` untouched.
+`toolcase-gateway` provides a dual-layer configuration model:
+1. **Startup Bootstrapping**: Initial settings are loaded from environment variables and an optional `.env` file (configured via `GW_ENV_FILE`).
+2. **Standalone Persistent Storage (`gateway_config.json`)**: Settings managed through the Dashboard UI (`/gateway-config/dashboard`) or management APIs are stored in a standalone, crash-safe JSON file (configured via `GW_CONFIG_FILE`), leaving `.env` untouched.
 
-## Reference
+---
 
-| Variable | Default | Type | Description |
-| --- | --- | --- | --- |
-| `GW_CONFIG_FILE` | `gateway_config.json` | path | Path to the standalone persistent JSON configuration file. |
-| `GW_LISTEN_HOST` | `127.0.0.1` | host | Bind address. Non-loopback values log a warning at startup. |
-| `GW_LISTEN_PORT` | `20129` | u16 | Listen port. |
-| `GW_TARGET_HOST` | `127.0.0.1` | host | Upstream host to proxy to. |
-| `GW_TARGET_PORT` | `20128` | u16 | Upstream port. |
-| `GW_FALLBACK_MODELS` | `fail-try` | csv | Fallback models tried in round-robin order after the requested model. |
-| `GW_MAX_CONNECTIONS` | `256` | usize | Concurrent connection cap. Excess connections get `503`. |
-| `GW_IO_TIMEOUT_SECS` | `120` | u64 | Per-socket read and write timeout. `0` disables timeouts. |
-| `GW_PRISM_BASE_URL` | `https://prism.openai.com` | URL | Prism API base URL. |
-| `GW_PRISM_PROJECT_ID` | built-in default | string | Default Prism project ID. |
-| `GW_PRISM_COOKIE` | empty | string | Default Prism cookie when a request does not provide a composite key. |
-| `GW_PRISM_SANDBOX_TOKEN` | empty | string | Default Prism sandbox token. |
-| `GW_PRISM_USER_ID` | empty | string | Default Prism user ID. |
-| `GW_PRISM_DEFAULT_MODEL` | `gpt-5.6-sol` | string | Default Prism model. |
-| `GW_PRISM_SYSTEM_PROMPT` | built-in default | string | System prompt injected into Prism input. |
+## 1. Configuration Precedence
 
-Empty or whitespace-only values fall back to the default. Unparseable numeric
-values fall back to the default rather than failing startup.
+When the gateway initializes and handles requests, configuration resolves in the following strict order of precedence:
 
-## Prism per-request credentials
-
-For multi-account Prism requests, pass one composite key through either
-`Authorization: Bearer <API_KEY>` or `x-api-key: <API_KEY>`:
-
-```text
-<COOKIE>|||<OPENAI_SENTINEL_TOKEN>|||<SANDBOX_TOKEN>|||<USER_ID>|||<PROJECT_ID>
+```
+[Built-in Defaults]
+        ↓ overridden by
+[Environment Variables & .env file]
+        ↓ overridden by
+[Persistent JSON Storage (gateway_config.json)]
+        ↓ overridden by
+[Live Runtime Dashboard API Mutations]
 ```
 
-The gateway forwards `OPENAI_SENTINEL_TOKEN` as the
-`openai-sentinel-token` request header. An explicit inbound
-`openai-sentinel-token` header takes precedence over the embedded token.
+1. **Built-in Defaults**: Hardcoded safe fallbacks in `Config::default()`.
+2. **Environment & `.env`**: Read on initial boot.
+3. **Persistent Config Store (`gateway_config.json`)**: If the JSON file exists on disk, its defined keys overlay the boot configuration.
+4. **Live In-Memory State (`ConfigStore`)**: Changes submitted via `/api/v1/dashboard/config`, `/api/v1/dashboard/muse-config`, or `/api/v1/dashboard/accounts` take effect immediately without process restart and are committed atomically to `gateway_config.json`.
 
-The legacy four-part triple-pipe and comma-separated formats remain accepted,
-but carry no sentinel token and can receive Prism `403 Forbidden` responses.
-Cookies and tokens are session credentials; never commit or log real values.
+---
 
-## Compile-time limits
+## 2. Environment Variables Reference
 
-These are constants in `src/main.rs`; change them and rebuild if your workload
-needs different bounds.
+| Variable | Default | Type | Subsystem | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `GW_CONFIG_FILE` | `gateway_config.json` | path | Core | Path to the dedicated persistent JSON configuration file. |
+| `GW_ENV_FILE` | `.env` | path | Core | Path to the environment bootstrap file. |
+| `GW_LISTEN_HOST` | `127.0.0.1` | host | Core | Bind IP address. Non-loopback addresses emit a security warning. |
+| `GW_LISTEN_PORT` | `20129` | u16 | Core | TCP listen port. |
+| `GW_TARGET_HOST` | `127.0.0.1` | host | OmniRoute | Upstream OpenAI-compatible host to proxy requests to. |
+| `GW_TARGET_PORT` | `20128` | u16 | OmniRoute | Upstream OpenAI-compatible target port. |
+| `GW_DEFAULT_MODEL` | *(empty)* | string | OmniRoute | Default model substituted when client request specifies an unknown model. |
+| `GW_FALLBACK_MODELS` | `fail-try` | csv | OmniRoute | Comma-separated candidate models attempted in round-robin on retryable errors. |
+| `GW_MAX_CONNECTIONS` | `256` | usize | Runtime | Concurrent TCP connection cap. Excess connections receive `503`. |
+| `GW_IO_TIMEOUT_SECS` | `120` | u64 | Runtime | Socket read and write timeout in seconds (`0` disables timeout). |
+| `GW_RETRY_BASE_DELAY_MS` | `100` | u64 | OmniRoute | Base backoff delay in milliseconds before candidate failover. |
+| `GW_MAX_RETRY_DELAY_MS` | `5000` | u64 | OmniRoute | Maximum backoff delay cap in milliseconds. |
+| `GW_JEV_API_KEYS` | *(empty)* | csv | Jev AI | Comma-separated list of Jev API keys (`sk-glm...`) for account pool rotation. |
+| `GW_JEV_BASE_URL` | `https://jev-ai.org` | URL | Jev AI | Target base URL for the Jev Decision API. |
+| `GW_JEV_ENABLED` | `false` | bool | Jev AI | Flag indicating whether Jev provider routing is active. |
+| `GW_JEV_SHADOW_MODE` | `true` | bool | Jev AI | Enables non-blocking shadow routing evaluation for telemetry. |
+| `GW_MUSEAI_BASE_URL` | `https://muse.ai` | URL | Muse AI | Base URL for Muse REST APIs and artifact downloads. |
+| `GW_MUSEAI_WS_URL` | `wss://hatch.metaaivm.com/v1/noise` | URL | Muse AI | WebSocket endpoint for Noise XX Confidential VM sessions. |
+| `GW_MUSEAI_ACCESS_TOKEN` | *(empty)* | string | Muse AI | Bearer access token for Muse CVM authentication. |
+| `GW_MUSEAI_NOTARY_TOKEN` | *(empty)* | string | Muse AI | Attestation notary token used during Noise XX handshake. |
+| `GW_MUSEAI_VM_ID` | *(empty)* | string | Muse AI | Identifier of the target Confidential VM instance. |
+| `GW_MUSEAI_COOKIE` | *(empty)* | string | Muse AI | Session cookie (`hatch_sess=...`) for REST and WebSocket bootstrap. |
+| `GW_MUSEAI_AUTO_CLEANUP_THREADS` | `true` | bool | Muse AI | Automatically clean up background worker threads after retention expiry. |
+| `GW_MUSEAI_THREAD_RETENTION_SECS` | `86400` | u64 | Muse AI | Duration in seconds before inactive worker threads are reclaimed. |
+| `MUSE_LIVE_VIDEO_PROMPT` | *(built-in prompt)* | string | Muse Video | Default prompt template used when generating videos without explicit prompt. |
+| `GW_MUSE_APPROVAL_MODE` | `off` | enum | Muse Sentinel | Approval mode: `off` (fail-closed), `observe` (log only), or `on` (scoped auto-approval). |
+| `GW_MUSE_APPROVAL_ALLOWED_DESTINATIONS` | *(empty)* | csv | Muse Sentinel | Comma-separated domain patterns permitted for auto-approval (e.g. `muse.ai`). |
+| `GW_MUSE_APPROVAL_ALLOWED_TYPES` | `network` | csv | Muse Sentinel | Decision categories eligible for headless approval (e.g. `network`). |
+| `GW_MUSE_APPROVAL_PREFER_ALLOW_ONCE` | `true` | bool | Muse Sentinel | Default to single-decision permission grant. |
+| `GW_MUSE_APPROVAL_ALLOW_ALWAYS` | `false` | bool | Muse Sentinel | Allow persistent rule creation for pre-scoped destinations. |
+| `GW_MUSE_APPROVAL_MAX_DECISIONS` | `3` | usize | Muse Sentinel | Maximum number of automated decisions allowed per video generation job. |
+| `GW_MUSE_APPROVAL_TIMEOUT_SECS` | `30` | u64 | Muse Sentinel | Seconds to wait for an auto-approval decision before timing out. |
+| `GW_PRISM_BASE_URL` | `https://prism.openai.com` | URL | Prism | Upstream base URL for dedicated Prism completions. |
+| `GW_PRISM_PROJECT_ID` | *(built-in default)* | string | Prism | Default project ID for Prism sessions. |
+| `GW_PRISM_DEFAULT_MODEL` | `gpt-5.6-sol` | string | Prism | Default reasoning model for Prism requests. |
+
+---
+
+## 3. Standalone Persistent JSON Storage (`gateway_config.json`)
+
+To prevent process race conditions, credential theft, and corruption of the development `.env` file, the gateway uses a dedicated JSON file (`gateway_config.json`) for dashboard mutations.
+
+### JSON Schema & Example
+```json
+{
+  "target_host": "127.0.0.1",
+  "target_port": 20128,
+  "fallbacks": [
+    "fail-try",
+    "gpt-4o"
+  ],
+  "default_model": "gpt-5.6-sol",
+  "io_timeout_secs": 120,
+  "jev_api_keys": [
+    "sk-glm5-00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b",
+    "sk-glm5-secondary-backup-token-example"
+  ],
+  "jev_base_url": "https://jev-ai.org",
+  "museai_base_url": "https://muse.ai",
+  "museai_ws_url": "wss://hatch.metaaivm.com/v1/noise",
+  "museai_vm_id": "vm-29402941",
+  "museai_access_token": "sk-secret-bearer-token",
+  "museai_notary_token": "notary-secret-token",
+  "museai_cookie": "hatch_sess=...; datr=...",
+  "default_video_prompt": "A colorful butterfly landing gently on a blooming sunflower, macro video",
+  "muse_approval_mode": "on",
+  "muse_approval_allowed_types": [
+    "network"
+  ],
+  "muse_approval_allowed_destinations": [
+    "muse.ai",
+    "api.muse.ai"
+  ],
+  "muse_approval_prefer_allow_once": true,
+  "muse_approval_allow_always": false,
+  "muse_approval_max_decisions": 5,
+  "muse_approval_timeout_secs": 45
+}
+```
+
+### Atomic File Write Guarantees
+1. Changes are written to a temporary sibling file (`.gateway_config.json~tmp`).
+2. On Unix platforms, permissions are strictly restricted to `0600` (`-rw-------`), readable only by the process user.
+3. The temporary file is atomically swapped over the destination via `std::fs::rename`. This eliminates partial writes or corrupted JSON if the process is terminated mid-write.
+4. The `.env` file remains untouched.
+
+---
+
+## 4. Compile-Time Limits
+
+These limits are defined in `src/http.rs` and `src/runtime/` to prevent memory exhaustion and request smuggling:
 
 | Constant | Value | Purpose |
-| --- | --- | --- |
-| `MAX_HEAD_BYTES` | 64 KB | Cap on request and response head size. |
-| `MAX_REQUEST_BYTES` | 64 MB | Cap on request body size. |
-| `MAX_REWRITE_WINDOW` | 1 MB | Forced flush point for newline-free response bodies. |
-| `RETRYABLE` | `401, 402, 403, 408, 429, 499, 500, 502, 503, 504, 524` | Statuses that trigger failover. |
+| :--- | :--- | :--- |
+| `MAX_HEAD_BYTES` | 64 KB | Maximum allowed byte length for HTTP request and response headers. |
+| `MAX_REQUEST_BYTES` | 64 MB | Maximum allowed byte length for HTTP request body payloads. |
+| `MAX_REWRITE_WINDOW` | 1 MB | Buffer threshold forcing flush if no line breaks are encountered in SSE streams. |
+| `DEFAULT_MAX_IN_FLIGHT_BYTES` | 64 MB | Global gateway admission budget for concurrent payload buffering. |
+| `RETRYABLE` | `401, 402, 403, 408, 429, 499, 500, 502, 503, 504, 524` | Upstream HTTP status codes that trigger model failover. |
 
-## Failover behavior
+---
 
-The attempt order is the model from the request body first, then each fallback.
-Fallbacks rotate: request *n* starts at `fallbacks[n % len]`, so repeated
-failures spread across secondaries instead of hammering one.
+## 5. Dashboard Configuration Guide
 
-```sh
-GW_FALLBACK_MODELS="gpt-4o-mini,claude-3-5-sonnet,llama-3.3-70b"
+Access the interactive dashboard at:
+```
+http://127.0.0.1:20129/gateway-config/dashboard
 ```
 
-A request naming `gpt-4o` produces the chain
-`gpt-4o -> gpt-4o-mini -> claude-3-5-sonnet -> llama-3.3-70b` on the first
-request, and `gpt-4o -> claude-3-5-sonnet -> llama-3.3-70b -> gpt-4o-mini` on the
-next. Duplicates are removed, so naming a model that is also a fallback does not
-retry it twice.
-
-To disable failover entirely, set the variable to a single space:
-
-```sh
-GW_FALLBACK_MODELS=" "
-```
-
-With no fallbacks the requested model is the only candidate and its response is
-returned as-is, including retryable statuses.
-
-## Tuning
-
-**Long streaming completions.** A large reasoning response can idle between
-tokens. If you see connections dropped mid-stream, raise the timeout:
-
-```sh
-GW_IO_TIMEOUT_SECS=600
-```
-
-**Many parallel agents.** Each in-flight request holds one thread and two
-sockets. Raise the cap only alongside the process file-descriptor limit:
-
-```sh
-GW_MAX_CONNECTIONS=512
-```
-
-**Low-memory hosts.** Worst-case memory is roughly
-`GW_MAX_CONNECTIONS * (request body + rewrite window)`. Lowering
-`MAX_REQUEST_BYTES` and `MAX_REWRITE_WINDOW` in source is the effective lever.
-
-## Deployment recipes
-
-### Loopback beside a local router (recommended)
-
-```sh
-GW_TARGET_PORT=8080 ./target/release/toolcase-gateway
-```
-
-Client points at `http://127.0.0.1:20129`.
-
-### systemd user service
-
-```ini
-[Unit]
-Description=toolcase-gateway
-After=network.target
-
-[Service]
-ExecStart=%h/.local/bin/toolcase-gateway
-Environment=GW_TARGET_PORT=8080
-Environment=GW_FALLBACK_MODELS=gpt-4o-mini,claude-3-5-sonnet
-Environment=GW_IO_TIMEOUT_SECS=300
-Restart=on-failure
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=read-only
-
-[Install]
-WantedBy=default.target
-```
-
-### Container
-
-```dockerfile
-FROM rust:1-slim AS build
-WORKDIR /src
-COPY . .
-RUN cargo build --release
-
-FROM gcr.io/distroless/cc
-COPY --from=build /src/target/release/toolcase-gateway /toolcase-gateway
-ENV GW_LISTEN_HOST=0.0.0.0
-EXPOSE 20129
-ENTRYPOINT ["/toolcase-gateway"]
-```
-
-Setting `GW_LISTEN_HOST=0.0.0.0` is required inside a container, but the gateway
-has no authentication. Publish the port only to a trusted network, or place an
-authenticating reverse proxy in front. See [`SECURITY_MODEL.md`](SECURITY_MODEL.md).
-
-## Logging
-
-Diagnostics go to stderr, one line each, no configurable level:
-
-```
-[toolcase-gateway] 127.0.0.1:20129 -> 127.0.0.1:20128
-[toolcase-gateway] upstream model "gpt-4o" returned HTTP 429. Failing over to "gpt-4o-mini"...
-[toolcase-gateway] upstream model "gpt-4o" failed (ConnectionRefused). Failing over to "gpt-4o-mini"...
-[toolcase-gateway] request failed: InvalidData
-```
-
-Request and response bodies are never logged, so prompts and API keys stay out of
-the log stream. Expected disconnects (`BrokenPipe`, `ConnectionReset`,
-`UnexpectedEof`) are silent.
+- **Gateway Configuration**: Adjust upstream OmniRoute host, port, default model, I/O timeout, and fallback model chains.
+- **Muse AI Subsystem**: Configure REST and WebSocket endpoints, VM ID, bearer tokens, session cookies, default video prompt, and Sentinel auto-approval rules. Leaving credential fields blank preserves currently active tokens.
+- **Provider Account Pool**: View active Jev AI accounts with short labels and masked keys. Paste new keys (comma- or newline-separated) to dynamically expand the round-robin rotation pool without restarting the server.

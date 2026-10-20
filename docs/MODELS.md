@@ -1,131 +1,159 @@
 # Models Reference
 
-Toolcase Gateway exposes an OpenAI-compatible API translating standard chat completions requests to diverse upstream protocols, such as Prism and Muse.ai Confidential VMs (CVM).
+Toolcase Gateway exposes multi-provider model routing, translating client requests to OpenAI-compatible proxies, Muse.ai Confidential VMs, or Jev AI decision networks.
 
 ---
 
-## Model Catalog
+## 1. Unified Model Catalog
 
-| Model ID | Provider / Engine | Protocol | Reasoning / Effort | Catalog Route |
+| Model ID | Provider / Engine | Protocol / Target | Primary Capability | Catalog Route |
 | :--- | :--- | :--- | :--- | :--- |
-| `gpt-5.6-sol` | OpenAI / Prism | HTTP / OmniRoute | Default | `/v1/models` |
-| `gpt-5.6-sol-low` | OpenAI / Prism | HTTP / OmniRoute | Low Effort | `/v1/models` |
-| `gpt-5.6-sol-medium` | OpenAI / Prism | HTTP / OmniRoute | Medium Effort | `/v1/models` |
-| `gpt-5.6-sol-high` | OpenAI / Prism | HTTP / OmniRoute | High Effort | `/v1/models` |
-| `gpt-5.6-sol-xhigh` | OpenAI / Prism | HTTP / OmniRoute | Extra High Effort | `/v1/models` |
-| `muse` | Muse.ai | Noise XX / WebSocket | Default | `/v1/models`, `/muse-ai/v1/models` |
+| `gpt-5.6-sol` | OpenAI / Prism | HTTP / OmniRoute | General conversational & tool use | `/v1/models` |
+| `gpt-5.6-sol-low` | OpenAI / Prism | HTTP / OmniRoute | Low reasoning effort | `/v1/models` |
+| `gpt-5.6-sol-medium` | OpenAI / Prism | HTTP / OmniRoute | Medium reasoning effort | `/v1/models` |
+| `gpt-5.6-sol-high` | OpenAI / Prism | HTTP / OmniRoute | High reasoning effort | `/v1/models` |
+| `gpt-5.6-sol-xhigh` | OpenAI / Prism | HTTP / OmniRoute | Extra-high reasoning effort | `/v1/models` |
+| `muse` | Muse.ai | Noise XX / WebSocket | Conversational chat via CVM | `/v1/models`, `/muse-ai/v1/models` |
+| `muse-video` | Muse.ai Video | Noise / Sentinel | Text-to-video synthesis (Default) | `/video/v1/providers` |
+| `gen-3`, `gen-4`, `kling` | Muse Compatibility | Noise / Sentinel | Video synthesis aliases | `/video/v1/providers` |
+| `jev-1.13` | Jev AI | HTTP REST / Jev Pool | Decision & classification analysis | `/jev/v1/models` |
 
 ---
 
-## 1. OpenAI / Prism Models
+## 2. Model Routing Matrix & Endpoints
 
-These models map requests to the upstream Prism OpenAI platform using standard JSON payloads, failover candidate sequences, and tool-name repairs.
+Different model families serve distinct architectural paradigms and cannot be interchanged across route types:
 
-### Model IDs
-- `gpt-5.6-sol`: Default model for general text and tool use.
-- `gpt-5.6-sol-{low|medium|high|xhigh}`: Reasoning effort variants for deep problem solving.
+```mermaid
+graph TD
+    Client["Client Request"] --> Router{"Inspect Model & Path"}
+    
+    Router -->|"Model: gpt-5.6-sol*<br>Route: /v1/chat/completions"| OmniRoute["OmniRoute Proxy<br>(Prism / OpenAI)"]
+    Router -->|"Model: muse<br>Route: /v1/chat/completions or /muse-ai/v1"| MuseChat["Muse CVM Chat<br>(Noise XX WebSocket)"]
+    Router -->|"Model: muse-video / gen-*<br>Route: /muse-ai/v1/create-video"| MuseVideo["Muse Video Studio<br>(Durable Job Tracking)"]
+    Router -->|"Model: jev-1.13<br>Route: /jev/v1/systemone"| JevEngine["Jev Decision Engine<br>(Account Pool Rotation)"]
+```
 
-### Endpoints
-- `POST /v1/chat/completions` (OpenAI format, supports automatic failovers)
-- `POST /prism-openai/v1/chat/completions` (Dedicated raw endpoint for Prism)
+### Routing Rules
 
-### Example Request
+1. **Conversational Chat Models (`gpt-5.6-sol*`, `muse`)**:
+   - Must be dispatched to `POST /v1/chat/completions`.
+   - Support tool definitions, stream deltas, and automatic tool-name casing restoration.
+   - If `muse` encounters a connection failure, OmniRoute automatically retries using fallback models configured in `GW_FALLBACK_MODELS`.
+
+2. **Video Generation Models (`muse-video`, `gen-3`, `gen-4`, `kling`)**:
+   - Must be dispatched to `POST /muse-ai/v1/create-video`.
+   - Take structured parameters (`prompt`, `aspect_ratio`, `duration`).
+   - Managed under the Muse Sentinel auto-approval coordinator.
+
+3. **Decision Models (`jev-1.13`)**:
+   - Must be dispatched to `POST /jev/v1/systemone`.
+   - Require structured decision payloads (`state` context and `questions` map).
+   - Cannot be sent to `/v1/chat/completions` (will return HTTP 404/405).
+
+---
+
+## 3. Provider Details
+
+### 3.1 OpenAI / Prism Models
+
+These models map requests to an upstream OpenAI-compatible platform (such as Prism) with transparent tool-name repair and candidate failovers.
+
+#### Reasoning Variants
+- `gpt-5.6-sol`: Default balanced model for general agentic tasks and tool execution.
+- `gpt-5.6-sol-low`: Fast, cost-efficient reasoning for straightforward transformations.
+- `gpt-5.6-sol-medium`: Standard reasoning depth.
+- `gpt-5.6-sol-high`: Deep reasoning for architectural planning and complex debugging.
+- `gpt-5.6-sol-xhigh`: Maximum reasoning budget for exhaustive verification.
+
+#### Example Request
 ```bash
-curl -X POST http://127.0.0.1:20130/v1/chat/completions \
+curl -X POST http://127.0.0.1:20129/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-5.6-sol-high",
     "messages": [
-      {"role": "user", "content": "Solve this equation step-by-step: 2x + 5 = 15"}
+      {"role": "user", "content": "Analyze the time complexity of quicksort in the worst case."}
     ]
   }'
 ```
 
 ---
 
-## 2. Muse.ai Model (`muse`)
+### 3.2 Muse.ai Conversational Model (`muse`)
 
-The `muse` model routes standard OpenAI requests through a native, end-to-end encrypted WebSocket connection powered by the **Noise Protocol Framework (`Noise_XX_25519_AESGCM_SHA256`)**.
+The `muse` model routes standard OpenAI requests through a native, end-to-end encrypted WebSocket connection directly to a Muse Confidential VM (CVM).
 
-### How It Works Under the Hood
-1. **VM Wake & Hatch Token:** Automatically wakes the remote Confidential VM via `POST /api/hatch/vm/wake` and acquires notary tokens from `POST /api/hatch/token`.
-2. **Noise XX Handshake:** Executes a 3-way cryptographic handshake with mutual attestation (`Message 3` includes a 32-byte randomized RV key and notary credentials).
-3. **Protobuf Framing:** Encapsulates JSON chat payloads into binary `ApplicationRequest`, `ServiceFrame`, `ServiceRequest`, and `NoiseTransportFrame` buffers.
-4. **Multiplexed Streams:** 
-   - Establishes a background subscription via `POST /chat/subscribe` on Stream 2.
-   - Dispatches user instructions via `POST /chat/stream` on Stream 1.
-5. **Streaming Assembly:** Gathers `delta.text_append` event payloads and unrolls array/multi-turn message histories cleanly into standard OpenAI completion responses.
+#### Cryptographic Architecture
+1. **VM Wake & Notary Token**: Wakes the remote CVM via `POST /api/hatch/vm/wake` and fetches a notary token from `POST /api/hatch/token`.
+2. **Noise XX Handshake**: Performs a 3-way mutual handshake (`Noise_XX_25519_AESGCM_SHA256`) using ephemeral Curve25519 keys.
+3. **Protobuf Binary Framing**: Encapsulates conversational messages into binary `ServiceFrame` structures.
+4. **SSE Delta Extraction**: Gathers `delta.text_append` events from Stream 2 and reconstructs OpenAI-compliant SSE streams or buffered responses.
 
-### Endpoints
-- `POST /v1/chat/completions` (Specify `"model": "muse"`)
-- `GET /muse-ai/v1/models` (Scoped catalog returning only `muse`)
-
-### Example Request
+#### Example Request
 ```bash
-curl -X POST http://127.0.0.1:20130/v1/chat/completions \
+curl -X POST http://127.0.0.1:20129/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "muse",
     "messages": [
-      {"role": "user", "content": "Reply with MUSE_OK exactly"}
+      {"role": "user", "content": "Reply with MUSE_OK"}
     ]
   }'
 ```
 
 ---
 
-## Model Routing Matrix & Scope
+### 3.3 Muse.ai Video Generation Models
 
-- `GET /v1/models` lists all available global models (`gpt-5.6-sol*` variants and `muse`).
-- `GET /muse-ai/v1/models` scopes specifically to the `muse` engine model.
-- If upstream `muse` connection fails, OmniRoute automatically falls back to configured fallback candidates in `GW_FALLBACK_MODELS`.
+Dedicated video synthesis models dispatched through `/muse-ai/v1/create-video`.
+
+#### Supported Video Model Names
+- `muse-video` (Canonical default)
+- Compatibility aliases: `muse`, `gen-3`, `gen-2`, `kling`, `gen-4`, `gen-4.5`, `gen-4-turbo`, `aleph-2.0`, `ruby`
+
+#### Example Request
+```bash
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "muse-video",
+    "prompt": "Cinematic shot of an orange fox skateboarding across a sunlit bridge, photorealistic, 4k.",
+    "aspect_ratio": "16:9",
+    "duration": 5
+  }'
+```
 
 ---
 
-## 3. Muse.ai Video Generation (`create-video`)
+### 3.4 Jev AI Decision Models (`jev-1.13`)
 
-The gateway provides a distinct wrapper endpoint for upstream video generation using Muse.ai backend capabilities.
+Jev models perform asynchronous decision classification and multi-question evaluation.
 
-### Endpoint
-`POST /muse-ai/v1/create-video`
-
-### Request Parameters (JSON)
-- `prompt` (string, **required**): The descriptive text describing the video to generate. Must not be empty.
-- `model` (string, optional): Target video model engine. Supported canonical value: `muse-video` (default). Compatibility aliases: `muse`, `gen-3`, `gen-2`, `kling`, `gen-4`, `gen-4.5`, `gen-4-turbo`, `aleph-2.0`, `ruby` (mapped internally to Muse Video).
-- `aspect_ratio` (string, optional): Desired aspect ratio request. Supported values: `16:9` (default), `9:16`, `1:1`, `5:4`, `4:3`.
-- `duration` (number or string, optional): Desired generation duration in seconds (e.g., `5`, `10`, `30`, `60`). Defaults to `5`.
-
-### Curl Smoke Test
-
-Keep the JSON payload on one physical line; real newlines inside the `prompt` string make the body invalid JSON.
-
+#### Example Request
 ```bash
-curl --no-buffer --max-time 930 -H 'Content-Type: application/json' --data-raw '{"prompt":"Create a cheerful cartoon-style short video: a small orange fox wearing a blue scarf rides a skateboard through a colorful city park, bouncy animation, bright morning light, playful camera moves, whimsical clouds, no text, no logos, family-friendly.","model":"muse-video","aspect_ratio":"16:9","duration":5}' http://127.0.0.1:20130/muse-ai/v1/create-video
+curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: ticket-8814-20261010" \
+  -d '{
+    "model": "jev-1.13",
+    "state": "Customer has filed three warranty claims in the last 14 days.",
+    "questions": {
+      "potential_fraud": {
+        "type": "noul",
+        "instructions": "Does this activity pattern indicate potential warranty fraud?"
+      }
+    }
+  }'
 ```
 
-### Response Schema
-Success returns `200 OK` with the following structure:
-```json
-{
-  "id": "video-a1b2c3d4...",
-  "object": "video.generation",
-  "created": 1700000000,
-  "model": "muse-video",
-  "requested_model": "gen-3",
-  "prompt": "flying over glowing neon mountains at night",
-  "requested_aspect_ratio": "16:9",
-  "requested_duration": 5,
-  "status": "completed",
-  "video_url": "https://cdn.muse.ai/video/xyz123.mp4"
-}
-```
-*Note*: The gateway asks Muse for video generation through chat using a capability-neutral instruction; it does not claim unsupported model, aspect-ratio, or duration controls. The instruction asks Muse to return a public Google Drive link, while the response validator accepts only supported public HTTPS Drive or direct video URLs. It returns a completed result only when an artifact URL is found. When Muse refuses or finishes without an artifact, the request fails instead of reporting a pending job that cannot be polled.
+---
 
-### Error Handling
-- `400 Bad Request`: Missing prompt, empty string provided, or unsupported parameter given (e.g., passing `4:5` as `aspect_ratio` or `unsupported-model`).
-- `401 Unauthorized`: Muse.ai session (`cookie`, `access_token`, etc.) is missing or expired.
-- `501 Not Implemented`: Video generation completed without a supported public HTTPS artifact (Muse returned empty).
-- `502 Bad Gateway`: Upstream protocol connection over Noise WS failed or thread orchestration failed.
+## 4. Model Catalog Endpoints
 
-### Architecture: Muse Session & Artifact Tracking
-`create-video` opens a fresh Muse chat session over Noise WebSocket, sends the video request as text, then subscribes to that session for assistant and delayed presentation events. A `task.status` snapshot alone does not end the stream. The gateway extracts supported HTTPS media URLs from returned text or presentation data; it does not select a third-party provider or verify rendered video duration or aspect ratio.
+| Catalog Route | HTTP Method | Scope | Returned Structure |
+| :--- | :--- | :--- | :--- |
+| `/v1/models` | `GET` | Global conversational models | `{"object": "list", "data": [{"id": "gpt-5.6-sol", ...}, {"id": "muse", ...}]}` |
+| `/muse-ai/v1/models` | `GET` | Scoped Muse conversational model | `{"object": "list", "data": [{"id": "muse", ...}]}` |
+| `/jev/v1/models` | `GET` | Active Jev decision models | `{"object": "list", "data": [{"id": "jev-1.13", ...}]}` |
+| `/video/v1/providers` | `GET` | Supported video engines | `{"object": "list", "data": [{"id": "muse_chat", ...}]}` |

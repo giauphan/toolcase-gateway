@@ -1,63 +1,59 @@
 # toolcase-gateway
 
-**A Rust reverse proxy that fixes LLM tool-name casing, fails over between models, and supports Prism OpenAI endpoints.**
+**A zero-async Rust reverse proxy and multi-provider sidecar for OpenAI-compatible LLMs, Jev AI Decision APIs, and Muse AI Confidential VMs.**
 
-`toolcase-gateway` sits between an LLM client (editor agent, CLI, SDK) and an
-OpenAI-compatible HTTP endpoint. It solves everyday problems with hosted
-model routers:
+`toolcase-gateway` sits between clients (agent runners, editor extensions, CLIs, SDKs) and diverse upstream AI engines. It solves everyday operational challenges across hosted providers:
 
-1. **Tool-name casing drift** — upstreams frequently lowercase function/tool
-   names (`MyTool` → `mytool`), which breaks strict clients that match names
-   exactly. The gateway restores the original casing from the request.
-2. **Model failure** — when a model returns `429`, `503`, or a payment/auth
-   error, the gateway retries the same request against configured fallback
-   models before returning anything to the client.
-3. **Prism API Adaptation** — transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism (including transparent `reasoning_effort` and suffix support).
+1. **Tool-Name Casing Drift** — Upstreams frequently lowercase function/tool names (`MyTool` → `mytool`), breaking strict clients. The gateway restores original casing from the request on the fly.
+2. **Model Candidate Failover** — When an upstream model returns `429`, `503`, or credit/auth errors, the gateway retries transparently against configured fallback models before returning anything to the client.
+3. **Prism OpenAI Adaptation** — Transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism (including transparent `reasoning_effort` and token injection).
+4. **Jev AI Decision API & Multi-Account Pool** — Routes structured decision evaluations (`/jev/v1/systemone`) and automatically rotates across multiple Jev API keys with failover on credit caps (`401, 402, 403, 429`).
+5. **Muse AI CVM & Video Generation** — Connects directly to Muse Confidential VMs via Noise XX encrypted WebSockets, supports text-to-video synthesis (`/muse-ai/v1/create-video`), and provides headless Sentinel auto-approvals.
+6. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/gateway-config/dashboard` that saves settings and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
 
-Small Rust codebase with zero heavy runtimes (no async runtime).
+Zero heavy async runtimes (`tokio` forbidden; standard library blocking networking only) and `#![forbid(unsafe_code)]`.
 
 ---
 
 ## Table of contents
 
-- [Why](#why)
 - [How it works](#how-it-works)
 - [Install](#install)
 - [Quick start](#quick-start)
+- [Web Dashboard](#web-dashboard)
+- [Provider Integrations](#provider-integrations)
+  - [Prism OpenAI](#prism-openai)
+  - [Jev AI Decision API](#jev-ai-decision-api)
+  - [Muse AI Subsystem](#muse-ai-subsystem)
 - [Configuration](#configuration)
-- [Security model](#security-model)
-- [Docs](#docs)
+- [Security Model](#security-model)
+- [Documentation](#documentation)
 - [Development](#development)
 - [License](#license)
 
-## Why
-
-| Problem | Without gateway | With gateway |
-| --- | --- | --- |
-| Upstream lowercases tool names | Client rejects unknown tool `mytool` | Casing restored to `MyTool` |
-| Model returns `429`/`503` | Request fails, client shows an error | Transparent retry on fallback model |
-| Streaming responses | Rewriting mid-stream corrupts partial JSON | Line-boundary buffering keeps pairs intact |
-| Upstream sends gzip | Body cannot be rewritten | `Accept-Encoding: identity` forced upstream |
+---
 
 ## How it works
 
 ```mermaid
 graph TD
-    A[LLM client] --> B[toolcase-gateway]
-    B --> C[Read request head + body]
-    C --> D[Validate framing, reject smuggling]
-    D --> E[Pick candidate models: requested, then fallbacks]
-    E --> F[Open upstream, read status line only]
-    F --> G{Status retryable?}
-    G -->|Yes, more candidates| E
-    G -->|No| H[Commit to this model]
-    H --> I[Stream body, rewrite tool-name casing]
-    I --> A
+    Client["Client / IDE / Agent"] --> Gateway["toolcase-gateway (127.0.0.1:20129)"]
+    Gateway --> Dispatcher{"Canonical Dispatcher<br>(src/routes.rs)"}
+    
+    Dispatcher -->|"/gateway-config/dashboard"| Dashboard["Dashboard UI & REST API"]
+    Dispatcher -->|"/v1/chat/completions"| OmniRoute["OmniRoute: Failover & Casing Repair"]
+    Dispatcher -->|"/jev/v1/*"| Jev["Jev Decision Engine: Account Pool"]
+    Dispatcher -->|"/muse-ai/v1/*"| Muse["Muse CVM: Noise WS & Sentinel"]
+    
+    Dashboard --> Disk[("gateway_config.json (0600)")]
+    OmniRoute --> UpstreamLLM["External LLM Upstream"]
+    Jev --> UpstreamJev["External Jev Upstream"]
+    Muse --> UpstreamMuse["External Muse CVM"]
 ```
 
-The failover decision happens **before** any byte reaches the client, so a
-retry is never visible downstream. Once the gateway commits to a model, the
-body is streamed chunk-by-chunk with casing rewritten on the fly.
+The failover decision happens **before** any byte reaches the client, ensuring retries are completely invisible downstream. Once committed, response streams are processed chunk-by-chunk with casing restored on the fly.
+
+---
 
 ## Install
 
@@ -71,130 +67,167 @@ cargo build --release
 
 The binary lands at `target/release/toolcase-gateway` (~350 KB, stripped, LTO).
 
+---
+
 ## Quick start
 
 ```sh
-# Proxy 127.0.0.1:20129 -> 127.0.0.1:20128, falling back to "fail-try"
+# Start gateway on default port 127.0.0.1:20129 proxying to 127.0.0.1:20128
 ./target/release/toolcase-gateway
 ```
 
 ```sh
-# Custom upstream and fallback chain
+# Start with custom upstream and fallback chain
 GW_TARGET_HOST=127.0.0.1 \
 GW_TARGET_PORT=8080 \
 GW_FALLBACK_MODELS="gpt-4o-mini,claude-3-5-sonnet" \
 ./target/release/toolcase-gateway
 ```
 
-Point your client at `http://127.0.0.1:20129` instead of the upstream address.
+Point your client at `http://127.0.0.1:20129` instead of the direct upstream address.
 
+---
 
-### Prism OpenAI Multi-Account Settings
+## Web Dashboard
 
-You can use different Prism accounts per request by providing the credentials in the client's `Authorization: Bearer <API_KEY>` or `x-api-key` header instead of static `.env` settings.
+The gateway includes an embedded, real-time web dashboard accessible at:
 
-**Recommended API key format:**
+```
+http://127.0.0.1:20129/gateway-config/dashboard
+```
+
+From the dashboard, operators can:
+- Inspect active upstream targets, fallback models, and masked credentials.
+- Add provider API keys (e.g., Jev AI account keys) to active rotation pools.
+- Update target host, port, timeout, and default models without restarting.
+- Configure Muse credentials, VM IDs, default video prompt, and headless Sentinel auto-approval policies.
+- Automatically save all changes to `gateway_config.json` with POSIX `0600` permissions.
+
+---
+
+## Provider Integrations
+
+### Prism OpenAI
+
+You can pass multiple Prism accounts per request by providing credentials in `Authorization: Bearer <API_KEY>` or `x-api-key`:
 
 ```text
 <GW_PRISM_COOKIE>|||<OPENAI_SENTINEL_TOKEN>|||<GW_PRISM_SANDBOX_TOKEN>|||<GW_PRISM_USER_ID>|||<GW_PRISM_PROJECT_ID>
 ```
 
-Send it through either `Authorization: Bearer <API_KEY>` or `x-api-key: <API_KEY>`. The gateway forwards `OPENAI_SENTINEL_TOKEN` as Prism's `openai-sentinel-token` request header.
+The gateway extracts `OPENAI_SENTINEL_TOKEN` and forwards it as Prism's `openai-sentinel-token` request header.
 
-An explicit `openai-sentinel-token` inbound header overrides the token embedded in the API key. The legacy four-part triple-pipe and comma-separated formats remain accepted, but they contain no sentinel token and may receive Prism `403 Forbidden` responses.
+### Jev AI Decision API
 
-### Jev AI Multi-Account Settings
+Dedicated routes (`/jev/v1/systemone`, `/jev/v1/models`, `/jev/v1/requests/{id}`) pool multiple Jev AI account keys and transparently round-robin + fail over between them when accounts hit credit or rate limits (`401, 402, 403, 429`).
 
-The gateway includes dedicated Jev AI routes (`/jev/v1`, `/jev-ai/v1`) that pool
-multiple Jev AI account keys and transparently round-robin + fail over between
-them. Each request tries the current account, and if that account hits a
-credit cap or authentication limit (HTTP `401`/`402`/`403`/`429`), it
-automatically falls back to the next account.
-
-**Set multiple Jev AI account keys** (Jev AI Tools: up to 300 credits/month,
-capped 30/day; Jev AI Space: 200 one-time credits; Jev AI Playground:
-5 welcome credits + daily claims) with comma-separated `GW_JEV_API_KEYS`:
-
-```text
-GW_JEV_API_KEYS="<Jev-Account-1-Key>,<Jev-Account-2-Key>,<Jev-Account-3-Key>"
+Configure keys via the dashboard or environment:
+```sh
+GW_JEV_API_KEYS="key-1,key-2,key-3"
 ```
 
-The gateway routes Jev AI OpenAI-compatible `/v1/chat/completions` calls to
-`http://127.0.0.1:20129/jev/v1` (or `/jev-ai/v1`) while internally rotating
-the `Authorization: Bearer <key>` header through every configured Jev account
-in round-robin order. See [Jev AI Integration & Multi-Account Guide](docs/JEV_INTEGRATION.md)
-for setup steps in Claude Code, Codex, VS Code, Cursor, and JetBrains IDEs.
+Submit decision requests:
+```sh
+curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: ticket-8814-20261010" \
+  -d '{
+    "model": "jev-1.13",
+    "state": "A customer wants a refund for a damaged product.",
+    "questions": {
+      "refund": {
+        "type": "noul",
+        "instructions": "Is the customer requesting a refund?"
+      }
+    }
+  }'
+```
+
+See [`docs/JEV_INTEGRATION.md`](docs/JEV_INTEGRATION.md) for full schemas and setup guides.
+
+### Muse AI Subsystem
+
+Directly communicates with Muse Confidential VMs (CVM) using Noise XX protocol WebSockets. Supports text-to-video synthesis at `/muse-ai/v1/create-video` and headless Sentinel auto-approvals.
+
+Submit video generation tasks:
+```sh
+curl --no-buffer --max-time 930 -X POST \
+  -H "Content-Type: application/json" \
+  --data-raw '{"prompt":"A small orange fox rides a skateboard through a park, bouncy animation.","model":"muse-video","aspect_ratio":"16:9","duration":5}' \
+  http://127.0.0.1:20129/muse-ai/v1/create-video
+```
+
+See [`docs/muse-video-generation.md`](docs/muse-video-generation.md) for details.
+
+---
 
 ## Configuration
 
-All configuration is environment variables, read once at startup.
+The gateway uses a two-layer configuration model:
+1. **Startup environment variables** (or `.env`).
+2. **Persistent standalone JSON configuration** (`gateway_config.json`), editable via the web dashboard.
+
+### Core Environment Variables
 
 | Variable | Default | Description |
-| --- | --- | --- |
-| `GW_LISTEN_HOST` | `127.0.0.1` | Bind address. Non-loopback values log a warning. |
+| :--- | :--- | :--- |
+| `GW_LISTEN_HOST` | `127.0.0.1` | Bind address. Non-loopback values log a security warning. |
 | `GW_LISTEN_PORT` | `20129` | Listen port. |
-| `GW_TARGET_HOST` | `127.0.0.1` | Upstream host. |
-| `GW_TARGET_PORT` | `20128` | Upstream port. |
-| `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated fallback models, tried in round-robin order. |
-| `GW_JEV_API_KEYS` | empty | One or more comma-separated Jev AI account keys for credit failover. |
-| `GW_MAX_CONNECTIONS` | `256` | Concurrent connection cap; excess gets `503`. |
-| `GW_IO_TIMEOUT_SECS` | `120` | Read/write timeout per socket. `0` disables. |
+| `GW_TARGET_HOST` | `127.0.0.1` | Default upstream host. |
+| `GW_TARGET_PORT` | `20128` | Default upstream port. |
+| `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated fallback models, rotated across requests. |
+| `GW_JEV_API_KEYS` | empty | Comma-separated Jev AI account keys for credit failover. |
+| `GW_MUSE_APPROVAL_MODE` | `off` | Sentinel auto-approval mode (`off`, `observe`, `on`). |
+| `GW_MAX_CONNECTIONS` | `256` | Maximum concurrent connections; excess rejected with `503`. |
+| `GW_IO_TIMEOUT_SECS` | `120` | Read/write timeout per socket in seconds (`0` disables). |
 
-Retryable upstream statuses: `400`, `401`, `402`, `403`, `408`, `429`, `500`, `502`, `503`,
-`504`, `524`. `413` is deliberately excluded — a too-large request will fail
-identically on every model.
+See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for the comprehensive configuration guide.
 
-## Security model
+---
 
-**The gateway performs no authentication.** It is designed to run on loopback
-next to the client it serves. Binding it to a public interface exposes an open
-proxy to your upstream credentials; put an authenticating front end in front of
-it if you need remote access.
+## Security Model
 
-Hardening that is implemented:
+**The gateway performs no public authentication.** It is strictly designed to run on loopback (`127.0.0.1`) next to the clients it serves.
 
-- `#![forbid(unsafe_code)]` and zero third-party dependencies — no supply chain.
-- **Request smuggling rejected**: conflicting or duplicated `Content-Length` /
-  `Transfer-Encoding` framing returns `400`-class failure instead of being
-  normalized.
-- **Header injection rejected**: header names must be valid HTTP tokens; values
-  containing `CR`, `LF`, or `NUL` are refused.
-- **Request line validated**: method must be a token, target must be printable
-  ASCII and ≤ 8192 bytes.
-- **Bounded memory**: 64 KB head limit, 64 MB body limit, 1 MB rewrite window,
-  so a newline-free stream cannot grow unbounded.
-- **Bounded concurrency and time**: connection cap plus per-socket read/write
-  timeouts prevent slowloris-style thread exhaustion.
-- **Hop-by-hop headers stripped** in both directions.
-- **Error bodies JSON-escaped** so upstream text cannot break out of the
-  response envelope.
+Key protections:
+- `#![forbid(unsafe_code)]` and zero async runtimes.
+- **Request smuggling rejected**: Conflicting framing (`Content-Length` + chunked) fails fast with `400`.
+- **Header injection prevented**: Headers with `CR`, `LF`, or `NUL` are rejected.
+- **Credential masking**: Passwords, tokens, and cookies are masked (`sk-glm...d74b` or `***`) across all API responses.
+- **POSIX 0600 storage**: `gateway_config.json` is saved via atomic rename with owner-only permissions.
+- **Fail-closed routing**: Unregistered routes immediately return HTTP 404/405 without upstream leakage.
 
-See [`SECURITY.md`](SECURITY.md) for reporting and [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
-for threat details.
+See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for full threat modeling.
 
-## Docs
+---
 
-- [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) — maintenance map, runtime flow, invariants, debugging
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — request lifecycle, module map, design tradeoffs
-- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — every variable, tuning guidance, deployment recipes
-- [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — trust boundaries, threats, mitigations
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — build, test, and PR workflow
+## Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Architectural overview, canonical route inventory, and lifecycle
+- [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) — Subsystem components, code ownership, concurrency, and data flow
+- [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) — Live source code organization, file responsibilities, and DDD rules
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — Dual-layer configuration reference, JSON schema, and dashboard usage
+- [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — Trust boundaries, credential masking, atomic I/O, and auto-approval policies
+- [`docs/JEV_INTEGRATION.md`](docs/JEV_INTEGRATION.md) — Jev Decision API schemas, account pool rotation, and failover mechanics
+- [`docs/MODELS.md`](docs/MODELS.md) — Model catalog, provider routing matrix, and reasoning variants
+- [`docs/muse-video-generation.md`](docs/muse-video-generation.md) — Video synthesis API, Sentinel coordinator, and lifecycle
+- [`docs/MUSE_VIDEO_CURL_TEST.md`](docs/MUSE_VIDEO_CURL_TEST.md) — Quick smoke test curl commands
+
+---
 
 ## Development
 
 ```sh
-cargo test              # 11 unit + integration tests
-cargo clippy --all-targets
-cargo fmt --check
-cargo build --release
+cargo test                    # run all 268+ automated unit and integration tests
+cargo clippy --all-targets    # linting and contract verification
+cargo fmt -- --check          # code formatting verification
+cargo build --release         # production release build
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution rules and quality gates.
+
+---
 
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
-
----
-
-<sub>Keywords: rust http proxy, llm gateway, openai compatible proxy, model
-failover, tool calling, function calling, reverse proxy, zero dependency rust,
-tool name casing, streaming json rewrite.</sub>

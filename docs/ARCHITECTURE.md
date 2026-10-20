@@ -1,175 +1,127 @@
 # Architecture
 
-`toolcase-gateway` is a single-file, std-only HTTP/1.1 reverse proxy. One thread
-per connection, no async runtime, no dependencies.
+`toolcase-gateway` is a high-performance, zero-async, single-binary HTTP/1.1 reverse proxy written in 100% safe Rust (`#![forbid(unsafe_code)]`). It utilizes blocking I/O (`std::net` and `std::thread`) with admission control and no asynchronous runtime (zero `tokio`/`async-std`).
 
-## Route ownership
+---
 
-The listener hosts several independent feature surfaces. Dispatch is exclusive:
-a request claimed by a feature namespace is handled or rejected by that feature
-and never falls through to the generic OmniRoute proxy.
+## 1. Subsystem Architecture
 
-| Route | Owner | Methods |
-| --- | --- | --- |
-| `/models`, `/v1/models` | OmniRoute catalog | `GET` |
-| `/prism-openai/v1/chat/completions` | Prism | `POST` |
-| `/muse-ai/models`, `/muse-ai/v1/models` | Muse catalog | `GET` |
-| `/muse-ai/v1` | Muse chat | `POST` |
-| `/muse-ai/v1/create-video` | Muse video | `POST` |
-| `/muse-ai/v1/threads/<id>` | Muse cleanup | `DELETE` |
-| `/muse-ai/v1/config/har` | Muse configuration | `POST` |
-| `/muse-config` | Muse configuration UI | `GET` |
-| `/video-template[/<name>]` | Video template UI | `GET` |
-| `/gateway-config/dashboard` | Provider & multi-account dashboard UI | `GET` |
-| `/api/v1/dashboard/overview` | Dashboard overview & masked status | `GET` |
-| `/api/v1/dashboard/config` | Standalone gateway config update | `POST` |
-| `/api/v1/dashboard/muse-config` | Muse AI subsystem configuration update | `POST` |
-| `/api/v1/dashboard/accounts` | Dynamic provider account ingestion | `POST` |
-| All unclaimed paths | OmniRoute proxy | forwarded method |
-
-Unknown paths under `/prism-openai` and `/muse-ai` return `404`. A known
-feature route with the wrong method returns `405`. This prevents feature typos
-or method errors from being sent to the configured OmniRoute upstream.
-
-## Request lifecycle
+The gateway serves four cohesive subsystems behind an admission controller and exclusive, fail-closed router:
 
 ```mermaid
-graph TD
-    A[accept] --> B[read_request]
-    B --> C[validate framing and headers]
-    C --> D[request_candidates]
-    D --> E[open_upstream with replace_model]
-    E --> F[read_response_head]
-    F --> G{retryable and candidates left}
-    G -->|yes| E
-    G -->|no| H[stream_response]
-    H --> I[write_chunk with rewrite_tool_names]
+flowchart TD
+    Client[Client Request] --> Adm[Admission Controller & Quota Guard]
+    Adm --> Parser[HTTP Framing & Header Parser]
+    Parser --> Router{Route Dispatcher\nsrc/routes.rs}
+
+    Router -->|/gateway-config/dashboard\n/api/v1/dashboard/*| Dash[Dashboard & Config Engine\nsrc/features/dashboard/]
+    Router -->|/jev/*, /jev-ai/*| Jev[Jev AI Decision Provider\nsrc/providers/jev/]
+    Router -->|/muse-ai/*, /video-template\n/muse-config| Muse[Muse AI CVM Subsystem\nsrc/museai/]
+    Router -->|/models, /v1/*\nUnclaimed paths| Omni[OmniRoute Upstream Proxy\nsrc/gateway/]
+
+    Dash --> Storage[(Standalone JSON Store\ngateway_config.json)]
+    Jev --> JevPool[Account Pool & Round-Robin Rotation]
+    JevPool --> JevUpstream[Jev Decision API\njev-ai.org]
+
+    Muse --> Noise[Noise_XX CVM WebSocket]
+    Muse --> Sentinel[Muse Sentinel Auto-Approval Coordinator]
+    Muse --> VideoLifecycle[Video Generation & Job Store]
+
+    Omni --> Candidates[Candidate Model Planner]
+    Candidates --> Rewriter[Tool-Name Case Rewriter]
+    Rewriter --> LLMUpstream[OpenAI-Compatible Upstream]
 ```
 
-### 1. Accept and admission control
+---
 
-`main` binds the listener and, for each connection, checks the `ACTIVE` counter
-against `GW_MAX_CONNECTIONS`. Over the cap the socket receives a `503` and
-closes immediately, so no thread is spawned. Accepted sockets get read and write
-timeouts before the worker thread starts.
+## 2. Route Ownership & Invariants
 
-### 2. Read and validate the request
+Dispatch in `src/routes.rs` is **exclusive and fail-closed**: a request matching a subsystem namespace is strictly handled or rejected within that subsystem. It **never falls through** to the generic OmniRoute proxy. Unknown paths under reserved namespaces return `404 Not Found`; mismatched HTTP methods return `405 Method Not Allowed`.
 
-`read_request` reads until `\r\n\r\n` (capped at `MAX_HEAD_BYTES`, 64 KB), then
-parses the request line and headers.
+| Route | Subsystem / Owner | Allowed Methods | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/gateway-config/dashboard` | Dashboard UI | `GET` | Interactive pipeline, provider pool, and configuration dashboard |
+| `/api/v1/dashboard/overview` | Dashboard API | `GET` | Aggregated provider status, masked credentials, and live config |
+| `/api/v1/dashboard/config` | Dashboard API | `POST` | Update gateway parameters (host, port, fallbacks, timeout) |
+| `/api/v1/dashboard/muse-config` | Dashboard API | `POST` | Update Muse AI endpoints, tokens, cookies, approvals, video prompt |
+| `/api/v1/dashboard/accounts` | Dashboard API | `POST` | Ingest multi-API keys/accounts into live rotation pools |
+| `/jev/models`, `/jev/v1/models` | Jev Decision | `GET` | Supported Jev decision model catalog |
+| `/jev/v1/systemone` | Jev Decision | `POST` | Jev Decision API (SystemOne schema: `state`, `questions`) |
+| `/jev/v1/requests/{id}` | Jev Decision | `GET` | Decision request status lookup |
+| `/jev/v1/requests/{id}/cancel` | Jev Decision | `POST` | Decision request cancellation |
+| `/jev-ai/v1/*` | Jev Decision | `*` | Compatibility alias for `/jev/v1/*` |
+| `/models`, `/v1/models` | OmniRoute | `GET` | OmniRoute upstream model catalog |
+| `/v1/chat/completions` | OmniRoute | `POST` | OpenAI-compatible chat completions with model failover |
+| `/prism-openai/v1/chat/completions` | Prism | `POST` | Direct Prism raw OpenAI completion endpoint |
+| `/muse-ai/models`, `/muse-ai/v1/models` | Muse AI | `GET` | Local Muse model catalog (`muse`) |
+| `/muse-ai/v1` | Muse AI | `POST` | Streaming chat completions over Noise encrypted transport |
+| `/muse-ai/v1/create-video` | Muse Video | `POST` | Video creation task submission |
+| `/muse-ai/v1/videos/{id}` | Muse Video | `GET`, `POST` | Video job polling (`GET`) or edit prompt revision (`POST`) |
+| `/muse-ai/v1/threads/{id}/cleanup` | Muse Threads | `POST` | Background worker thread registration and cleanup |
+| `/muse-ai/v1/config` | Muse Config | `GET` | Effective masked Muse configuration snapshot |
+| `/muse-ai/v1/config/har` | Muse Config | `POST` | DevTools HAR capture upload and credential extraction |
+| `/muse-config` | Muse Config UI | `GET` | Web interface for DevTools HAR upload and import |
+| `/video-template[/<name>]` | Video Studio UI | `GET` | Interactive video generation studio and template viewer |
+| *All unclaimed paths* | OmniRoute Proxy | Any | Generic reverse proxy forwarding with model failover |
 
-Validation is fail-closed:
+---
 
-- Method must be an HTTP token; target must be printable ASCII, at most 8192 bytes.
-- `parse_headers` rejects names that are not tokens (catching `X-Bad : 1`, the
-  classic smuggling variant) and values containing `CR`, `LF`, or `NUL`.
-- Duplicate `Content-Length`, or `Content-Length` together with
-  `Transfer-Encoding: chunked`, is rejected rather than resolved by preference.
+## 3. Core Subsystems
 
-Body reading is either length-delimited or `read_chunked_body`, both capped at
-`MAX_REQUEST_BYTES` (64 MB).
+### A. Dashboard & Standalone Persistent Storage (`src/features/dashboard/`)
+- **Single Page Application UI**: Served from [`assets/dashboard.html`](file:///home/ubuntu/toolcase-gateway-rs/assets/dashboard.html) at `/gateway-config/dashboard`. Zero external CDN or script dependencies.
+- **Standalone JSON Store (`gateway_config.json`)**: Configuration is managed via [`PersistentConfig`](file:///home/ubuntu/toolcase-gateway-rs/src/config.rs). When updated from the dashboard or API, changes are applied immediately to the in-memory [`ConfigStore`](file:///home/ubuntu/toolcase-gateway-rs/src/config.rs) and persisted atomically via `fs::write` to a temporary file (`.gateway_config.json~tmp`), unix permissions `0600`, and `fs::rename`. The `.env` file is left untouched.
+- **Credential Redaction**: API keys, bearer tokens, and session cookies are strictly masked (`mask_key`) in read responses (`sk-glm...d74b` or `***`). Full secrets are never emitted in API responses or log output.
 
-### 3. Choose candidate models
+### B. Jev AI Decision Engine & Account Pool (`src/providers/jev/`)
+- **Decision Schema Handling**: Jev is a specialized decision service (using `state` and `questions` payload), not an OpenAI chat completion endpoint. OmniRoute chat transformations do not apply.
+- **Multi-Account Rotation Pool (`JevAccountPool`)**: Rotates multiple configured API keys round-robin per request.
+- **Automatic Account Failover**: Automatically rotates to the next candidate key when account errors occur (`401 Unauthorized`, `402 Payment Required`, `403 Forbidden`, `429 Rate Limit`).
+- **Idempotency**: The `Idempotency-Key` HTTP header is preserved across account failovers to avoid duplicate billable decision execution.
 
-`request_candidates` builds the attempt order:
+### C. Muse AI Subsystem & Confidential VM Pipeline (`src/museai/`)
+- **Noise Protocol Handshake**: End-to-end encrypted transport to Confidential VMs via `Noise_XX_25519_AESGCM_SHA256` (`src/museai/noise.rs`).
+- **Sentinel Headless Auto-Approval Coordinator**: Manages auto-approval policies for outbound network requests without requiring interactive browser automation. Modes: `off` (fail-closed, prompts browser approval), `observe` (logs decisions), and `on` (`scoped-auto`, automatically approves destinations matching `allowed_destinations`).
+- **Video Generation & Polling**: Handles video task submission, prompt revision tracking, artifact verification (`video_url`), and background thread cleanup (`src/museai/video.rs`, `src/museai/threads.rs`).
 
-1. The model named in the request body, if `"model"` is present.
-2. Each configured fallback, starting at `rotation % fallbacks.len()`.
+### D. OmniRoute Reverse Proxy (`src/gateway/`)
+- **Candidate Model Planning**: Sequential candidate failover for transient or retryable errors (`401, 402, 403, 408, 429, 499, 500, 502, 503, 504, 524`). Non-retryable errors (`400 Bad Request`, `413 Payload Too Large`) fail immediately without consuming candidates.
+- **Tool-Name Case Repair**: Scans request tool definitions and restores exact casing in streamed responses (e.g. `bash` -> `Bash`) to repair casing mutations introduced by certain upstream models.
 
-The rotation offset comes from a global `AtomicUsize`, so consecutive requests
-that fail over do not all pile onto the same secondary model.
+---
 
-### 4. Attempt an upstream
+## 4. Module Map & Responsibilities
 
-`open_upstream` rewrites the `"model"` value via `replace_model`, then forwards
-the request with these changes:
+The codebase follows strict Domain-Driven Design (DDD) with clear boundaries:
 
-| Header | Action | Reason |
-| --- | --- | --- |
-| `Host` | replaced | must match the real upstream |
-| `Content-Length` | recomputed | body length changed after model swap |
-| `Accept-Encoding` | forced to `identity` | a compressed body cannot be rewritten |
-| hop-by-hop | dropped | `Connection`, `TE`, `Upgrade`, etc. are per-hop |
+| Path | Purpose / Domain | Line Target |
+| :--- | :--- | :--- |
+| `src/main.rs` | CLI executable entry point, signals, server loop | <150 lines |
+| `src/lib.rs` | Public library entry, bootstrap, and store initialization | <180 lines |
+| `src/config.rs` | Configuration models, `PersistentConfig`, and `ConfigStore` | <480 lines |
+| `src/routes.rs` | Canonical route dispatch and status code enforcement | <450 lines |
+| `src/http.rs` | HTTP framing, header parsing, and write utilities | <400 lines |
+| `src/har_config.rs` | DevTools HAR capture parser and credential extractor | <800 lines |
+| `src/video_template.rs` | Handlers serving Video Studio and Muse Config HTML pages | <50 lines |
+| `src/features/dashboard/mod.rs` | Dashboard feature facade and re-exports | <20 lines |
+| `src/features/dashboard/service.rs` | Dashboard overview, gateway settings API, and account ingestion | <360 lines |
+| `src/features/dashboard/muse.rs` | Muse AI config mutation handler and validation | <200 lines |
+| `src/providers/jev/mod.rs` | Jev provider facade and exports | <30 lines |
+| `src/providers/jev/adapter.rs` | Jev upstream transport, execution, and catalog handler | <160 lines |
+| `src/providers/jev/accounts.rs` | Jev multi-account pool, round-robin, and failover state | <120 lines |
+| `src/providers/jev/route.rs` | Jev route resolution and mapping | <60 lines |
+| `src/providers/jev/business.rs` | Jev retryable status classifier | <30 lines |
+| `src/museai/` | Muse AI subsystem: transport, noise, chat, video, approval, session | Decomposed <450/module |
+| `src/gateway/` | Candidate planning, retry classification, policy rules | Decomposed <450/module |
+| `src/runtime/` | Admission controller, byte guard, connection limits | Decomposed <450/module |
+| `src/codecs/` | SSE and chunked streaming decoders | Decomposed <450/module |
 
-Only the status line and headers are read (`read_response_head`). This is the
-key design point: the failover decision is made before a single body byte is
-sent to the client, so retries are invisible downstream.
+---
 
-### 5. Failover or commit
+## 5. Architectural Invariants
 
-| Outcome | Candidates left | Action |
-| --- | --- | --- |
-| Status in `RETRYABLE` | yes | log, try next model |
-| Status in `RETRYABLE` | no | stream it anyway |
-| Any other status | n/a | commit and stream |
-| Connect or IO error | yes | log, try next model |
-| Connect or IO error | no | `502` with JSON error body |
-
-`RETRYABLE` is `401, 402, 403, 408, 429, 499, 500, 502, 503, 504, 524`. `400` and `413` are excluded
-on purpose: an oversized request fails identically everywhere.
-
-### 6. Stream and rewrite
-
-`stream_response` always re-frames the response as `Transfer-Encoding: chunked`,
-because the rewritten length is not known ahead of time. It strips
-`Content-Length`, `Content-Encoding`, `ETag` (the body no longer matches the
-upstream digest), and hop-by-hop headers.
-
-The body is read either as upstream chunks (`read_one_chunk`) or by
-`Content-Length`, accumulated into `output`, and flushed at the last newline.
-That boundary matters: SSE and JSONL payloads put each record on its own line,
-so a `"name":"..."` pair is never split across two `write_chunk` calls. If a body
-contains no newline at all, `MAX_REWRITE_WINDOW` (1 MB) forces a flush so memory
-stays bounded.
-
-### 7. Rewrite tool-name casing
-
-`rewrite_tool_names` collects every `"name":"Value"` from the request that
-contains an uppercase letter, then scans the outgoing buffer for `"name"` keys
-whose value case-insensitively matches, replacing it with the original casing. It
-tolerates whitespace after the colon. Non-UTF-8 bodies pass through untouched.
-
-## Module map
-
-The MuseAI integration lives in `src/museai/` and is organized into focused submodules:
-
-| Module | Purpose | Lines |
-| --- | --- | --- |
-| `src/museai/session.rs` | WebSocket URL validation, session bootstrap/HTTP auth | ~375 |
-| `src/museai/chat.rs` | Chat completion streaming, MuseNoise frames, SSE parsing | ~600 |
-| `src/museai/video.rs` | Video prompt validation, artifact URL extraction, video creation | ~290 |
-| `src/museai/threads.rs` | Thread registry, background cleanup worker, thread deletion | ~150 |
-| `src/museai/handlers.rs` | HTTP route handlers delegating to application services | ~150 |
-| `src/museai/transport.rs` | WebSocket transport layer, upstream HTTP proxy | ~340 |
-| `src/museai/protocol.rs` | Muse Noise Frame encoding, service frame serialization | ~386 |
-| `src/museai/noise.rs` | Noise protocol handshake, encryption/decryption | ~210 |
-| `src/museai/business.rs` | Business logic for building upstream requests | ~55 |
-| `src/museai/mod.rs` | Module facade, re-exports, and `#[cfg(test)]` test module | ~160 non-test lines |
-
-Routes dispatch to the facade:
-- `POST /muse-ai/v1` → `museai::handle_museai_v1` (proxy through `send_museai_request`)
-- `POST /muse-ai/v1/create-video` → `museai::handle_create_video`
-- `DELETE /muse-ai/v1/threads/<id>` → `museai::handle_museai_thread_cleanup`
-- `GET /muse-ai/v1/models` → `routes::handle_muse_models_catalog`
-
-External consumers import via `crate::museai::*` from `src/main.rs`, which re-exports all
-necessary types and functions from the subsystem modules.
-
-## Design tradeoffs
-
-**Thread per connection, not async.** The workload is a handful of concurrent
-long-lived streams from one local client. A thread per connection with a hard cap
-is simpler, has no dependencies, and its worst case is bounded by
-`GW_MAX_CONNECTIONS`.
-
-**Hand-rolled JSON scanning, not a parser.** The gateway only needs two string
-fields. Byte scanning avoids parsing multi-megabyte payloads and works on partial
-streaming fragments, where a real parser would need the full document. The cost
-is that pathological escaping could theoretically be missed, which is accepted
-because a miss means "casing not fixed", never corruption.
-
-**Always re-chunk the response.** Rewriting changes the body length, so
-`Content-Length` cannot be preserved. Chunked framing is the only correct option.
-
-**Single upstream host.** The gateway multiplexes across models, not hosts.
-Multi-host routing belongs in a layer above.
+1. **Zero External Async Runtime**: All I/O uses blocking `std::net::TcpStream` with thread-per-connection pools bounded by `GW_MAX_CONNECTIONS`. No `tokio`, `async-std`, or hidden event loops.
+2. **`#![forbid(unsafe_code)]`**: Enforced compiler-wide in `Cargo.toml`. Zero unsafe blocks across the entire codebase.
+3. **Zero New Dependencies**: Minimal, focused dependencies (`serde`, `serde_json`, `ureq`, `uuid`, `snow`, `tungstenite`, `dotenvy`). No external databases (e.g. SQLite); persistence is strictly file-based and atomic.
+4. **Strict Modular Line Ceilings**: Target under 450 lines per module (soft ceiling 800 lines maximum). Monolithic files must be decomposed into focused submodules with facade re-exports.
+5. **Fail-Closed Security**: Network bounds, URL schemes, and route namespaces fail closed by default.
