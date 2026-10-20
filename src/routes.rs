@@ -146,6 +146,22 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
             )
         };
     }
+    if clean_path == "/api/v1/dashboard/config" {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::features::dashboard::handle_update_gateway_config(
+                &mut client,
+                &request.body,
+                store,
+            )
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "dashboard config only supports POST",
+            )
+        };
+    }
     if clean_path == "/muse-config" {
         return if request.method.eq_ignore_ascii_case("get") {
             crate::video_template::handle_muse_config_page(&mut client)

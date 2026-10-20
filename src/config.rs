@@ -46,6 +46,26 @@ pub fn absolute_env_file(configured: PathBuf, current_dir: PathBuf) -> PathBuf {
     }
 }
 
+pub fn resolve_config_file() -> PathBuf {
+    let configured = env::var("GW_CONFIG_FILE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("gateway_config.json"));
+    absolute_config_file(
+        configured,
+        env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    )
+}
+
+pub fn absolute_config_file(configured: PathBuf, current_dir: PathBuf) -> PathBuf {
+    if configured.is_absolute() {
+        configured
+    } else {
+        current_dir.join(configured)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoutingMode {
     Existing,
@@ -156,19 +176,114 @@ impl Default for Config {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+pub struct PersistentConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallbacks: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub io_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_api_keys: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_base_url: Option<String>,
+}
+
+impl PersistentConfig {
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            target_host: Some(config.target_host.clone()),
+            target_port: Some(config.target_port),
+            fallbacks: Some(config.fallbacks.clone()),
+            default_model: Some(config.default_model.clone()),
+            io_timeout_secs: config.io_timeout.map(|d| d.as_secs()),
+            jev_api_keys: Some(config.jev_api_keys.clone()),
+            jev_base_url: Some(config.jev_base_url.clone()),
+        }
+    }
+
+    pub fn apply_to(&self, config: &mut Config) {
+        if let Some(ref h) = self.target_host {
+            config.target_host = h.clone();
+        }
+        if let Some(p) = self.target_port {
+            config.target_port = p;
+        }
+        if let Some(ref f) = self.fallbacks {
+            config.fallbacks = f.clone();
+        }
+        if let Some(ref m) = self.default_model {
+            config.default_model = m.clone();
+        }
+        if let Some(secs) = self.io_timeout_secs {
+            config.io_timeout = (secs > 0).then(|| Duration::from_secs(secs));
+        }
+        if let Some(ref keys) = self.jev_api_keys {
+            config.jev_api_keys = keys.clone();
+        }
+        if let Some(ref url) = self.jev_base_url {
+            config.jev_base_url = url.clone();
+        }
+    }
+}
+
+pub fn load_persistent_config(path: &std::path::Path) -> Option<PersistentConfig> {
+    if !path.exists() {
+        return None;
+    }
+    let data = std::fs::read(path).ok()?;
+    serde_json::from_slice(&data).ok()
+}
+
+pub fn save_persistent_config(
+    path: &std::path::Path,
+    config: &PersistentConfig,
+) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(config)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let parent = path.parent().unwrap_or(std::path::Path::new("."));
+    if !parent.exists() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let tmp = parent.join(format!(
+        ".{}~tmp",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    std::fs::write(&tmp, &json)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct ConfigStore {
     inner: Arc<RwLock<Config>>,
     pub env_file: PathBuf,
+    pub config_file: PathBuf,
     pub jev_pool: Arc<crate::providers::jev::accounts::JevAccountPool>,
     admission: Arc<crate::runtime::admission::AdmissionController>,
 }
 
 impl ConfigStore {
     pub fn new(config: Config, env_file: PathBuf) -> Self {
-        Self::new_with_limits(
+        let config_file = if env_file.file_name().map(|n| n == ".env").unwrap_or(false) {
+            env_file.with_file_name("gateway_config.json")
+        } else {
+            env_file.with_extension("config.json")
+        };
+        Self::new_with_limits_and_config_file(
             config,
             env_file,
+            config_file,
             256,
             crate::runtime::admission::DEFAULT_MAX_IN_FLIGHT_BYTES,
         )
@@ -180,12 +295,34 @@ impl ConfigStore {
         max_connections: usize,
         max_in_flight_bytes: usize,
     ) -> Self {
+        let config_file = if env_file.file_name().map(|n| n == ".env").unwrap_or(false) {
+            env_file.with_file_name("gateway_config.json")
+        } else {
+            env_file.with_extension("config.json")
+        };
+        Self::new_with_limits_and_config_file(
+            config,
+            env_file,
+            config_file,
+            max_connections,
+            max_in_flight_bytes,
+        )
+    }
+
+    pub fn new_with_limits_and_config_file(
+        config: Config,
+        env_file: PathBuf,
+        config_file: PathBuf,
+        max_connections: usize,
+        max_in_flight_bytes: usize,
+    ) -> Self {
         let pool = Arc::new(crate::providers::jev::accounts::JevAccountPool::new(
             &config.jev_api_keys,
         ));
         Self {
             inner: Arc::new(RwLock::new(config)),
             env_file,
+            config_file,
             jev_pool: pool,
             admission: Arc::new(crate::runtime::admission::AdmissionController::new(
                 max_connections,
@@ -217,5 +354,10 @@ impl ConfigStore {
             conf.jev_api_keys = self.jev_pool.keys();
         }
         added
+    }
+
+    pub fn save_to_persistent_file(&self) -> std::io::Result<()> {
+        let persistent = PersistentConfig::from_config(&self.snapshot());
+        save_persistent_config(&self.config_file, &persistent)
     }
 }

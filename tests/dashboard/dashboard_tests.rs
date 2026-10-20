@@ -168,12 +168,18 @@ fn dashboard_accounts_add_and_live_pool_update() {
     let candidates = store.jev_pool().candidate_accounts();
     assert_eq!(candidates.len(), 3);
 
-    // Verify .env persistence
-    let env_content = fs::read_to_string(&tmp_env).unwrap();
-    assert!(env_content.contains("GW_LISTEN_PORT=20129"));
-    assert!(env_content.contains("GW_JEV_API_KEYS=\"sk-glm5-existing1111111111,sk-glm5-added2222222222,sk-glm5-added3333333333\""));
+    // Verify JSON persistence instead of mutating .env
+    assert!(store.config_file.exists());
+    let json_content = fs::read_to_string(&store.config_file).unwrap();
+    assert!(json_content.contains("sk-glm5-added2222222222"));
+    assert!(json_content.contains("sk-glm5-added3333333333"));
 
-    let _ = fs::remove_file(tmp_env);
+    // .env remains untouched with its original content
+    let env_content = fs::read_to_string(&tmp_env).unwrap();
+    assert_eq!(env_content, "GW_LISTEN_PORT=20129\n");
+
+    let _ = fs::remove_file(&tmp_env);
+    let _ = fs::remove_file(&store.config_file);
 }
 
 #[test]

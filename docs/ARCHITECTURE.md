@@ -22,6 +22,7 @@ and never falls through to the generic OmniRoute proxy.
 | `/video-template[/<name>]` | Video template UI | `GET` |
 | `/dashboard` | Provider & multi-account dashboard UI | `GET` |
 | `/api/v1/dashboard/overview` | Dashboard overview & masked status | `GET` |
+| `/api/v1/dashboard/config` | Standalone gateway config update | `POST` |
 | `/api/v1/dashboard/accounts` | Dynamic provider account ingestion | `POST` |
 | All unclaimed paths | OmniRoute proxy | forwarded method |
 

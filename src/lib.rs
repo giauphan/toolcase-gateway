@@ -112,9 +112,15 @@ pub fn run() -> io::Result<()> {
             }
         },
     };
-    let store = ConfigStore::new_with_limits(
+    let mut config = config;
+    let config_file = crate::config::resolve_config_file();
+    if let Some(persistent) = crate::config::load_persistent_config(&config_file) {
+        persistent.apply_to(&mut config);
+    }
+    let store = ConfigStore::new_with_limits_and_config_file(
         config,
         resolve_env_file(),
+        config_file,
         max_connections,
         crate::runtime::admission::DEFAULT_MAX_IN_FLIGHT_BYTES,
     );

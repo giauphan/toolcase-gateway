@@ -1,12 +1,12 @@
 # Configuration
 
-All configuration is environment variables, read once at startup. There is no
-config file and no command-line flags. Restart to apply changes.
+Initial gateway configuration is read from environment variables and `.env` at startup. When modified through the Dashboard UI (`/dashboard`), configuration changes are persisted directly to a dedicated standalone JSON configuration file (`gateway_config.json`, or configured via `GW_CONFIG_FILE`), leaving `.env` untouched.
 
 ## Reference
 
 | Variable | Default | Type | Description |
 | --- | --- | --- | --- |
+| `GW_CONFIG_FILE` | `gateway_config.json` | path | Path to the standalone persistent JSON configuration file. |
 | `GW_LISTEN_HOST` | `127.0.0.1` | host | Bind address. Non-loopback values log a warning at startup. |
 | `GW_LISTEN_PORT` | `20129` | u16 | Listen port. |
 | `GW_TARGET_HOST` | `127.0.0.1` | host | Upstream host to proxy to. |
