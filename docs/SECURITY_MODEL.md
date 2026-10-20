@@ -123,6 +123,15 @@ external timeout to bound connection setup. Live failures suppress private
 response content and credential-bearing URLs; debug output reports allowlisted
 event categories rather than raw frames.
 
+### Dashboard & Provider Multi-Account Ingestion Security Model
+
+The provider management dashboard at `/dashboard` and API endpoints (`GET /api/v1/dashboard/overview`, `POST /api/v1/dashboard/accounts`) manage runtime credentials and provider pools:
+
+1. **Credential Masking**: All read responses and overview displays mask API keys and secrets. Only the prefix and suffix (`sk-glm...d74b`) or redaction tokens (`***`) are exposed. Full plaintext keys are never returned in read responses.
+2. **Safe Persistence**: Key persistence writes updated `.env` configuration files using atomic replacement with restricted file permissions (`0600` on Unix), preventing credential theft or file corruption during process termination.
+3. **Fail-Closed Validation**: Account ingestion validates payload format, rejects unsupported providers or empty credentials with HTTP 400 Bad Request, and enforces HTTP 405 Method Not Allowed on invalid methods.
+4. **Duplicate Deduplication**: Resubmitting existing keys avoids credential duplication in the memory rotation pool.
+
 ### Muse Sentinel Headless Approval Security Model
 
 The headless Muse Sentinel auto-approval coordinator allows automated resolution of pre-authorized, scoped approvals during video generation without browser automation:

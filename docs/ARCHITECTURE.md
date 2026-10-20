@@ -20,6 +20,9 @@ and never falls through to the generic OmniRoute proxy.
 | `/muse-ai/v1/config/har` | Muse configuration | `POST` |
 | `/muse-config` | Muse configuration UI | `GET` |
 | `/video-template[/<name>]` | Video template UI | `GET` |
+| `/dashboard` | Provider & multi-account dashboard UI | `GET` |
+| `/api/v1/dashboard/overview` | Dashboard overview & masked status | `GET` |
+| `/api/v1/dashboard/accounts` | Dynamic provider account ingestion | `POST` |
 | All unclaimed paths | OmniRoute proxy | forwarded method |
 
 Unknown paths under `/prism-openai` and `/muse-ai` return `404`. A known

@@ -209,4 +209,13 @@ impl ConfigStore {
     pub fn write_guard(&self) -> std::sync::RwLockWriteGuard<'_, Config> {
         self.inner.write().unwrap()
     }
+
+    pub fn add_jev_keys(&self, keys: &[String]) -> usize {
+        let added = self.jev_pool.add_keys(keys);
+        if added > 0 {
+            let mut conf = self.inner.write().unwrap();
+            conf.jev_api_keys = self.jev_pool.keys();
+        }
+        added
+    }
 }

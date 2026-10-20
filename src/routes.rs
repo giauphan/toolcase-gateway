@@ -106,6 +106,46 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
 
     // Runtime-config routes operate on the live store and never fall through to
     // the generic OmniRoute proxy.
+    if clean_path == "/dashboard" {
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::features::dashboard::handle_dashboard_page(&mut client)
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "dashboard only supports GET",
+            )
+        };
+    }
+    if clean_path == "/api/v1/dashboard/overview" {
+        return if request.method.eq_ignore_ascii_case("get") {
+            crate::features::dashboard::handle_dashboard_overview(&mut client, store)
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "dashboard overview only supports GET",
+            )
+        };
+    }
+    if clean_path == "/api/v1/dashboard/accounts" {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::features::dashboard::handle_add_provider_accounts(
+                &mut client,
+                &request.body,
+                store,
+            )
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "dashboard accounts only supports POST",
+            )
+        };
+    }
     if clean_path == "/muse-config" {
         return if request.method.eq_ignore_ascii_case("get") {
             crate::video_template::handle_muse_config_page(&mut client)

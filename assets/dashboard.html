@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Gateway Dashboard — Provider &amp; Pipeline Control</title>
+<style>
+:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#e8eaf0;--muted:#9aa0b0;--accent:#5b8cff;--ok:#3fd08a;--err:#ff6b6b;--border:#2a2f3f;--radius:12px}
+@media (prefers-color-scheme: light){:root{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f6;--text:#1a1c24;--muted:#5a5f6e;--accent:#2f5be0;--ok:#1b9e68;--err:#d63;--border:#d8dbe4}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px 16px 60px}
+.wrap{max-width:960px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:16px}
+h1{font-size:24px;margin:0 0 4px;font-weight:700}
+.sub{color:var(--muted);margin:0;font-size:14px}
+.nav-links{display:flex;gap:10px;align-items:center}
+.nav-link{padding:7px 14px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);text-decoration:none;font-size:13px;font-weight:600}
+.nav-link:hover{border-color:var(--accent);color:var(--accent)}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px}
+.card h2{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 16px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:16px;margin-bottom:20px}
+.stat-box{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:16px}
+.stat-box .title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px;font-weight:700}
+.stat-box .val{font-size:18px;font-weight:700;color:var(--text);word-break:break-all}
+.stat-box .desc{font-size:12px;color:var(--muted);margin-top:6px}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}
+th{color:var(--muted);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+td{padding:12px;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+.tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
+.tag.ok{background:rgba(63,208,138,.15);color:var(--ok);border:1px solid var(--ok)}
+.tag.idle{background:var(--panel2);color:var(--muted);border:1px solid var(--border)}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+textarea,select,input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical}
+textarea:focus,select:focus,input[type=text]:focus{outline:none;border-color:var(--accent)}
+.field-group{margin-bottom:14px}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.btns{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+button{font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;padding:11px 22px;background:var(--accent);color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+.ok-box{background:rgba(63,208,138,.12);border:1px solid var(--ok);border-radius:8px;padding:14px;font-size:13px;color:var(--ok);margin-top:14px;display:none}
+.err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:14px;font-size:13px;color:var(--err);margin-top:14px;display:none;white-space:pre-wrap}
+.empty-hint{text-align:center;padding:24px;color:var(--muted);font-style:italic}
+.hint{font-size:12px;color:var(--muted);margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Gateway Dashboard</h1>
+      <p class="sub">Pipeline routing, provider status, and multi-account pool management</p>
+    </div>
+    <div class="nav-links">
+      <a class="nav-link" href="/video-template">Video Studio</a>
+      <a class="nav-link" href="/muse-config">Muse Config</a>
+    </div>
+  </header>
+
+  <div class="grid" id="stats-grid">
+    <div class="stat-box">
+      <div class="title">OmniRoute Proxy</div>
+      <div class="val" id="omni-target">--</div>
+      <div class="desc" id="omni-desc">Default fallback &amp; OpenAI chat router</div>
+    </div>
+    <div class="stat-box">
+      <div class="title">Jev AI Decision API</div>
+      <div class="val" id="jev-status">--</div>
+      <div class="desc" id="jev-desc">Multi-account failover pool</div>
+    </div>
+    <div class="stat-box">
+      <div class="title">MuseAI Subsystem</div>
+      <div class="val" id="muse-status">--</div>
+      <div class="desc" id="muse-desc">WebSocket &amp; Video pipeline</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>
+      <span>Jev AI Provider Multi-Account Pool</span>
+      <span class="tag ok" id="jev-count-badge">0 accounts</span>
+    </h2>
+    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
+      Keys rotate round-robin across requests and automatically fail over when account quota or limits are reached (HTTP 401, 402, 403, 429).
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Masked API Key</th>
+            <th>Rotation Status</th>
+          </tr>
+        </thead>
+        <tbody id="jev-accounts-table">
+          <tr><td colspan="3" class="empty-hint">Loading configured accounts...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Add Multi API Keys / Accounts</h2>
+    <form id="add-form">
+      <div class="field-group">
+        <label for="provider-select">Provider</label>
+        <select id="provider-select" name="provider">
+          <option value="jev" selected>Jev AI Decision API (Multi-Account Pool)</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label for="keys-input">API Key(s)</label>
+        <textarea id="keys-input" name="keys" rows="3" placeholder="Enter one or more API keys (comma-separated or one per line), e.g.&#10;sk-glm5-00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b&#10;sk-glm5-anotheraccounttoken..."></textarea>
+        <div class="hint">Newly added keys will immediately join the live candidate pool and persist to <code>.env</code>.</div>
+      </div>
+
+      <div class="btns">
+        <button id="submit-btn" type="submit">Add to Account Pool</button>
+      </div>
+      <div class="ok-box" id="ok-msg"></div>
+      <div class="err-box" id="err-msg"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function(){
+  const tableBody = document.getElementById('jev-accounts-table');
+  const countBadge = document.getElementById('jev-count-badge');
+  const omniTarget = document.getElementById('omni-target');
+  const omniDesc = document.getElementById('omni-desc');
+  const jevStatus = document.getElementById('jev-status');
+  const jevDesc = document.getElementById('jev-desc');
+  const museStatus = document.getElementById('muse-status');
+  const museDesc = document.getElementById('muse-desc');
+  const addForm = document.getElementById('add-form');
+  const keysInput = document.getElementById('keys-input');
+  const submitBtn = document.getElementById('submit-btn');
+  const okMsg = document.getElementById('ok-msg');
+  const errMsg = document.getElementById('err-msg');
+
+  function renderOverview(data) {
+    if (!data || !data.providers) return;
+    const p = data.providers;
+
+    if (p.omniroute) {
+      omniTarget.textContent = (p.omniroute.target_host || '127.0.0.1') + ':' + (p.omniroute.target_port || 20128);
+      omniDesc.textContent = 'Fallbacks: ' + (p.omniroute.fallbacks && p.omniroute.fallbacks.length ? p.omniroute.fallbacks.join(', ') : 'none');
+    }
+
+    if (p.jev) {
+      const cnt = p.jev.total_accounts || 0;
+      jevStatus.textContent = cnt + (cnt === 1 ? ' Account' : ' Accounts');
+      jevDesc.textContent = p.jev.base_url || 'https://jev-ai.org';
+      countBadge.textContent = cnt + (cnt === 1 ? ' account' : ' accounts');
+
+      if (p.jev.accounts && p.jev.accounts.length > 0) {
+        tableBody.innerHTML = p.jev.accounts.map(function(acc) {
+          return '<tr>' +
+            '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
+            '<td class="mono">' + escapeHtml(acc.masked_key) + '</td>' +
+            '<td><span class="tag ok">Active in Pool</span></td>' +
+            '</tr>';
+        }).join('');
+      } else {
+        tableBody.innerHTML = '<tr><td colspan="3" class="empty-hint">No accounts configured yet. Add accounts below.</td></tr>';
+      }
+    }
+
+    if (p.museai) {
+      museStatus.textContent = p.museai.configured ? 'Configured' : 'Defaults';
+      museDesc.textContent = p.museai.base_url || 'https://muse.ai';
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function loadOverview() {
+    fetch('/api/v1/dashboard/overview')
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(data) {
+        renderOverview(data);
+      })
+      .catch(function(err) {
+        tableBody.innerHTML = '<tr><td colspan="3" class="empty-hint" style="color:var(--err)">Failed to load overview: ' + escapeHtml(err.message) + '</td></tr>';
+      });
+  }
+
+  addForm.addEventListener('submit', function(ev) {
+    ev.preventDefault();
+    okMsg.style.display = 'none';
+    errMsg.style.display = 'none';
+
+    const raw = keysInput.value.trim();
+    if (!raw) {
+      errMsg.textContent = 'Please enter at least one API key.';
+      errMsg.style.display = 'block';
+      return;
+    }
+
+    // Split on comma or newline
+    const keys = raw.split(/[\r\n,]+/).map(function(k){ return k.trim(); }).filter(function(k){ return k.length > 0; });
+    if (keys.length === 0) {
+      errMsg.textContent = 'No valid keys detected.';
+      errMsg.style.display = 'block';
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Adding...';
+
+    fetch('/api/v1/dashboard/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'jev',
+        api_keys: keys
+      })
+    })
+    .then(function(res) {
+      return res.json().then(function(json) {
+        return { ok: res.ok, status: res.status, data: json };
+      });
+    })
+    .then(function(res) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Add to Account Pool';
+
+      if (!res.ok) {
+        errMsg.textContent = res.data && res.data.message ? res.data.message : 'Error adding accounts (HTTP ' + res.status + ')';
+        errMsg.style.display = 'block';
+      } else {
+        keysInput.value = '';
+        okMsg.textContent = 'Success! Added ' + res.data.added_count + ' new key(s). Total accounts in pool: ' + res.data.total_accounts + '.';
+        okMsg.style.display = 'block';
+        loadOverview();
+      }
+    })
+    .catch(function(err) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Add to Account Pool';
+      errMsg.textContent = 'Network or server error: ' + err.message;
+      errMsg.style.display = 'block';
+    });
+  });
+
+  loadOverview();
+})();
+</script>
+</body>
+</html>
