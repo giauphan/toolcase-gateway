@@ -128,20 +128,47 @@ curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
 
 ### 3.4 Jev AI Decision Models (`jev-1.13`)
 
-Jev models perform asynchronous decision classification and multi-question evaluation.
+Jev models perform asynchronous decision classification and concurrent multi-question evaluation via the **Parallel Sampler**. All questions are evaluated across a shared `state` context simultaneously in a single pass.
 
-#### Example Request
+#### Example Multi-Question Request
 ```bash
 curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: ticket-8814-20261010" \
   -d '{
     "model": "jev-1.13",
-    "state": "Customer has filed three warranty claims in the last 14 days.",
+    "state": {
+      "task": "Customer requesting a refund due to duplicate credit card charges",
+      "customer_tier": "VIP",
+      "previous_tickets_count": 0
+    },
     "questions": {
-      "potential_fraud": {
-        "type": "noul",
-        "instructions": "Does this activity pattern indicate potential warranty fraud?"
+      "category": {
+        "type": "choice",
+        "instructions": "Identify the primary topic of the customer request.",
+        "criteria": {
+          "billing": "Charges, payments, invoices, refunds, pricing, or subscription fees.",
+          "technical": "A product feature is broken, failing, unavailable, or behaving unexpectedly.",
+          "account": "Sign-in, password, profile, access permissions, or account administration."
+        }
+      },
+      "urgency": {
+        "type": "score",
+        "instructions": "Score the urgency level from 0 to 3 based on impact and timing.",
+        "criteria": [
+          "0: Routine question or informational inquiry; no operational disruption.",
+          "1: Degraded experience, but core functionality remains fully usable.",
+          "2: Blocks core workflow or involves pending financial hold-ups.",
+          "3: Critical operational stoppage or severe risk of active financial loss."
+        ]
+      },
+      "needs_escalation": {
+        "type": "boolean",
+        "instructions": "Does this request require direct escalation to a manager?",
+        "criteria": {
+          "true": "Customer threatens legal action, multiple mischarges, or extreme distress.",
+          "false": "Standard operational refund request manageable by frontline workflow."
+        }
       }
     }
   }'

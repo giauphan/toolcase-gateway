@@ -126,18 +126,35 @@ Configure keys via the dashboard or environment:
 GW_JEV_API_KEYS="key-1,key-2,key-3"
 ```
 
-Submit decision requests:
+Submit decision requests (evaluating multiple concurrent questions via the **Parallel Sampler**):
 ```sh
 curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: ticket-8814-20261010" \
   -d '{
     "model": "jev-1.13",
-    "state": "A customer wants a refund for a damaged product.",
+    "state": {
+      "task": "Customer requesting a refund due to duplicate charges",
+      "customer_tier": "VIP"
+    },
     "questions": {
-      "refund": {
-        "type": "noul",
-        "instructions": "Is the customer requesting a refund?"
+      "category": {
+        "type": "choice",
+        "instructions": "Identify the primary topic of the request.",
+        "criteria": {
+          "billing": "Charges, invoices, refunds, pricing, or fees.",
+          "technical": "A product feature is broken or failing."
+        }
+      },
+      "urgency": {
+        "type": "score",
+        "instructions": "Score urgency from 0 to 3 based on impact.",
+        "criteria": [
+          "0: Informational inquiry; no disruption.",
+          "1: Minor issue, core features work.",
+          "2: Blocks core workflow or financial hold-up.",
+          "3: Critical stoppage or active loss."
+        ]
       }
     }
   }'

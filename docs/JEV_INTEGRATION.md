@@ -6,13 +6,34 @@
 
 Clients send structured decision payloads containing a contextual `state` and a set of `questions`. The gateway forwards this payload directly to Jev upstream endpoints, handles multi-account credit rotation, and returns Jev's structured decision responses.
 
+### The Parallel Sampler: Concurrent Multi-Question Evaluation
+
+You can ask multiple questions simultaneously in a single call. This is a core architectural capability of Jev's **Parallel Sampler**: the model evaluates all questions across the same shared context (`state`) concurrently in a single pass, eliminating the compounding sequential latency typical of autoregressive LLMs.
+
+```mermaid
+graph LR
+    subgraph Sequential LLM Architecture
+        L1[State] --> Q1[Question 1] --> R1[Response 1]
+        R1 --> Q2[Question 2] --> R2[Response 2]
+        R2 --> Q3[Question 3] --> R3[Response 3]
+    end
+    
+    subgraph Jev Parallel Sampler
+        State[Shared Context 'state']
+        State --> S1[Question 1: Category]
+        State --> S2[Question 2: Urgency]
+        State --> S3[Question 3: Escalation]
+        S1 & S2 & S3 --> Aggregated[Unified Concurrent Result in Single Pass]
+    end
+```
+
 ### Why OmniRoute Cannot Handle Jev Requests
 
 OmniRoute (`/v1/chat/completions`) is strictly optimized for OpenAI-style conversational message sequences (`[{"role": "user", "content": "..."}]`) and streams incremental token chunks while repairing tool/function name casing.
 
 In contrast, Jev:
-- Operates on decision graphs (`state` string + `questions` schema map).
-- Evaluates categorical, boolean, or multi-option questions against the context.
+- Operates on decision graphs (`state` object/string + `questions` schema map).
+- Concurrently evaluates categorical choices, scores, or boolean questions against shared context.
 - Returns comprehensive decision evaluations and confidence metrics.
 - Uses dedicated REST endpoints (`/api/v1/systemone/`, `/api/v1/models/`, `/api/v1/requests/{id}/`).
 
@@ -20,7 +41,127 @@ Therefore, Jev traffic is routed through dedicated gateway endpoints under `/jev
 
 ---
 
-## 2. Configuration & Account Management
+## 2. Standard Structure of `POST /jev/v1/systemone`
+
+The endpoint expects a JSON payload containing exactly two top-level components (`state` and `questions`):
+
+```json
+{
+  "state": {
+    "task": "Customer requesting a refund due to duplicate credit card charges",
+    "customer_tier": "VIP",
+    "previous_tickets_count": 0
+  },
+  "questions": {
+    "category": {
+      "type": "choice",
+      "instructions": "Identify the primary topic of the customer's request.",
+      "criteria": {
+        "billing": "Charges, payments, invoices, refunds, pricing, or subscription fees.",
+        "technical": "A product feature is broken, failing, unavailable, or behaving unexpectedly.",
+        "account": "Sign-in, password, profile, access permissions, or account administration."
+      }
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "Score the urgency level on a scale from 0 to 3 based on impact and timing.",
+      "criteria": [
+        "0: Routine question or informational inquiry; no operational disruption.",
+        "1: Degraded experience, but core functionality remains fully usable.",
+        "2: Blocks core workflow or involves pending financial/transactional hold-ups.",
+        "3: Critical operational stoppage or severe risk of active financial loss."
+      ]
+    },
+    "needs_escalation": {
+      "type": "boolean",
+      "instructions": "Does this request require direct escalation to a team lead or manager?",
+      "criteria": {
+        "true": "The customer threatens legal action, a VIP account has been mischarged more than once, or extreme distress is expressed.",
+        "false": "Standard operational refund request manageable through frontline workflows."
+      }
+    }
+  }
+}
+```
+
+> [!TIP]
+> You may optionally include `"model": "jev-1.13"` in the request root if you wish to target a specific model release. When omitted, Jev routes to the default calibrated engine.
+
+### Supported Question Types
+
+| Type | Description | Criteria Format |
+| :--- | :--- | :--- |
+| `choice` | Multi-class categorical classification | Object mapping each candidate category to its semantic definition. |
+| `score` | Calibrated integer scoring scale (e.g. 0–3, 0–4) | Array of anchor strings defining each discrete score level. |
+| `boolean` | Binary determination | Object with `"true"` and `"false"` keys defining criteria for each outcome. |
+| `noul` / `options` | Backward-compatibility aliases for `boolean` and `choice` | Supports existing legacy prompt pipelines. |
+
+---
+
+## 3. Context Engineering: Structuring `state` for High-Accuracy Decisions
+
+Because Jev is a **System 1 evaluation model** (calibrated pattern matching and probabilistic mapping) rather than a freeform generative chat model, output fidelity depends directly on how the input is normalized.
+
+### Technique 1: Supply Hierarchical JSON Over Raw Text
+
+Avoid passing long, unstructured text blobs. Group information into discrete semantic dimensions:
+
+- **Suboptimal (Unstructured narrative):**
+  > *"Customer A emailed today saying their payment failed. They are a VIP user who registered back in 2024..."*
+
+- **Optimal (Structured key-value properties):**
+  ```json
+  "state": {
+    "raw_message": "I was charged twice on my Visa card for this cycle...",
+    "entity_info": { "tier": "Enterprise", "arr": 24000 },
+    "system_flags": { "recent_payment_failed": true }
+  }
+  ```
+
+Jev maps structured key-value inputs to question criteria significantly faster and with higher precision than raw prose.
+
+### Technique 2: Deconstruct Complex Intents (Question Decomposition)
+
+Never combine multiple evaluation criteria into a single question (e.g., avoid *"Is this a severe technical issue?"*). Decompose the evaluation into independent dimensions:
+
+- **Question 1 (`choice`):** Department assignment (`technical`, `billing`, `account`).
+- **Question 2 (`score`):** Operational severity (`severity` on a 0–3 or 0–4 rubric).
+- **Question 3 (`boolean`):** Regulatory or compliance risk (`compliance_risk`).
+
+Decomposition allows the parallel sampler to compute independent probability distributions for each axis without cross-intent contamination.
+
+### Technique 3: Formulate MECE Rubrics and Anchors
+
+Model calibration depends on unambiguous boundaries between candidates:
+
+- **Eliminate vague adjectives:** Avoid subjective terminology such as *"somewhat urgent"*, *"fairly critical"*, or *"normal"*.
+- **Anchor to concrete criteria:**
+  - **For `score`:** Anchor each integer level to an explicit system or business state (e.g., `0 = general query`, `1 = cosmetic UI defect`, `2 = checkout conversion blocker`, `3 = global service outage`).
+  - **For `choice`:** Always provide an explicit fallback option (such as `other` or `unspecified`) with defined scope, giving the model an explicit sink for probability density when inputs fall outside the main categories.
+
+### Technique 4: Decouple Signal Extraction from Business Policy
+
+Do not attempt to embed routing decisions or execution logic inside the prompt instructions. Use Jev strictly to produce objective probabilistic signals, and enforce decision logic deterministically in code:
+
+```typescript
+// Jev returns calibrated signals:
+// urgency.score = 2.7 / 3
+// needs_escalation.probability = 0.88
+// category.choice = "billing" (p = 0.94)
+
+// Your application applies the business policy deterministically:
+if (answers.category.choice === 'billing' && answers.urgency.score >= 2.0) {
+  if (answers.needs_escalation.probability > 0.8) {
+    assignToLeadSupport(state.ticket_id);
+  } else {
+    assignToStandardBillingQueue(state.ticket_id);
+  }
+}
+```
+
+---
+
+## 4. Configuration & Account Management
 
 ### Configuration Methods
 
@@ -53,7 +194,7 @@ You can configure Jev API keys statically or dynamically:
 
 ---
 
-## 3. Account Pool Rotation & Automatic Failover
+## 5. Account Pool Rotation & Automatic Failover
 
 The gateway maintains a thread-safe `JevAccountPool`:
 
@@ -79,7 +220,7 @@ flowchart TD
 
 ---
 
-## 4. Endpoints & Route Mapping
+## 6. Endpoints & Route Mapping
 
 The gateway normalizes inbound paths and maps them to canonical upstream Jev endpoints (including required trailing slashes):
 
@@ -95,9 +236,9 @@ The gateway normalizes inbound paths and maps them to canonical upstream Jev end
 
 ---
 
-## 5. Decision Request & Response Examples
+## 7. Multi-Question Example
 
-### SystemOne Decision Request
+### Parallel Decision Curl Request
 
 ```bash
 curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
@@ -105,31 +246,42 @@ curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
   -H "Idempotency-Key: ticket-8814-20261010" \
   -d '{
     "model": "jev-1.13",
-    "state": "A customer wants a refund for a damaged product delivered three days ago.",
+    "state": {
+      "task": "Customer requesting a refund due to duplicate credit card charges",
+      "customer_tier": "VIP",
+      "previous_tickets_count": 0
+    },
     "questions": {
-      "is_refund": {
-        "type": "noul",
-        "instructions": "Is the customer requesting a refund?"
+      "category": {
+        "type": "choice",
+        "instructions": "Identify the primary topic of the customer'\''s request.",
+        "criteria": {
+          "billing": "Charges, payments, invoices, refunds, pricing, or subscription fees.",
+          "technical": "A product feature is broken, failing, unavailable, or behaving unexpectedly.",
+          "account": "Sign-in, password, profile, access permissions, or account administration."
+        }
       },
       "urgency": {
-        "type": "options",
-        "options": ["low", "medium", "high", "critical"],
-        "instructions": "Determine the urgency level of the request."
+        "type": "score",
+        "instructions": "Score the urgency level on a scale from 0 to 3 based on impact and timing.",
+        "criteria": [
+          "0: Routine question or informational inquiry; no operational disruption.",
+          "1: Degraded experience, but core functionality remains fully usable.",
+          "2: Blocks core workflow or involves pending financial/transactional hold-ups.",
+          "3: Critical operational stoppage or severe risk of active financial loss."
+        ]
+      },
+      "needs_escalation": {
+        "type": "boolean",
+        "instructions": "Does this request require direct escalation to a team lead or manager?",
+        "criteria": {
+          "true": "The customer threatens legal action, a VIP account has been mischarged more than once, or extreme distress is expressed.",
+          "false": "Standard operational refund request manageable through frontline workflows."
+        }
       }
     }
   }'
 ```
-
-### Request Fields
-
-| Field | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `model` | string | Yes | Target decision model (e.g. `jev-1.13`). |
-| `state` | string | Yes | Natural language text or context describing the situation to evaluate. |
-| `questions` | object | Yes | Key-value mapping of question IDs to question definitions. |
-| `questions.<key>.type` | string | Yes | Question evaluation type: `"noul"` (boolean yes/no) or `"options"` (categorical selection). |
-| `questions.<key>.instructions` | string | Yes | Clear prompt directing the model on how to evaluate the state. |
-| `questions.<key>.options` | array | For `"options"` | List of valid categorical outcomes. |
 
 ### SystemOne Decision Response (`200 OK`)
 
@@ -139,15 +291,20 @@ curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
   "model": "jev-1.13",
   "status": "completed",
   "results": {
-    "is_refund": {
-      "answer": true,
-      "confidence": 0.99,
-      "reasoning": "The user explicitly states they want a refund for the delivered item."
+    "category": {
+      "choice": "billing",
+      "probability": 0.98,
+      "reasoning": "Duplicate charges directly concern billing and financial transactions."
     },
     "urgency": {
-      "answer": "medium",
-      "confidence": 0.88,
-      "reasoning": "Product delivery occurred 3 days ago; standard refund window applies."
+      "score": 2.0,
+      "confidence": 0.92,
+      "reasoning": "Involves an active financial hold-up on the customer's account."
+    },
+    "needs_escalation": {
+      "boolean": false,
+      "probability": 0.12,
+      "reasoning": "First occurrence for a VIP customer; frontline billing can issue an immediate refund."
     }
   },
   "usage": {
@@ -158,7 +315,7 @@ curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
 
 ---
 
-## 6. Querying Models & Status
+## 8. Querying Models & Status
 
 ### Query Available Models
 
@@ -195,8 +352,8 @@ curl -X POST "http://127.0.0.1:20129/jev/v1/requests/req-98234-abcd/cancel"
 
 ---
 
-## 7. Billing & Operational Guidance
+## 9. Billing & Operational Guidance
 
-- **Billable Actions**: Jev bills accounts only for successful `200 OK` decision evaluations.
-- **Free Actions**: Calling `/jev/v1/models`, checking status via `GET /jev/v1/requests/{id}`, or cancelling jobs are free and consume no credits.
-- **Fail-Closed Safety**: Requests with missing fields, invalid question types, or empty states return `400 Bad Request` and do not consume credits or cause account failovers.
+- **Single Billed Credit**: Because the Parallel Sampler evaluates all concurrent questions in a single pass over the shared context, multi-question payloads consume only 1 credit per successful evaluation.
+- **Free Endpoints**: Calling `/jev/v1/models`, checking status via `GET /jev/v1/requests/{id}`, or cancelling jobs are free and consume no credits.
+- **Fail-Closed Safety**: Requests with missing fields, invalid question types, or empty states return `400 Bad Request` and do not consume credits or trigger account failovers.
