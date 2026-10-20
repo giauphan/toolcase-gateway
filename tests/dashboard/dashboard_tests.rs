@@ -99,11 +99,6 @@ fn dashboard_page_route_serves_html_and_rejects_post() {
     assert_eq!(head_slash.status, 200);
     assert!(String::from_utf8_lossy(&body_slash).contains("Gateway Dashboard"));
 
-    // GET /dashboard (backward-compatible alias)
-    let (head_alias, body_alias) = request_gateway("GET", "/dashboard", b"", &store);
-    assert_eq!(head_alias.status, 200);
-    assert!(String::from_utf8_lossy(&body_alias).contains("Gateway Dashboard"));
-
     // POST /gateway-config/dashboard -> 405 Method Not Allowed
     let (head_post, _) = request_gateway("POST", "/gateway-config/dashboard", b"", &store);
     assert_eq!(head_post.status, 405);
@@ -284,7 +279,6 @@ fn dashboard_cors_preflight_supported() {
     let store = ConfigStore::new(test_config(), PathBuf::from(".env.test_dashboard"));
     for path in [
         "/gateway-config/dashboard",
-        "/dashboard",
         "/api/v1/dashboard/overview",
         "/api/v1/dashboard/accounts",
     ] {

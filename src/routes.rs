@@ -106,7 +106,7 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
 
     // Runtime-config routes operate on the live store and never fall through to
     // the generic OmniRoute proxy.
-    if clean_path == "/gateway-config/dashboard" || clean_path == "/dashboard" {
+    if clean_path == "/gateway-config/dashboard" {
         return if request.method.eq_ignore_ascii_case("get") {
             crate::features::dashboard::handle_dashboard_page(&mut client)
         } else {
