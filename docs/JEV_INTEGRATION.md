@@ -87,7 +87,7 @@ The endpoint expects a JSON payload containing exactly two top-level components 
 > [!TIP]
 > You may optionally include `"model": "jev-1.13"` in the request root if you wish to target a specific model release. When omitted, Jev routes to the default calibrated engine.
 
-### Supported Question Types
+### Supported Question Types & Capacity Limits
 
 | Type | Description | Criteria Format |
 | :--- | :--- | :--- |
@@ -95,6 +95,9 @@ The endpoint expects a JSON payload containing exactly two top-level components 
 | `score` | Calibrated integer scoring scale (e.g. 0–3, 0–4) | Array of anchor strings defining each discrete score level. |
 | `boolean` | Binary determination | Object with `"true"` and `"false"` keys defining criteria for each outcome. |
 | `noul` / `options` | Backward-compatibility aliases for `boolean` and `choice` | Supports existing legacy prompt pipelines. |
+
+> [!NOTE]
+> **Batching Limits**: Jev supports evaluating up to **20 questions simultaneously** per request across a context of up to 32,000 tokens (100,000 characters). All questions in the batch are processed in a single pass without adding compounding sequential latency.
 
 ---
 
