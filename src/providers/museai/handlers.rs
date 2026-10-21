@@ -275,3 +275,102 @@ pub fn handle_get_video(client: &mut TcpStream, job_id: &str) -> io::Result<()> 
         Err(e) => crate::http::write_error(client, 500, "Internal Server Error", &e.to_string()),
     }
 }
+
+pub fn handle_get_video_content(
+    client: &mut TcpStream,
+    job_id: &str,
+    request: &crate::http::Request,
+) -> io::Result<()> {
+    if !crate::providers::museai::video::has_video_media(job_id) {
+        return crate::http::write_error(
+            client,
+            404,
+            "Not Found",
+            &format!("video content not found for job: {job_id}"),
+        );
+    }
+
+    let bytes = match crate::providers::museai::video::load_video_media(job_id) {
+        Ok(b) => b,
+        Err(e) => {
+            return crate::http::write_error(
+                client,
+                500,
+                "Internal Server Error",
+                &format!("failed to read video media: {e}"),
+            );
+        }
+    };
+
+    let total_len = bytes.len();
+    let is_head = request.method.eq_ignore_ascii_case("head");
+
+    let range_header = request
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("range"))
+        .map(|(_, v)| v.as_str());
+
+    if let Some(range_val) = range_header {
+        if let Some(range_spec) = range_val.strip_prefix("bytes=") {
+            let mut parts = range_spec.split('-');
+            let start_str = parts.next().unwrap_or("").trim();
+            let end_str = parts.next().unwrap_or("").trim();
+
+            let (start, end) = if start_str.is_empty() {
+                let suffix_len: usize = end_str.parse().unwrap_or(0);
+                let start = total_len.saturating_sub(suffix_len);
+                (start, total_len.saturating_sub(1))
+            } else {
+                let start: usize = start_str.parse().unwrap_or(0);
+                let end = if end_str.is_empty() {
+                    total_len.saturating_sub(1)
+                } else {
+                    end_str
+                        .parse()
+                        .unwrap_or(total_len.saturating_sub(1))
+                        .min(total_len.saturating_sub(1))
+                };
+                (start, end)
+            };
+
+            if start <= end && start < total_len {
+                let slice = &bytes[start..=end];
+                let content_len = slice.len();
+                let header = format!(
+                    "HTTP/1.1 206 Partial Content\r\n\
+                     Content-Type: video/mp4\r\n\
+                     Content-Range: bytes {start}-{end}/{total_len}\r\n\
+                     Content-Length: {content_len}\r\n\
+                     Accept-Ranges: bytes\r\n\
+                     Access-Control-Allow-Origin: *\r\n\
+                     Access-Control-Allow-Headers: Range, Content-Type, Accept\r\n\
+                     Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
+                     Connection: close\r\n\r\n"
+                );
+                client.write_all(header.as_bytes())?;
+                if !is_head {
+                    client.write_all(slice)?;
+                }
+                return client.flush();
+            }
+        }
+    }
+
+    let header = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: video/mp4\r\n\
+         Content-Length: {total_len}\r\n\
+         Accept-Ranges: bytes\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Headers: Range, Content-Type, Accept\r\n\
+         Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
+         Content-Disposition: inline; filename=\"{job_id}.mp4\"\r\n\
+         Connection: close\r\n\r\n"
+    );
+    client.write_all(header.as_bytes())?;
+    if !is_head {
+        client.write_all(&bytes)?;
+    }
+    client.flush()
+}

@@ -269,12 +269,29 @@ fn route_request_impl(
     }
 
     if clean_path.starts_with("/muse-ai/v1/videos/") {
-        let job_id = clean_path.strip_prefix("/muse-ai/v1/videos/").unwrap_or("");
+        let sub = clean_path.strip_prefix("/muse-ai/v1/videos/").unwrap_or("");
+        if let Some(job_id) = sub
+            .strip_suffix("/content")
+            .or_else(|| sub.strip_suffix("/download"))
+        {
+            let allowed = request.method.eq_ignore_ascii_case("get")
+                || request.method.eq_ignore_ascii_case("head");
+            return if allowed {
+                crate::museai::handle_get_video_content(client, job_id, request)
+            } else {
+                write_error(
+                    client,
+                    405,
+                    "Method Not Allowed",
+                    "video content only supports GET and HEAD",
+                )
+            };
+        }
         if request.method.eq_ignore_ascii_case("put") {
-            return crate::museai::handle_update_video_prompt(client, job_id, &request.body);
+            return crate::museai::handle_update_video_prompt(client, sub, &request.body);
         }
         if request.method.eq_ignore_ascii_case("get") {
-            return crate::museai::handle_get_video(client, job_id);
+            return crate::museai::handle_get_video(client, sub);
         }
         return write_error(
             client,

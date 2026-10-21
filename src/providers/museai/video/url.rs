@@ -80,14 +80,79 @@ pub fn extract_url_from_text(text: &str) -> String {
             return cleaned.to_string();
         }
     }
+    for url in &urls {
+        let cleaned = trim_trailing_punct(url);
+        if is_raw_video_artifact_url(cleaned) {
+            return cleaned.to_string();
+        }
+    }
     String::new()
 }
 
+pub fn is_vm_media_host(authority: &str) -> bool {
+    let host = authority
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    host == "metaaivm.com"
+        || host.ends_with(".metaaivm.com")
+        || host == "willow606.com"
+        || host.ends_with(".willow606.com")
+        || host == "exe.xyz"
+        || host.ends_with(".exe.xyz")
+}
+
+pub fn is_vm_media_url(url: &str) -> bool {
+    is_vm_media_host(url_authority(url))
+}
+
+pub fn is_gateway_video_content_url(url: &str) -> bool {
+    url.contains("/muse-ai/v1/videos/") && (url.ends_with("/content") || url.ends_with("/download"))
+}
+
+pub fn extract_vm_media_path(url: &str) -> Option<String> {
+    let after_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let path_and_query = after_scheme.split_once('/')?.1;
+    let path_only = path_and_query.split('?').next()?.split('#').next()?;
+    let fs_idx = path_only.find("/fs/raw/").map(|i| i + "/fs/raw/".len());
+    let media_idx = path_only
+        .find("/media/raw/")
+        .map(|i| i + "/media/raw/".len());
+    let raw_sub = match (fs_idx, media_idx) {
+        (Some(f), Some(m)) => &path_only[f.min(m)..],
+        (Some(f), None) => &path_only[f..],
+        (None, Some(m)) => &path_only[m..],
+        (None, None) => {
+            let w_idx = path_only.find("workspace/")?;
+            &path_only[w_idx..]
+        }
+    };
+    let clean = raw_sub.trim_start_matches('/');
+    if clean.starts_with("workspace/") {
+        Some(clean.to_string())
+    } else {
+        None
+    }
+}
+
+pub fn is_raw_video_artifact_url(url: &str) -> bool {
+    is_supported_video_url(url)
+        || (url.starts_with("https://")
+            && is_vm_media_url(url)
+            && has_supported_video_extension(url))
+}
+
 pub fn is_supported_video_url(url: &str) -> bool {
-    url.starts_with("https://")
-        && (is_muse_files_url(url)
-            || (is_google_drive_host(url) && is_google_drive_file_path(url))
-            || (has_supported_video_extension(url) && !is_spoofed_host(url)))
+    is_gateway_video_content_url(url)
+        || (url.starts_with("https://")
+            && (is_muse_files_url(url)
+                || (is_google_drive_host(url) && is_google_drive_file_path(url))
+                || (has_supported_video_extension(url)
+                    && !is_spoofed_host(url)
+                    && !is_vm_media_url(url))))
 }
 
 pub fn is_muse_files_url(url: &str) -> bool {

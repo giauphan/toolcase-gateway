@@ -4,6 +4,8 @@ use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+mod media;
+pub use media::*;
 mod url;
 pub use url::*;
 
@@ -125,14 +127,6 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         build_video_prompt(&upstream_model, &prompt, &aspect_ratio, duration)
     };
 
-    let request_json = serde_json::to_vec(&serde_json::json!({
-        "model": "muse",
-        "messages": [
-            {"role": "user", "content": full_prompt}
-        ]
-    }))
-    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
     let allocated_job_id = body
         .get("id")
         .and_then(|v| v.as_str())
@@ -140,6 +134,15 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| format!("video-{}", Uuid::new_v4()));
+
+    let request_json = serde_json::to_vec(&serde_json::json!({
+        "model": "muse",
+        "job_id": allocated_job_id,
+        "messages": [
+            {"role": "user", "content": full_prompt}
+        ]
+    }))
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -279,8 +282,8 @@ where
         .and_then(|t| t.as_str())
         .map(str::to_string);
 
-    let video_url = extract_url_from_text(content);
-    if video_url.is_empty() {
+    let raw_video_url = extract_url_from_text(content);
+    if raw_video_url.is_empty() {
         if req.existing_job.is_none() {
             let err_msg = if crate::providers::museai::chat::explicit_video_refusal(content) {
                 format!("Muse video generation was declined: {content}")
@@ -312,12 +315,26 @@ where
         ));
     }
 
+    let is_vm = is_vm_media_url(&raw_video_url);
+    let (video_url, media_validated) = if is_vm {
+        let content_url = format!("/muse-ai/v1/videos/{}/content", req.allocated_job_id);
+        let validated = has_video_media(&req.allocated_job_id);
+        (content_url, validated)
+    } else {
+        (raw_video_url, false)
+    };
+    let rev_status = if media_validated {
+        "completed"
+    } else {
+        "artifact_reported"
+    };
+
     if let Some(parent) = req.existing_job {
         let updated = super::lifecycle::append_job_revision(
             &parent.job_id,
             &req.prompt,
             &video_url,
-            "artifact_reported",
+            rev_status,
         )?;
         let rev_id = updated
             .revisions
@@ -586,16 +603,24 @@ pub fn build_video_result_with_job_id(
     thread_id: Option<String>,
     submission_key: Option<String>,
 ) -> io::Result<serde_json::Value> {
-    let video_url = extract_url_from_text(content);
-    if video_url.is_empty() {
+    let raw_video_url = extract_url_from_text(content);
+    if raw_video_url.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "Muse video generation completed without a supported public HTTPS artifact",
         ));
     }
 
-    let output_verified = false;
-    let media_validated = false;
+    let is_vm = is_vm_media_url(&raw_video_url);
+    let (video_url, media_validated) = if is_vm {
+        let content_url = format!("/muse-ai/v1/videos/{job_id}/content");
+        let validated = has_video_media(&job_id);
+        (content_url, validated)
+    } else {
+        (raw_video_url, false)
+    };
+
+    let output_verified = media_validated;
     let status = if media_validated {
         "completed"
     } else {

@@ -19,6 +19,9 @@ pub fn request_museai_chat_completion(
     wait_for_video_artifact: bool,
 ) -> io::Result<String> {
     let prompt = extract_user_prompt(request_body)?;
+    let job_id_hint = serde_json::from_slice::<serde_json::Value>(request_body)
+        .ok()
+        .and_then(|v| v.get("job_id").and_then(|j| j.as_str()).map(str::to_string));
     let config = bootstrap_museai_config(config)?;
 
     let base_url = if config.museai_base_url.is_empty() {
@@ -219,6 +222,37 @@ pub fn request_museai_chat_completion(
                 Err(e) => {
                     debug_log(&format!("Video URL read error: {e}"));
                     break;
+                }
+            }
+        }
+    }
+
+    if let Some(ref raw_url) = video_url {
+        if crate::providers::museai::video::is_vm_media_url(raw_url) {
+            if let Some(vm_path) = crate::providers::museai::video::extract_vm_media_path(raw_url) {
+                debug_log(&format!("Fetching internal VM media over Noise: {vm_path}"));
+                let fetch_stream_id = active_stream_id.max(2) + 1;
+                match crate::providers::museai::video::fetch_vm_media_over_noise(
+                    &mut socket,
+                    &mut session,
+                    fetch_stream_id,
+                    &vm_path,
+                ) {
+                    Ok(media_bytes) => {
+                        debug_log(&format!(
+                            "Fetched {} bytes of VM video media",
+                            media_bytes.len()
+                        ));
+                        if let Some(ref jid) = job_id_hint {
+                            let _ = crate::providers::museai::video::save_video_media(
+                                jid,
+                                &media_bytes,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        debug_log(&format!("Failed to fetch VM media over Noise: {e}"));
+                    }
                 }
             }
         }
