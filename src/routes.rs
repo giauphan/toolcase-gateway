@@ -436,14 +436,16 @@ fn route_request_impl(
         };
     }
     if clean_path == "/video-template" || clean_path.starts_with("/video-template/") {
-        return if request.method.eq_ignore_ascii_case("get") {
-            crate::video_template::handle_video_template_page(client)
+        return if request.method.eq_ignore_ascii_case("get")
+            || request.method.eq_ignore_ascii_case("head")
+        {
+            crate::video_template::handle_video_template_page_with_method(client, &request.method)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
-                "video templates only support GET",
+                "video templates only support GET and HEAD",
             )
         };
     }
