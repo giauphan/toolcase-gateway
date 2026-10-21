@@ -34,6 +34,13 @@ pub fn extract_candidate_urls(text: &str) -> Vec<String> {
             if !urls.iter().any(|u| u == cleaned) {
                 urls.push(cleaned.to_string());
             }
+        } else if cleaned.starts_with("/fs/raw/workspace/")
+            || cleaned.starts_with("workspace/")
+            || cleaned.starts_with("/workspace/")
+        {
+            if !urls.iter().any(|u| u == cleaned) {
+                urls.push(cleaned.to_string());
+            }
         } else if let Some(idx) = word.find("https://").or_else(|| word.find("http://")) {
             let slice = trim_trailing_punct(&word[idx..]);
             if (slice.starts_with("https://") || slice.starts_with("http://"))
@@ -105,6 +112,9 @@ pub fn is_vm_media_host(authority: &str) -> bool {
 
 pub fn is_vm_media_url(url: &str) -> bool {
     is_vm_media_host(url_authority(url))
+        || url.starts_with("/fs/raw/workspace/")
+        || url.starts_with("/workspace/")
+        || url.starts_with("workspace/")
 }
 
 pub fn is_gateway_video_content_url(url: &str) -> bool {
@@ -112,11 +122,15 @@ pub fn is_gateway_video_content_url(url: &str) -> bool {
 }
 
 pub fn extract_vm_media_path(url: &str) -> Option<String> {
-    let after_scheme = url
+    let path_only = if let Some(after_scheme) = url
         .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
-    let path_and_query = after_scheme.split_once('/')?.1;
-    let path_only = path_and_query.split('?').next()?.split('#').next()?;
+        .or_else(|| url.strip_prefix("http://"))
+    {
+        let path_and_query = after_scheme.split_once('/')?.1;
+        path_and_query.split('?').next()?.split('#').next()?
+    } else {
+        url.split('?').next()?.split('#').next()?
+    };
     let fs_idx = path_only.find("/fs/raw/").map(|i| i + "/fs/raw/".len());
     let media_idx = path_only
         .find("/media/raw/")
@@ -140,7 +154,10 @@ pub fn extract_vm_media_path(url: &str) -> Option<String> {
 
 pub fn is_raw_video_artifact_url(url: &str) -> bool {
     is_supported_video_url(url)
-        || (url.starts_with("https://")
+        || ((url.starts_with("https://")
+            || url.starts_with("http://")
+            || url.starts_with('/')
+            || url.starts_with("workspace/"))
             && is_vm_media_url(url)
             && has_supported_video_extension(url))
 }
@@ -197,10 +214,18 @@ pub fn is_spoofed_host(url: &str) -> bool {
 }
 
 pub fn has_supported_video_extension(url: &str) -> bool {
-    let path = url
+    let path_str = if let Some(after_scheme) = url
         .strip_prefix("https://")
-        .and_then(|rest| rest.split_once('/').map(|(_, path)| path))
-        .unwrap_or("")
+        .or_else(|| url.strip_prefix("http://"))
+    {
+        after_scheme
+            .split_once('/')
+            .map(|(_, path)| path)
+            .unwrap_or("")
+    } else {
+        url
+    };
+    let path = path_str
         .split('?')
         .next()
         .unwrap_or("")

@@ -1,5 +1,5 @@
 use super::stream::MuseChatStream;
-use crate::providers::museai::video::{extract_url_from_text, is_supported_video_url};
+use crate::providers::museai::video::{extract_url_from_text, is_raw_video_artifact_url};
 
 pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> {
     if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
@@ -120,8 +120,15 @@ pub fn find_video_url_in_json(val: &serde_json::Value, depth: usize) -> Option<S
     match val {
         serde_json::Value::String(s) => {
             let extracted = extract_url_from_text(s);
-            if !extracted.is_empty() && is_supported_video_url(&extracted) {
-                Some(extracted)
+            let candidate = if !extracted.is_empty() {
+                extracted
+            } else if is_raw_video_artifact_url(s) {
+                s.to_string()
+            } else {
+                String::new()
+            };
+            if !candidate.is_empty() && is_raw_video_artifact_url(&candidate) {
+                Some(candidate)
             } else {
                 None
             }
@@ -140,8 +147,15 @@ pub fn find_video_url_in_json(val: &serde_json::Value, depth: usize) -> Option<S
             ] {
                 if let Some(serde_json::Value::String(s)) = map.get(*key) {
                     let extracted = extract_url_from_text(s);
-                    if !extracted.is_empty() && is_supported_video_url(&extracted) {
-                        return Some(extracted);
+                    let candidate = if !extracted.is_empty() {
+                        extracted
+                    } else if is_raw_video_artifact_url(s) {
+                        s.to_string()
+                    } else {
+                        String::new()
+                    };
+                    if !candidate.is_empty() && is_raw_video_artifact_url(&candidate) {
+                        return Some(candidate);
                     }
                 }
             }

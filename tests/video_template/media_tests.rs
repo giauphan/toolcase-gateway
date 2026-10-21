@@ -282,3 +282,44 @@ fn test_persisted_live_video_job_content_is_served() {
     assert_eq!(body.len(), 1998471);
     assert_eq!(&body[4..12], b"ftypisom");
 }
+
+#[test]
+fn test_find_video_url_in_structured_json_events() {
+    use toolcase_gateway::museai::chat::find_video_url_in_json;
+    use toolcase_gateway::museai::video::is_raw_video_artifact_url;
+
+    let vm_card_event = serde_json::json!({
+        "event": "delta.presentation",
+        "payload": {
+            "card": {
+                "title": "Generated Video",
+                "url": "https://57004190-bb16-4e36-8c1f-695a4de1d5e1.metaaivm.com/fs/raw/workspace/your_files/cat/cat.mp4"
+            }
+        }
+    });
+    let found = find_video_url_in_json(&vm_card_event, 0).expect("must find VM URL in card");
+    assert!(is_raw_video_artifact_url(&found));
+    assert!(found.contains(".metaaivm.com"));
+
+    let workspace_path_event = serde_json::json!({
+        "event": "delta.media",
+        "payload": {
+            "media": {
+                "path": "/fs/raw/workspace/your_files/animated_cube.mp4"
+            }
+        }
+    });
+    let found_path =
+        find_video_url_in_json(&workspace_path_event, 0).expect("must find workspace path");
+    assert!(is_raw_video_artifact_url(&found_path));
+    assert!(found_path.contains("workspace/"));
+
+    let public_cdn_event = serde_json::json!({
+        "event": "delta.card",
+        "payload": {
+            "video_url": "https://video.xx.fbcdn.net/v/t39.25447-2/test.mp4"
+        }
+    });
+    let found_cdn = find_video_url_in_json(&public_cdn_event, 0).expect("must find public CDN URL");
+    assert!(is_raw_video_artifact_url(&found_cdn));
+}

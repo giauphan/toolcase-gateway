@@ -290,7 +290,7 @@ pre{margin:0}
         if(d.status==="failed" || d.status==="approval_required" || d.status==="submission_unknown"){
           go.disabled=false;
           setStatus("","");
-          var msg=d && d.error && d.error.message ? d.error.message : (d && d.error_message ? d.error_message : "");
+          var msg=d && d.error && d.error.message ? d.error.message : (d && d.error && typeof d.error === "string" ? d.error : (d && d.error_message ? d.error_message : ""));
           if(!msg && d.status==="approval_required"){
             msg="Video generation requires approval.";
           } else if(!msg){
