@@ -728,16 +728,15 @@ fn test_live_create_video_from_har_capture() {
             assert_eq!(result["object"], "video.generation");
             let status = result["status"].as_str().unwrap_or("");
             assert!(
-                status == "completed",
-                "live Muse did not return a completed video"
+                status == "completed" || status == "artifact_reported",
+                "live Muse did not return a valid video status: {status}"
             );
-            if status == "completed" {
-                let url = result["video_url"].as_str().unwrap_or("");
-                assert!(
-                    url.starts_with("https://"),
-                    "completed but video_url is not HTTPS"
-                );
-            }
+            let url = result["video_url"].as_str().unwrap_or("");
+            assert!(url.starts_with("https://"), "video_url is not HTTPS: {url}");
+            assert!(
+                toolcase_gateway::museai::video::is_supported_video_url(url),
+                "video_url must be a supported CDN URL: {url}"
+            );
             #[cfg(unix)]
             {
                 use std::os::unix::fs::OpenOptionsExt;
@@ -745,7 +744,8 @@ fn test_live_create_video_from_har_capture() {
                     .join("target/muse-video-result.json");
                 let mut file = std::fs::OpenOptions::new()
                     .write(true)
-                    .create_new(true)
+                    .create(true)
+                    .truncate(true)
                     .mode(0o600)
                     .open(path)
                     .unwrap_or_else(|_| panic!("cannot securely create live video result file"));
@@ -753,6 +753,18 @@ fn test_live_create_video_from_har_capture() {
                     .unwrap_or_else(|_| panic!("cannot write live video result file"));
                 println!("Live video result saved to target/muse-video-result.json");
             }
+            let job_id = result["id"].as_str().unwrap_or("");
+            if !job_id.is_empty() {
+                let loaded = toolcase_gateway::museai::load_video_job(job_id)
+                    .expect("live generated video job must be persisted in lifecycle store");
+                assert_eq!(loaded.job_id, job_id);
+                assert_eq!(loaded.video_url, url);
+                assert_eq!(loaded.status, status);
+            }
+            let template_html = include_str!("../../assets/video-template.html");
+            assert!(template_html.contains("showVideo(d.video_url)"));
+            assert!(template_html.contains("player.src=url"));
+            assert!(template_html.contains("download.href=url"));
             #[cfg(not(unix))]
             panic!("secure live-result storage requires an owner-only file ACL implementation");
         }

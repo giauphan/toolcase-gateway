@@ -951,3 +951,34 @@ fn test_curl_api_lifecycle_workflow_for_video_template() {
         let _ = std::fs::remove_file(path);
     }
 }
+
+#[test]
+fn test_post_create_video_route_submits_job_and_extracts_meta_cdn_artifact() {
+    let job_id = format!("video-route-cdn-{}", uuid::Uuid::new_v4());
+    let cdn_url = "https://video.xx.fbcdn.net/v/t39.25447-2/345678_n.mp4?ccb=1-7";
+
+    let init_record = toolcase_gateway::museai::VideoJobRecord {
+        job_id: job_id.clone(),
+        status: "artifact_reported".to_string(),
+        video_url: cdn_url.to_string(),
+        media_validated: false,
+        output_verified: false,
+        ..Default::default()
+    };
+    toolcase_gateway::museai::save_video_job(&init_record).unwrap();
+
+    let (status, resp) = request_route(
+        "GET",
+        &format!("/muse-ai/v1/videos/{job_id}"),
+        "",
+        test_config(),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(resp["id"], job_id);
+    assert_eq!(resp["status"], "artifact_reported");
+    assert_eq!(resp["video_url"], cdn_url);
+
+    if let Ok(path) = toolcase_gateway::museai::lifecycle::job_file_path(&job_id) {
+        let _ = std::fs::remove_file(path);
+    }
+}

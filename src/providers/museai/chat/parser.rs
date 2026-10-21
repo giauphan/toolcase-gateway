@@ -1,4 +1,5 @@
 use super::stream::MuseChatStream;
+use crate::providers::museai::video::{extract_url_from_text, is_supported_video_url};
 
 pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<String> {
     if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
@@ -28,23 +29,6 @@ pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<Stri
     }
 
     if let Some(payload) = val.get("payload") {
-        if let Some(data) = payload.get("data") {
-            let url = data.get("url").and_then(|u| u.as_str()).or_else(|| {
-                data.get("data")
-                    .and_then(|nested| nested.get("url"))
-                    .and_then(|u| u.as_str())
-            });
-            if let Some(url) = url {
-                if !url.is_empty() {
-                    return Some(format!("\nVideo URL: {url}\n"));
-                }
-            }
-            if let Some(fallback) = data.get("fallback_text").and_then(|f| f.as_str()) {
-                if !fallback.is_empty() {
-                    return Some(format!("\nVideo: {fallback}\n"));
-                }
-            }
-        }
         if let Some(text) = payload.get("text").and_then(|t| t.as_str()) {
             if !text.is_empty() {
                 return Some(text.to_string());
@@ -83,6 +67,27 @@ pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<Stri
             return Some(text);
         }
     }
+
+    if let Some(url) = find_video_url_in_json(val, 0) {
+        return Some(format!("\nVideo URL: {url}\n"));
+    }
+
+    if let Some(fallback) = val
+        .get("payload")
+        .and_then(|p| p.get("data"))
+        .and_then(|d| d.get("fallback_text"))
+        .and_then(|f| f.as_str())
+        .or_else(|| {
+            val.get("payload")
+                .and_then(|p| p.get("fallback_text"))
+                .and_then(|f| f.as_str())
+        })
+        .or_else(|| val.get("fallback_text").and_then(|f| f.as_str()))
+    {
+        if !fallback.is_empty() {
+            return Some(format!("\nVideo: {fallback}\n"));
+        }
+    }
     if let Some(events) = val.get("events").and_then(|e| e.as_array()) {
         let mut combined = String::new();
         for ev in events {
@@ -106,6 +111,114 @@ pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<Stri
         }
     }
     None
+}
+
+pub fn find_video_url_in_json(val: &serde_json::Value, depth: usize) -> Option<String> {
+    if depth > 10 {
+        return None;
+    }
+    match val {
+        serde_json::Value::String(s) => {
+            let extracted = extract_url_from_text(s);
+            if !extracted.is_empty() && is_supported_video_url(&extracted) {
+                Some(extracted)
+            } else {
+                None
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for key in &[
+                "url",
+                "video_url",
+                "videoUrl",
+                "uri",
+                "src",
+                "path",
+                "download_url",
+                "source_url",
+                "media_url",
+            ] {
+                if let Some(serde_json::Value::String(s)) = map.get(*key) {
+                    let extracted = extract_url_from_text(s);
+                    if !extracted.is_empty() && is_supported_video_url(&extracted) {
+                        return Some(extracted);
+                    }
+                }
+            }
+            for key in &[
+                "data",
+                "payload",
+                "card",
+                "media",
+                "attachment",
+                "artifact",
+                "result",
+                "output",
+                "resources",
+                "attachments",
+                "cards",
+                "items",
+                "events",
+                "metadata",
+                "widgets",
+                "presentations",
+            ] {
+                if let Some(child) = map.get(*key) {
+                    if let Some(url) = find_video_url_in_json(child, depth + 1) {
+                        return Some(url);
+                    }
+                }
+            }
+            for (key, child) in map {
+                if !matches!(
+                    key.as_str(),
+                    "data"
+                        | "payload"
+                        | "card"
+                        | "media"
+                        | "attachment"
+                        | "artifact"
+                        | "result"
+                        | "output"
+                        | "resources"
+                        | "attachments"
+                        | "cards"
+                        | "items"
+                        | "events"
+                        | "metadata"
+                        | "widgets"
+                        | "presentations"
+                        | "url"
+                        | "video_url"
+                        | "videoUrl"
+                        | "uri"
+                        | "src"
+                        | "path"
+                        | "download_url"
+                        | "source_url"
+                        | "media_url"
+                        | "session_id"
+                        | "thread_id"
+                        | "message_id"
+                        | "id"
+                ) {
+                    if let Some(url) = find_video_url_in_json(child, depth + 1) {
+                        return Some(url);
+                    }
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                if let Some(url) = find_video_url_in_json(item, depth + 1) {
+                    return Some(url);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 pub fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {

@@ -120,6 +120,10 @@ impl MuseChatStream {
             | "delta.message_start"
             | "delta.tool_start"
             | "delta.tool_done"
+            | "delta.card"
+            | "delta.attachment"
+            | "delta.media"
+            | "message.attachment"
             | "approvals.snapshot"
             | "delta.marker"
             | "delta.placeholder" => event,
@@ -244,8 +248,23 @@ impl MuseChatStream {
         }
         if matches!(
             event,
-            "delta.text_append" | "delta.message_done" | "message.assistant" | "delta.presentation"
-        ) {
+            "delta.text_append"
+                | "delta.message_done"
+                | "message.assistant"
+                | "delta.presentation"
+                | "delta.tool_done"
+                | "delta.card"
+                | "delta.attachment"
+                | "delta.media"
+                | "message.attachment"
+                | "delta.marker"
+                | "delta.placeholder"
+                | "task.complete"
+        ) || (event.is_empty()
+            && (record.get("content").is_some()
+                || record.get("text").is_some()
+                || record.get("payload").is_some()))
+        {
             if let Some(text) = parse_assistant_content_from_json(record) {
                 self.text.push_str(&text);
             }

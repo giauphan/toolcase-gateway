@@ -185,6 +185,22 @@ pub fn request_museai_chat_completion(
             session_id: Some(thread_id.clone()),
             ..Default::default()
         };
+        if config.muse_approval.mode == crate::config::MuseApprovalMode::ScopedAuto {
+            let mut coordinator =
+                crate::providers::museai::approval::ApprovalCoordinator::new(&config, &thread_id);
+            presentation_stream.approval_handler = Some(Box::new(move |_sid, record| {
+                match coordinator.handle_approval_snapshot(record) {
+                    Ok(crate::providers::museai::approval::CoordinateResult::Approved {
+                        ..
+                    }) => Ok(true),
+                    Ok(crate::providers::museai::approval::CoordinateResult::ManualRequired {
+                        reason,
+                        ..
+                    }) => Err(io::Error::other(reason)),
+                    Err(e) => Err(e),
+                }
+            }));
+        }
         while std::time::Instant::now() < deadline && video_url.is_none() {
             match socket.read_encrypted_service_frame(&mut session) {
                 Ok(frame) => {
@@ -197,6 +213,7 @@ pub fn request_museai_chat_completion(
                     if let Some(extracted) = extract_video_url_from_stream(&presentation_stream) {
                         debug_log("Video artifact URL received");
                         video_url = Some(extracted);
+                        break;
                     }
                 }
                 Err(e) => {
