@@ -909,6 +909,7 @@ fn test_curl_api_lifecycle_workflow_for_video_template() {
         approval_id: None,
         submission_key: None,
         last_checked_at: Some(now),
+        ..Default::default()
     };
     toolcase_gateway::museai::save_video_job(&init_record).unwrap();
 

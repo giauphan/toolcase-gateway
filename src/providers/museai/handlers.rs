@@ -224,7 +224,7 @@ pub fn handle_update_video_prompt(
 pub fn handle_get_video(client: &mut TcpStream, job_id: &str) -> io::Result<()> {
     match crate::providers::museai::lifecycle::load_video_job(job_id) {
         Ok(record) => {
-            let response = serde_json::json!({
+            let mut response = serde_json::json!({
                 "id": record.job_id,
                 "object": "video.generation",
                 "created": record.created_at,
@@ -244,6 +244,13 @@ pub fn handle_get_video(client: &mut TcpStream, job_id: &str) -> io::Result<()> 
                 "revisions": record.revisions,
                 "last_activity_at": record.last_activity_at,
             });
+            if let Some(ref err) = record.error {
+                response["error"] = serde_json::json!({
+                    "message": err,
+                    "code": "VIDEO_GENERATION_FAILED"
+                });
+                response["error_message"] = serde_json::Value::String(err.clone());
+            }
             let response_str = serde_json::to_string(&response)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             client.write_all(

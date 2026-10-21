@@ -290,7 +290,13 @@ pre{margin:0}
         if(d.status==="failed" || d.status==="approval_required" || d.status==="submission_unknown"){
           go.disabled=false;
           setStatus("","");
-          setError(d.status==="approval_required" ? "Video generation requires approval." : "Video generation did not finish.");
+          var msg=d && d.error && d.error.message ? d.error.message : (d && d.error_message ? d.error_message : "");
+          if(!msg && d.status==="approval_required"){
+            msg="Video generation requires approval.";
+          } else if(!msg){
+            msg="Video generation did not finish.";
+          }
+          setError(msg);
           return;
         }
         setStatus("Generating…", "busy");

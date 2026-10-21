@@ -182,6 +182,7 @@ fn create_init_job_record(req: &ValidatedVideoRequest) -> super::lifecycle::Vide
         approval_id: None,
         submission_key: req.submission_key.clone(),
         last_checked_at: Some(req.now),
+        error: None,
     }
 }
 
@@ -213,11 +214,13 @@ where
                 } else {
                     ("failed", None)
                 };
-                if let Err(update_err) = super::lifecycle::update_video_job(
+                let err_msg = e.to_string();
+                if let Err(update_err) = super::lifecycle::update_video_job_with_error(
                     &req.allocated_job_id,
                     status,
                     approval_status,
                     None,
+                    Some(&err_msg),
                 ) {
                     super::lifecycle::debug_log_lifecycle(&format!(
                         "Failed to update job status after completion error: {update_err}"
@@ -238,9 +241,14 @@ where
         Ok(json) => json,
         Err(e) => {
             if req.existing_job.is_none() {
-                if let Err(update_err) =
-                    super::lifecycle::update_video_job(&req.allocated_job_id, "failed", None, None)
-                {
+                let err_msg = format!("Failed to parse completion JSON: {e}");
+                if let Err(update_err) = super::lifecycle::update_video_job_with_error(
+                    &req.allocated_job_id,
+                    "failed",
+                    None,
+                    None,
+                    Some(&err_msg),
+                ) {
                     super::lifecycle::debug_log_lifecycle(&format!(
                         "Failed to update job status after JSON parse error: {update_err}"
                     ));
@@ -274,11 +282,18 @@ where
     let video_url = extract_url_from_text(content);
     if video_url.is_empty() {
         if req.existing_job.is_none() {
-            if let Err(update_err) = super::lifecycle::update_video_job(
+            let err_msg = if crate::providers::museai::chat::explicit_video_refusal(content) {
+                format!("Muse video generation was declined: {content}")
+            } else {
+                "Muse video generation completed without a supported public HTTPS artifact"
+                    .to_string()
+            };
+            if let Err(update_err) = super::lifecycle::update_video_job_with_error(
                 &req.allocated_job_id,
                 "failed",
                 None,
                 thread_id.as_deref(),
+                Some(&err_msg),
             ) {
                 super::lifecycle::debug_log_lifecycle(&format!(
                     "Failed to update job status after empty video url: {update_err}"
@@ -621,6 +636,7 @@ pub fn build_video_result_with_job_id(
         approval_id: None,
         submission_key,
         last_checked_at: Some(now),
+        error: None,
     };
 
     if let Ok(existing) = super::lifecycle::load_video_job(&job_id) {

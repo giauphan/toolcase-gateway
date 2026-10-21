@@ -318,6 +318,11 @@ fn test_submit_video_persists_provider_failure() {
     loop {
         let record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
         if record.status == "failed" {
+            assert_eq!(
+                record.error.as_deref(),
+                Some("provider failed"),
+                "error message must be persisted on failure"
+            );
             break;
         }
         assert!(
@@ -526,4 +531,59 @@ fn test_muse_files_url_is_supported() {
 
     let wrong_ext = "https://muse.ai/files/123/abc/file.txt";
     assert!(!is_supported_video_url(wrong_ext));
+}
+
+#[test]
+fn test_submit_video_missing_url_persists_artifact_error() {
+    let job_id = format!("video-missing-url-{}", uuid::Uuid::new_v4());
+    let request = serde_json::json!({"id": job_id, "prompt": "a paper boat"});
+    let response = toolcase_gateway::museai::video::submit_video_with_completion(
+        &serde_json::to_vec(&request).unwrap(),
+        &test_config(),
+        |_request, _config, _wait_for_artifact| {
+            Ok(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "I am working on your video now."
+                    }
+                }]
+            })
+            .to_string())
+        },
+    )
+    .unwrap();
+    assert_eq!(response["status"], "submitting");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let record = toolcase_gateway::museai::load_video_job(&job_id).unwrap();
+        if record.status == "failed" {
+            assert!(
+                record.error.as_deref().unwrap().contains("artifact"),
+                "error must mention artifact: {:?}",
+                record.error
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "provider failure was not persisted"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn test_apply_muse_session_metadata_extracts_notary_token() {
+    let mut config = test_config();
+    config.museai_notary_token.clear();
+    let session = serde_json::json!({
+        "vm_id": "vm-123",
+        "endpoint_url": "wss://hatch.metaaivm.com/v1/noise",
+        "auth_token": "token-123",
+        "notary_token": "notary-abc-789"
+    });
+    toolcase_gateway::museai::session::apply_muse_session_metadata(&mut config, &session);
+    assert_eq!(config.museai_notary_token, "notary-abc-789");
 }

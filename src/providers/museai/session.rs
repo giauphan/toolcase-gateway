@@ -193,6 +193,14 @@ pub fn apply_muse_session_metadata(config: &mut Config, session: &serde_json::Va
             .unwrap_or_default()
             .to_owned();
     }
+    if config.museai_notary_token.is_empty() {
+        config.museai_notary_token = session
+            .get("notary_token")
+            .or_else(|| selected_vm.and_then(|vm| vm.get("notary_token")))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_owned();
+    }
 }
 
 pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
@@ -367,15 +375,19 @@ pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
         Err(error) => debug_log(&format!("Note: POST /api/auth/check failed: {error}")),
     }
 
-    if bootstrapped.museai_access_token.is_empty() {
+    if bootstrapped.museai_access_token.is_empty() || bootstrapped.museai_notary_token.is_empty() {
         match request.send_json(serde_json::Value::Object(body)) {
             Ok(response) => {
                 if let Ok(session) = response.into_body().read_json::<serde_json::Value>() {
-                    if let Some(token) = session.get("token").and_then(|v| v.as_str()) {
-                        bootstrapped.museai_access_token = token.to_owned();
+                    if bootstrapped.museai_access_token.is_empty() {
+                        if let Some(token) = session.get("token").and_then(|v| v.as_str()) {
+                            bootstrapped.museai_access_token = token.to_owned();
+                        }
                     }
-                    if let Some(notary) = session.get("notary_token").and_then(|v| v.as_str()) {
-                        bootstrapped.museai_notary_token = notary.to_owned();
+                    if bootstrapped.museai_notary_token.is_empty() {
+                        if let Some(notary) = session.get("notary_token").and_then(|v| v.as_str()) {
+                            bootstrapped.museai_notary_token = notary.to_owned();
+                        }
                     }
                 }
             }

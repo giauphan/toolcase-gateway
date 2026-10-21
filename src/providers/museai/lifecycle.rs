@@ -47,6 +47,8 @@ pub struct VideoJobRecord {
     pub submission_key: Option<String>,
     #[serde(default)]
     pub last_checked_at: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 pub fn state_dir() -> PathBuf {
@@ -86,11 +88,12 @@ pub fn save_video_job(record: &VideoJobRecord) -> io::Result<()> {
     Ok(())
 }
 
-pub fn update_video_job(
+pub fn update_video_job_with_error(
     job_id: &str,
     status: &str,
     approval_status: Option<&str>,
     thread_id: Option<&str>,
+    error: Option<&str>,
 ) -> io::Result<()> {
     let _guard = job_update_lock()
         .lock()
@@ -101,9 +104,21 @@ pub fn update_video_job(
     if let Some(tid) = thread_id {
         record.thread_id = Some(tid.to_string());
     }
+    if let Some(err) = error {
+        record.error = Some(err.to_string());
+    }
     record.last_activity_at = now_secs();
     record.last_checked_at = Some(record.last_activity_at);
     save_video_job(&record)
+}
+
+pub fn update_video_job(
+    job_id: &str,
+    status: &str,
+    approval_status: Option<&str>,
+    thread_id: Option<&str>,
+) -> io::Result<()> {
+    update_video_job_with_error(job_id, status, approval_status, thread_id, None)
 }
 
 pub const STALE_SUBMITTING_SECS: u64 = 300;

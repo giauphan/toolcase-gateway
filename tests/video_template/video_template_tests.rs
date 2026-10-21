@@ -87,3 +87,11 @@ fn video_template_tracks_processing_state_and_polls_job_lifecycle() {
     assert!(html.contains("d.status===\"queued\""));
     assert!(html.contains("pollVideo(d.id || id,go)"));
 }
+
+#[test]
+fn video_template_surfaces_actionable_error_on_failure() {
+    let html = include_str!("../../assets/video-template.html");
+    assert!(html.contains("d && d.error && d.error.message ? d.error.message"));
+    assert!(html.contains("Video generation did not finish."));
+    assert!(html.contains("Video generation requires approval."));
+}
