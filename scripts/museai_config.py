@@ -86,6 +86,19 @@ def extract_from_header_text(text: str) -> dict[str, str]:
     }
 
 
+def _process_payload(payload: Any, result: dict[str, str]) -> None:
+    for key, value in _walk(payload):
+        if not isinstance(value, str) or not value:
+            continue
+        key_lower = str(key).lower()
+        if key_lower in _WS_URL_KEYS and value.startswith(("ws://", "wss://")):
+            result.setdefault("GW_MUSEAI_WS_URL", value)
+        elif key_lower in ("access_token", "token"):
+            result.setdefault("GW_MUSEAI_ACCESS_TOKEN", value)
+        elif key_lower in ("ws_token", "websocket_token", "notary_token"):
+            result.setdefault("GW_MUSEAI_NOTARY_TOKEN", value)
+
+
 def extract_from_har(har: dict[str, Any]) -> dict[str, str]:
     entries = har.get("log", {}).get("entries", [])
     if not isinstance(entries, list):
@@ -108,20 +121,8 @@ def extract_from_har(har: dict[str, Any]) -> dict[str, str]:
             result.setdefault("GW_MUSEAI_COOKIE", cookie)
 
         payload = _response_json(entry)
-        if payload is None:
-            continue
-        for key, value in _walk(payload):
-            if not isinstance(value, str) or not value:
-                continue
-            key_lower = str(key).lower()
-            if key_lower in _WS_URL_KEYS and value.startswith(("ws://", "wss://")):
-                result.setdefault("GW_MUSEAI_WS_URL", value)
-            elif key_lower == "access_token":
-                result.setdefault("GW_MUSEAI_ACCESS_TOKEN", value)
-            elif key_lower in ("ws_token", "websocket_token", "notary_token"):
-                result.setdefault("GW_MUSEAI_NOTARY_TOKEN", value)
-            elif key_lower == "token":
-                result.setdefault("GW_MUSEAI_ACCESS_TOKEN", value)
+        if payload is not None:
+            _process_payload(payload, result)
 
     if not result:
         raise ValueError("HAR contains no Muse.ai requests")
@@ -137,18 +138,13 @@ def _env_value(value: str) -> str:
 def _safe_path(path: str | Path) -> Path:
     if isinstance(path, str) and "\0" in path:
         raise ValueError("Invalid path: contains null byte")
-    full_path = os.path.abspath(os.path.realpath(str(path)))
-    cwd = os.path.abspath(os.getcwd())
-    temp_dir = os.path.abspath(tempfile.gettempdir())
-    home_dir = os.path.abspath(str(Path.home()))
+    target = Path(path).resolve()
+    base = Path.cwd().resolve()
+    temp_dir = Path(tempfile.gettempdir()).resolve()
 
-    in_cwd = os.path.commonpath([cwd, full_path]) == cwd
-    in_temp = os.path.commonpath([temp_dir, full_path]) == temp_dir
-    in_home = os.path.commonpath([home_dir, full_path]) == home_dir
-
-    if not (in_cwd or in_temp or in_home):
+    if not (target.is_relative_to(base) or target.is_relative_to(temp_dir)):
         raise ValueError(f"Path traversal detected: {path} is outside allowed directories")
-    return Path(full_path)
+    return target
 
 
 def update_env_file(path: str | Path, values: dict[str, str], replace: bool = False) -> None:
