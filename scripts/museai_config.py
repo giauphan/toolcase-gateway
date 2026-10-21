@@ -7,6 +7,7 @@ import argparse
 import base64
 import json
 from pathlib import Path
+import tempfile
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -132,8 +133,22 @@ def _env_value(value: str) -> str:
     return value
 
 
+def _safe_path(path: str | Path) -> Path:
+    if isinstance(path, str) and "\0" in path:
+        raise ValueError("Invalid path: contains null byte")
+    target = Path(path).resolve()
+    allowed_roots = [
+        Path.cwd().resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+        Path.home().resolve(),
+    ]
+    if not any(target.is_relative_to(root) for root in allowed_roots):
+        raise ValueError(f"Path traversal detected: {path} is outside allowed directories")
+    return target
+
+
 def update_env_file(path: str | Path, values: dict[str, str], replace: bool = False) -> None:
-    env_path = Path(path)
+    env_path = _safe_path(path)
     existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
     lines = existing.splitlines()
     positions: dict[str, int] = {}
@@ -159,10 +174,10 @@ def update_env_file(path: str | Path, values: dict[str, str], replace: bool = Fa
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Extract local Muse.ai config into an env file")
-    parser.add_argument("--har", type=Path, help="Path to a Muse.ai HAR export")
-    parser.add_argument("--cookie-file", type=Path, help="Path to a browser cookie text file")
-    parser.add_argument("--header-file", type=Path, help="Path to a DevTools copied headers text file")
-    parser.add_argument("--out", type=Path, default=Path(".env"), help="Env file to update")
+    parser.add_argument("--har", type=_safe_path, help="Path to a Muse.ai HAR export")
+    parser.add_argument("--cookie-file", type=_safe_path, help="Path to a browser cookie text file")
+    parser.add_argument("--header-file", type=_safe_path, help="Path to a DevTools copied headers text file")
+    parser.add_argument("--out", type=_safe_path, default=Path(".env"), help="Env file to update")
     parser.add_argument("--replace", action="store_true", help="Replace existing Muse.ai entries")
     return parser
 
@@ -174,15 +189,19 @@ def main(argv: list[str] | None = None) -> int:
 
     values: dict[str, str] = {}
     if args.har:
-        with args.har.open("r", encoding="utf-8") as handle:
+        har_path = _safe_path(args.har)
+        with har_path.open("r", encoding="utf-8") as handle:
             values.update(extract_from_har(json.load(handle)))
     if args.cookie_file:
-        values.update(extract_from_cookie_text(args.cookie_file.read_text(encoding="utf-8")))
+        cookie_path = _safe_path(args.cookie_file)
+        values.update(extract_from_cookie_text(cookie_path.read_text(encoding="utf-8")))
     if args.header_file:
-        values.update(extract_from_header_text(args.header_file.read_text(encoding="utf-8")))
+        header_path = _safe_path(args.header_file)
+        values.update(extract_from_header_text(header_path.read_text(encoding="utf-8")))
 
-    update_env_file(args.out, values, replace=args.replace)
-    print(f"updated {args.out} with {len(values)} Muse.ai config keys")
+    out_path = _safe_path(args.out)
+    update_env_file(out_path, values, replace=args.replace)
+    print(f"updated {out_path} with {len(values)} Muse.ai config keys")
     print("secret values were not printed")
     return 0
 

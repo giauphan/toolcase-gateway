@@ -60,7 +60,7 @@ fn video_template_surfaces_unverified_media_boundary() {
 fn video_template_reads_selected_duration_before_submission() {
     let html = include_str!("../../assets/video-template.html");
     assert!(html.contains(
-        "function duration(){return parseInt(document.getElementById(\"duration\").value,10)||10}"
+        "function duration(){return Number.parseInt(document.getElementById(\"duration\").value,10)||10}"
     ));
 }
 

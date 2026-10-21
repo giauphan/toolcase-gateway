@@ -18,7 +18,7 @@ h1{font-size:22px;margin:0 0 4px}
 .card h2{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:700}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:640px){.grid{grid-template-columns:1fr}}
-label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+label, .label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
 .req{color:var(--err);font-weight:700}
 input[type=text],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
@@ -49,27 +49,27 @@ pre{margin:0}
     <h2>Fields</h2>
     <div class="grid">
       <div class="row">
-        <label>Topic <span class="req">*</span></label>
+        <label for="topic">Topic <span class="req">*</span></label>
         <input type="text" id="topic" name="topic" placeholder="e.g. a cozy bakery at dawn">
       </div>
       <div class="row">
-        <label>Character <span class="req">*</span></label>
+        <label for="character">Character <span class="req">*</span></label>
         <input type="text" id="character" name="character" placeholder="e.g. a round orange fox baker, big eyes, apron">
       </div>
       <div class="row">
-        <label>Setting</label>
+        <label for="setting">Setting</label>
         <input type="text" id="setting" name="setting" placeholder="auto-derived from topic">
       </div>
       <div class="row">
-        <label>Action (ONE beat only)</label>
+        <label for="action">Action (ONE beat only)</label>
         <input type="text" id="action" name="action" placeholder="auto-derived from topic">
       </div>
       <div class="row">
-        <label>Camera</label>
+        <label for="camera">Camera</label>
         <input type="text" id="camera" name="camera" placeholder="slow push-in / gentle pan / static">
       </div>
       <div class="row">
-        <label>Sound</label>
+        <label for="sound">Sound</label>
         <input type="text" id="sound" name="sound" placeholder="music mood + 1-2 SFX">
       </div>
     </div>
@@ -80,8 +80,8 @@ pre{margin:0}
     <p style="color:var(--muted);margin:0 0 14px;font-size:13px">Experimental legacy Muse test harness. OpenMontage owns creative profiles and final production orchestration.</p>
 
     <div class="row">
-      <label>Aspect ratio</label>
-      <div class="pill" id="aspect">
+      <div class="label" id="aspect-label">Aspect ratio</div>
+      <div class="pill" id="aspect" role="group" aria-labelledby="aspect-label">
         <span class="chip on" data-v="9:16">9:16</span>
         <span class="chip" data-v="16:9">16:9</span>
         <span class="chip" data-v="1:1">1:1</span>
@@ -90,15 +90,15 @@ pre{margin:0}
     </div>
 
     <div class="row">
-      <label>Model <span style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-left:6px">Legacy experimental</span></label>
-      <div class="pill" id="model">
+      <div class="label" id="model-label">Model <span style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-left:6px">Legacy experimental</span></div>
+      <div class="pill" id="model" role="group" aria-labelledby="model-label">
         <span class="chip on" data-v="muse-video">Muse Video</span>
       </div>
       <p style="color:var(--muted);margin:6px 0 0;font-size:13px">Muse uses its built-in video model. Duration and aspect ratio are requests, not guaranteed output settings.</p>
     </div>
 
     <div class="row">
-      <label>Duration (seconds)</label>
+      <label for="duration">Duration (seconds)</label>
       <select id="duration">
         <option value="5">5s</option>
         <option value="10" selected>10s</option>
@@ -181,7 +181,7 @@ pre{margin:0}
     ].join("\n");
   }
 
-  function duration(){return parseInt(document.getElementById("duration").value,10)||10}
+  function duration(){return Number.parseInt(document.getElementById("duration").value,10)||10}
 
   function showVideo(url){
     var player=document.getElementById("video-player");
@@ -333,7 +333,10 @@ pre{margin:0}
       duration: duration()
     };
 
-    var id="video-"+(Date.now().toString(36))+"-"+Math.random().toString(36).slice(2);
+    var randomSuffix = (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : Array.from(window.crypto.getRandomValues(new Uint32Array(2)), function(n){ return n.toString(36); }).join("");
+    var id = "video-" + (Date.now().toString(36)) + "-" + randomSuffix;
     body.id=id;
     fetch("/muse-ai/v1/create-video", {
       method:"POST",

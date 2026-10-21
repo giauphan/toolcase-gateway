@@ -409,9 +409,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
       cfgErrMsg.style.display = 'none';
 
       const host = cfgHost.value.trim();
-      const port = parseInt(cfgPort.value, 10);
+      const port = Number.parseInt(cfgPort.value, 10);
       const defaultModel = cfgDefaultModel.value.trim();
-      const timeout = parseInt(cfgTimeout.value, 10);
+      const timeout = Number.parseInt(cfgTimeout.value, 10);
       const fallbacksRaw = cfgFallbacks.value.trim();
       const fallbacks = fallbacksRaw ? fallbacksRaw.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; }) : [];
 
@@ -420,7 +420,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
         cfgErrMsg.style.display = 'block';
         return;
       }
-      if (isNaN(port) || port <= 0 || port > 65535) {
+      if (Number.isNaN(port) || port <= 0 || port > 65535) {
         cfgErrMsg.textContent = 'Port must be between 1 and 65535.';
         cfgErrMsg.style.display = 'block';
         return;
@@ -436,7 +436,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
           target_host: host,
           target_port: port,
           default_model: defaultModel,
-          io_timeout_secs: isNaN(timeout) ? 120 : timeout,
+          io_timeout_secs: Number.isNaN(timeout) ? 120 : timeout,
           fallbacks: fallbacks
         })
       })
@@ -485,8 +485,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
         allowed_types: cfgMuseApprovalTypes && cfgMuseApprovalTypes.value.trim()
           ? cfgMuseApprovalTypes.value.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; })
           : [],
-        timeout_secs: cfgMuseApprovalTimeout && parseInt(cfgMuseApprovalTimeout.value, 10) > 0
-          ? parseInt(cfgMuseApprovalTimeout.value, 10)
+        timeout_secs: cfgMuseApprovalTimeout && Number.parseInt(cfgMuseApprovalTimeout.value, 10) > 0
+          ? Number.parseInt(cfgMuseApprovalTimeout.value, 10)
           : 30
       };
       if (cfgMuseToken.value.trim()) payload.access_token = cfgMuseToken.value.trim();

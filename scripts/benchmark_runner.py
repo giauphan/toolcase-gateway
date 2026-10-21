@@ -7,9 +7,11 @@ Benchmark comparison harness for toolcase-gateway routing modes:
 """
 
 import argparse
+import ipaddress
 import json
 import time
 import urllib.request
+from urllib.parse import urlparse
 from typing import Dict, Any, List
 
 SAMPLE_TASKS = [
@@ -34,7 +36,28 @@ SAMPLE_TASKS = [
     },
 ]
 
+def _validate_endpoint(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Invalid URL scheme: '{parsed.scheme}'. Only http and https are allowed.")
+    if not parsed.hostname:
+        raise ValueError("Invalid URL: hostname is required.")
+
+    if parsed.hostname in ("169.254.169.254", "metadata.google.internal"):
+        raise ValueError(f"Access to metadata endpoint '{parsed.hostname}' is forbidden.")
+
+    try:
+        ip = ipaddress.ip_address(parsed.hostname)
+        if ip.is_link_local:
+            raise ValueError(f"Access to link-local address '{parsed.hostname}' is forbidden.")
+    except ValueError:
+        pass
+
+    return url.rstrip("/")
+
+
 def benchmark_endpoint(name: str, base_url: str, tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    safe_base = _validate_endpoint(base_url)
     latencies = []
     successes = 0
     total = len(tasks)
@@ -43,7 +66,7 @@ def benchmark_endpoint(name: str, base_url: str, tasks: List[Dict[str, Any]]) ->
         start = time.perf_counter()
         req_data = json.dumps(task["payload"]).encode("utf-8")
         req = urllib.request.Request(
-            f"{base_url}/v1/chat/completions",
+            f"{safe_base}/v1/chat/completions",
             data=req_data,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -68,7 +91,7 @@ def benchmark_endpoint(name: str, base_url: str, tasks: List[Dict[str, Any]]) ->
 
 def main():
     parser = argparse.ArgumentParser(description="Toolcase Gateway Routing Benchmark")
-    parser.add_argument("--endpoint", default="http://127.0.0.1:20130", help="Gateway URL")
+    parser.add_argument("--endpoint", default="http://127.0.0.1:20130", type=_validate_endpoint, help="Gateway URL")
     parser.add_argument("--mode", default="A", choices=["A", "B", "C"], help="Mode identifier")
     args = parser.parse_args()
 

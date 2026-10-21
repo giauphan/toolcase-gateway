@@ -158,5 +158,10 @@ Mozilla/5.0
             if os.path.exists(ef_path):
                 os.remove(ef_path)
 
+    def test_update_env_file_rejects_path_traversal(self):
+        """Test that update_env_file rejects paths escaping allowed directories."""
+        with self.assertRaises(ValueError):
+            update_env_file("/etc/passwd", {"GW_MUSEAI_COOKIE": "evil"})
+
 if __name__ == "__main__":
     unittest.main()
