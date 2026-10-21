@@ -43,15 +43,16 @@ def _validate_endpoint(url: str) -> str:
     if not parsed.hostname:
         raise ValueError("Invalid URL: hostname is required.")
 
-    if parsed.hostname in ("169.254.169.254", "metadata.google.internal"):
+    if parsed.hostname == "metadata.google.internal":
         raise ValueError(f"Access to metadata endpoint '{parsed.hostname}' is forbidden.")
 
     try:
         ip = ipaddress.ip_address(parsed.hostname)
-        if ip.is_link_local:
-            raise ValueError(f"Access to link-local address '{parsed.hostname}' is forbidden.")
     except ValueError:
-        pass
+        ip = None
+
+    if ip is not None and ip.is_link_local:
+        raise ValueError(f"Access to link-local address '{parsed.hostname}' is forbidden.")
 
     return url.rstrip("/")
 

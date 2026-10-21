@@ -1,4 +1,4 @@
-(async () => {
+void (async () => {
   if (location.hostname !== "muse.ai" && !location.hostname.endsWith(".muse.ai")) {
     throw new Error("Run this script on https://muse.ai");
   }
@@ -128,4 +128,4 @@
   console.warn(
     "GW_MUSEAI_COOKIE can omit HttpOnly cookies. If requests fail, copy full Cookie request header from DevTools Network > /api/session > Headers."
   );
-})().catch(console.error);
+})();

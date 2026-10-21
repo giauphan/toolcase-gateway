@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 from pathlib import Path
 import tempfile
 from typing import Any
@@ -40,7 +41,7 @@ def _response_json(entry: dict[str, Any]) -> Any | None:
     if content.get("encoding") == "base64":
         try:
             text = base64.b64decode(text).decode("utf-8")
-        except (ValueError, UnicodeDecodeError):
+        except ValueError:
             return None
     try:
         return json.loads(text)
@@ -136,20 +137,27 @@ def _env_value(value: str) -> str:
 def _safe_path(path: str | Path) -> Path:
     if isinstance(path, str) and "\0" in path:
         raise ValueError("Invalid path: contains null byte")
-    target = Path(path).resolve()
-    allowed_roots = [
-        Path.cwd().resolve(),
-        Path(tempfile.gettempdir()).resolve(),
-        Path.home().resolve(),
-    ]
-    if not any(target.is_relative_to(root) for root in allowed_roots):
+    full_path = os.path.abspath(os.path.realpath(str(path)))
+    cwd = os.path.abspath(os.getcwd())
+    temp_dir = os.path.abspath(tempfile.gettempdir())
+    home_dir = os.path.abspath(str(Path.home()))
+
+    in_cwd = os.path.commonpath([cwd, full_path]) == cwd
+    in_temp = os.path.commonpath([temp_dir, full_path]) == temp_dir
+    in_home = os.path.commonpath([home_dir, full_path]) == home_dir
+
+    if not (in_cwd or in_temp or in_home):
         raise ValueError(f"Path traversal detected: {path} is outside allowed directories")
-    return target
+    return Path(full_path)
 
 
 def update_env_file(path: str | Path, values: dict[str, str], replace: bool = False) -> None:
     env_path = _safe_path(path)
-    existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    existing = ""
+    if env_path.is_file():
+        with open(env_path, "r", encoding="utf-8") as handle:
+            existing = handle.read()
+
     lines = existing.splitlines()
     positions: dict[str, int] = {}
 
@@ -169,7 +177,9 @@ def update_env_file(path: str | Path, values: dict[str, str], replace: bool = Fa
         else:
             lines.append(line)
 
-    env_path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    content = "\n".join(lines).rstrip("\n") + "\n"
+    with open(env_path, "w", encoding="utf-8") as handle:
+        handle.write(content)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -190,14 +200,16 @@ def main(argv: list[str] | None = None) -> int:
     values: dict[str, str] = {}
     if args.har:
         har_path = _safe_path(args.har)
-        with har_path.open("r", encoding="utf-8") as handle:
+        with open(har_path, "r", encoding="utf-8") as handle:
             values.update(extract_from_har(json.load(handle)))
     if args.cookie_file:
         cookie_path = _safe_path(args.cookie_file)
-        values.update(extract_from_cookie_text(cookie_path.read_text(encoding="utf-8")))
+        with open(cookie_path, "r", encoding="utf-8") as handle:
+            values.update(extract_from_cookie_text(handle.read()))
     if args.header_file:
         header_path = _safe_path(args.header_file)
-        values.update(extract_from_header_text(header_path.read_text(encoding="utf-8")))
+        with open(header_path, "r", encoding="utf-8") as handle:
+            values.update(extract_from_header_text(handle.read()))
 
     out_path = _safe_path(args.out)
     update_env_file(out_path, values, replace=args.replace)
