@@ -82,16 +82,9 @@ fn test_framework_multi_stream_logging() {
     // Info message should NOT be in error.log
     assert!(!err_content.contains("Server successfully bound"));
 
-    // 3. Access log
-    logger.log_access("POST", "/muse-ai/v1/create-video", "192.168.1.100");
+    // 3. Verify access.log is NOT created
     let acc_file = test_dir.join("access.log");
-    let daily_acc_file = test_dir.join(format!("access-{today}.log"));
-    assert!(acc_file.is_file(), "access.log must exist");
-    assert!(daily_acc_file.is_file(), "access-YYYY-MM-DD.log must exist");
-    let acc_content = fs::read_to_string(&acc_file).unwrap();
-    assert!(acc_content.contains("[ACCESS]"));
-    assert!(acc_content.contains("POST /muse-ai/v1/create-video"));
-    assert!(acc_content.contains("192.168.1.100"));
+    assert!(!acc_file.exists(), "access.log must not be created");
 
     let _ = fs::remove_dir_all(test_dir);
 }
@@ -145,10 +138,10 @@ fn test_logger_concurrent_writes() {
                         &format!("thread iteration error {i}"),
                     );
                 } else {
-                    logger_clone.log_access(
-                        "GET",
-                        &format!("/api/test/{i}"),
-                        &format!("10.0.0.{t}"),
+                    logger_clone.log(
+                        "INFO",
+                        &format!("worker_{t}"),
+                        &format!("thread iteration info {i}"),
                     );
                 }
             }
@@ -162,19 +155,15 @@ fn test_logger_concurrent_writes() {
 
     let gw_file = test_dir.join("gateway.log");
     let err_file = test_dir.join("error.log");
-    let acc_file = test_dir.join("access.log");
 
     assert!(gw_file.is_file());
     assert!(err_file.is_file());
-    assert!(acc_file.is_file());
 
     let gw_lines = fs::read_to_string(&gw_file).unwrap().lines().count();
     let err_lines = fs::read_to_string(&err_file).unwrap().lines().count();
-    let acc_lines = fs::read_to_string(&acc_file).unwrap().lines().count();
 
     assert_eq!(gw_lines, thread_count * iterations_per_thread);
     assert_eq!(err_lines, thread_count * (iterations_per_thread / 2));
-    assert_eq!(acc_lines, thread_count * (iterations_per_thread / 2));
 
     let _ = fs::remove_dir_all(test_dir);
 }

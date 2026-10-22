@@ -100,12 +100,6 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
         .unwrap_or("")
         .trim_end_matches('/');
 
-    let peer_ip = client
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| "-".into());
-    crate::runtime::logger::log_access(&request.method, &request.path, &peer_ip);
-
     if request.method.eq_ignore_ascii_case("options") {
         return handle_cors_preflight(&mut client);
     }

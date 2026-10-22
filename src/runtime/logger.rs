@@ -57,8 +57,6 @@ struct LogWriter {
     daily_gateway_file: Option<File>,
     error_file: Option<File>,
     daily_error_file: Option<File>,
-    access_file: Option<File>,
-    daily_access_file: Option<File>,
 }
 
 impl Logger {
@@ -71,8 +69,6 @@ impl Logger {
                 daily_gateway_file: None,
                 error_file: None,
                 daily_error_file: None,
-                access_file: None,
-                daily_access_file: None,
             }),
         }
     }
@@ -80,12 +76,6 @@ impl Logger {
     pub fn log(&self, level: &str, target: &str, msg: &str) {
         if let Ok(mut writer) = self.inner.lock() {
             writer.write_entry(level, target, msg);
-        }
-    }
-
-    pub fn log_access(&self, method: &str, path: &str, client_ip: &str) {
-        if let Ok(mut writer) = self.inner.lock() {
-            writer.write_access_entry(method, path, client_ip);
         }
     }
 
@@ -135,7 +125,6 @@ impl LogWriter {
             self.current_date = today.to_string();
             self.daily_gateway_file = None;
             self.daily_error_file = None;
-            self.daily_access_file = None;
         }
     }
 
@@ -185,58 +174,12 @@ impl LogWriter {
         }
     }
 
-    fn write_access_entry(&mut self, method: &str, path: &str, client_ip: &str) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let ts = format_timestamp(now);
-        let today = format_date(now);
-        self.check_date_roll(&today);
-
-        let sanitized_path = sanitize_log_message(path);
-        let line = format!("[{ts}] [ACCESS] {client_ip} \"{method} {sanitized_path}\"\n");
-
-        if self.config.console {
-            eprint!("{line}");
-        }
-
-        if self.config.enabled {
-            // 1. Access logs
-            write_line(&mut self.access_file, &self.config.dir, "access.log", &line);
-            if self.config.daily {
-                let daily_acc = format!("access-{today}.log");
-                write_line(
-                    &mut self.daily_access_file,
-                    &self.config.dir,
-                    &daily_acc,
-                    &line,
-                );
-            }
-
-            // 2. Also mirror to gateway log
-            let main_name = self.config.file_name.clone();
-            write_line(&mut self.gateway_file, &self.config.dir, &main_name, &line);
-            if self.config.daily {
-                let daily_name = format!("gateway-{today}.log");
-                write_line(
-                    &mut self.daily_gateway_file,
-                    &self.config.dir,
-                    &daily_name,
-                    &line,
-                );
-            }
-        }
-    }
-
     fn set_dir(&mut self, dir: PathBuf) {
         self.config.dir = dir;
         self.gateway_file = None;
         self.daily_gateway_file = None;
         self.error_file = None;
         self.daily_error_file = None;
-        self.access_file = None;
-        self.daily_access_file = None;
     }
 }
 
@@ -249,11 +192,6 @@ pub fn default_logger() -> &'static Logger {
 /// Log a message with a given level and subsystem target to the global logger.
 pub fn log_message(level: &str, target: &str, msg: &str) {
     default_logger().log(level, target, msg);
-}
-
-/// Log an HTTP request access entry to the global logger.
-pub fn log_access(method: &str, path: &str, client_ip: &str) {
-    default_logger().log_access(method, path, client_ip);
 }
 
 /// Set the log output directory at runtime for the global logger.
