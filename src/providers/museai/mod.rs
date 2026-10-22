@@ -14,8 +14,8 @@ pub use approval::{ApprovalCoordinator, CoordinateResult, MuseSentinelClient, Se
 pub use chat::request_museai_chat_completion;
 pub use handlers::{
     handle_create_video, handle_create_video_request, handle_get_video, handle_get_video_content,
-    handle_get_video_request, handle_museai_thread_cleanup, handle_museai_v1,
-    handle_update_video_prompt, is_sync_requested, write_chat_completion,
+    handle_get_video_request, handle_museai_chat_completions, handle_museai_thread_cleanup,
+    handle_museai_v1, handle_update_video_prompt, is_sync_requested, write_chat_completion,
 };
 pub use lifecycle::{
     append_job_revision, is_submitting_stale, list_video_jobs, load_video_job,

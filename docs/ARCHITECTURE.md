@@ -54,7 +54,8 @@ Dispatch in `src/routes.rs` is **exclusive and fail-closed**: a request matching
 | `/v1/chat/completions` | OmniRoute | `POST` | OpenAI-compatible chat completions with model failover |
 | `/prism-openai/v1/chat/completions` | Prism | `POST` | Direct Prism raw OpenAI completion endpoint |
 | `/muse-ai/models`, `/muse-ai/v1/models` | Muse AI | `GET` | Local Muse model catalog (`muse`) |
-| `/muse-ai/v1` | Muse AI | `POST` | Streaming chat completions over Noise encrypted transport |
+| `/muse-ai/v1/chat/completions` | Muse AI | `POST` | Dedicated Muse chat completions over Noise encrypted transport |
+| `/muse-ai/v1` | Muse AI | `POST` | Raw Muse REST proxy endpoint |
 | `/muse-ai/v1/create-video` | Muse Video | `POST` | Video creation task submission |
 | `/muse-ai/v1/videos/{id}` | Muse Video | `GET`, `POST` | Video job polling (`GET`) or edit prompt revision (`POST`) |
 | `/muse-ai/v1/threads/{id}/cleanup` | Muse Threads | `POST` | Background worker thread registration and cleanup |

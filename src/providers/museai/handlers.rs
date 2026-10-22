@@ -17,13 +17,63 @@ pub fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Resu
     client.flush()
 }
 
+pub fn handle_museai_chat_completions(
+    client: &mut TcpStream,
+    request_body: &[u8],
+    config: &Config,
+) -> io::Result<()> {
+    match crate::providers::museai::chat::request_museai_chat_completion(
+        request_body,
+        config,
+        false,
+    ) {
+        Ok(response) => write_chat_completion(client, &response),
+        Err(err) => {
+            if err
+                .get_ref()
+                .and_then(|e| e.downcast_ref::<MuseApprovalRequired>())
+                .is_some()
+            {
+                return crate::http::write_error(
+                    client,
+                    409,
+                    "Conflict",
+                    &format!("Muse chat completion requires scoped approval: {err}"),
+                );
+            }
+            let (status, reason) = match err.kind() {
+                io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
+                io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
+                io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
+                _ => (502, "Bad Gateway"),
+            };
+            crate::http::write_error(
+                client,
+                status,
+                reason,
+                &format!("Muse chat completion failed: {err}"),
+            )
+        }
+    }
+}
+
 pub fn handle_museai_v1(
     client: &mut TcpStream,
     request_body: &[u8],
     config: &Config,
 ) -> io::Result<()> {
     let (url, method, body_json) =
-        crate::providers::museai::business::build_museai_request(request_body, config)?;
+        match crate::providers::museai::business::build_museai_request(request_body, config) {
+            Ok(tuple) => tuple,
+            Err(e) => {
+                return crate::http::write_error(
+                    client,
+                    400,
+                    "Bad Request",
+                    &format!("Invalid Muse request: {e}"),
+                );
+            }
+        };
 
     let result = send_museai_request(&url, &method, &body_json, config);
 

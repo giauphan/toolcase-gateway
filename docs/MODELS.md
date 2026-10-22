@@ -29,7 +29,7 @@ graph TD
     Client["Client Request"] --> Router{"Inspect Model & Path"}
     
     Router -->|"Model: gpt-5.6-sol*<br>Route: /v1/chat/completions"| OmniRoute["OmniRoute Proxy<br>(Prism / OpenAI)"]
-    Router -->|"Model: muse<br>Route: /v1/chat/completions or /muse-ai/v1"| MuseChat["Muse CVM Chat<br>(Noise XX WebSocket)"]
+    Router -->|"Model: muse<br>Route: /muse-ai/v1/chat/completions or /v1/chat/completions"| MuseChat["Muse CVM Chat<br>(Noise XX WebSocket)"]
     Router -->|"Model: muse-video / gen-*<br>Route: /muse-ai/v1/create-video"| MuseVideo["Muse Video Studio<br>(Durable Job Tracking)"]
     Router -->|"Model: jev-1.13<br>Route: /jev/v1/systemone"| JevEngine["Jev Decision Engine<br>(Account Pool Rotation)"]
 ```
@@ -37,7 +37,7 @@ graph TD
 ### Routing Rules
 
 1. **Conversational Chat Models (`gpt-5.6-sol*`, `muse`)**:
-   - Must be dispatched to `POST /v1/chat/completions`.
+   - `muse` can be dispatched directly to `POST /muse-ai/v1/chat/completions` or globally to `POST /v1/chat/completions`.
    - Support tool definitions, stream deltas, and automatic tool-name casing restoration.
    - If `muse` encounters a connection failure, OmniRoute automatically retries using fallback models configured in `GW_FALLBACK_MODELS`.
 
@@ -92,6 +92,17 @@ The `muse` model routes standard OpenAI requests through a native, end-to-end en
 
 #### Example Request
 ```bash
+# Dedicated Muse chat completions route
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "muse",
+    "messages": [
+      {"role": "user", "content": "Reply with MUSE_OK"}
+    ]
+  }'
+
+# Or via global OpenAI completions route
 curl -X POST http://127.0.0.1:20129/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{

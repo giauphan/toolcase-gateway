@@ -248,6 +248,19 @@ fn route_request_impl(
         };
     }
 
+    if clean_path == "/muse-ai/v1/chat/completions" || clean_path == "/muse-ai/chat/completions" {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::museai::handle_museai_chat_completions(client, &request.body, config)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Muse chat completions only support POST",
+            )
+        };
+    }
+
     if clean_path == "/muse-ai/v1" {
         return if request.method.eq_ignore_ascii_case("post") {
             crate::museai::handle_museai_v1(client, &request.body, config)
@@ -256,7 +269,7 @@ fn route_request_impl(
                 client,
                 405,
                 "Method Not Allowed",
-                "Muse chat completions only support POST",
+                "Muse endpoint only supports POST",
             )
         };
     }
