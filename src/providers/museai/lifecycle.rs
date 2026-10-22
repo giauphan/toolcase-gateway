@@ -243,11 +243,26 @@ pub fn evaluate_job_retention(record: &VideoJobRecord, now: u64, ttl_secs: u64) 
 }
 
 pub fn cleanup_expired_video_jobs(ttl_secs: u64) -> io::Result<usize> {
+    cleanup_expired_video_jobs_with_callback(ttl_secs, |_| {})
+}
+
+pub fn cleanup_expired_video_jobs_with_callback<F>(
+    ttl_secs: u64,
+    mut on_delete: F,
+) -> io::Result<usize>
+where
+    F: FnMut(&VideoJobRecord),
+{
     let jobs = list_video_jobs()?;
     let now = now_secs();
     let mut cleaned = 0;
     for job in jobs {
         if evaluate_job_retention(&job, now, ttl_secs) {
+            on_delete(&job);
+            let media_path = crate::providers::museai::video::video_media_path(&job.job_id);
+            if media_path.is_file() {
+                let _ = fs::remove_file(media_path);
+            }
             let path = job_file_path(&job.job_id)?;
             if fs::remove_file(path).is_ok() {
                 cleaned += 1;

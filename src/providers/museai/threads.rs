@@ -97,10 +97,52 @@ pub fn cleanup_tracked_threads_once() -> usize {
     deleted_count
 }
 
+pub fn cleanup_cycle_once() -> (usize, usize) {
+    let threads_cleaned = cleanup_tracked_threads_once();
+
+    let ttl_secs = std::env::var("GW_MUSEAI_THREAD_RETENTION_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(172800);
+
+    let base_url =
+        std::env::var("GW_MUSEAI_BASE_URL").unwrap_or_else(|_| "https://muse.ai".to_string());
+    let cookie = std::env::var("GW_MUSEAI_COOKIE").unwrap_or_default();
+
+    let jobs_cleaned =
+        super::lifecycle::cleanup_expired_video_jobs_with_callback(ttl_secs, |job| {
+            if let Some(ref tid) = job.thread_id {
+                let cfg = Config {
+                    museai_base_url: base_url.clone(),
+                    museai_cookie: cookie.clone(),
+                    ..Default::default()
+                };
+                let _ = delete_muse_thread(&base_url, tid, &cfg);
+            }
+        })
+        .unwrap_or(0);
+
+    if threads_cleaned > 0 || jobs_cleaned > 0 {
+        eprintln!(
+            "[museai:cleanup] automatic cycle purged {threads_cleaned} tracked threads and {jobs_cleaned} expired jobs"
+        );
+    }
+
+    (threads_cleaned, jobs_cleaned)
+}
+
 pub fn start_cleanup_worker() {
-    thread::spawn(|| loop {
-        thread::sleep(Duration::from_secs(300));
-        cleanup_tracked_threads_once();
+    start_cleanup_worker_with_interval(Duration::from_secs(300));
+}
+
+pub fn start_cleanup_worker_with_interval(interval: Duration) {
+    eprintln!(
+        "[museai:cleanup] background cleanup daemon worker started (interval: {:?})",
+        interval
+    );
+    thread::spawn(move || loop {
+        thread::sleep(interval);
+        cleanup_cycle_once();
     });
 }
 

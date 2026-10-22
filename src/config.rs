@@ -182,7 +182,7 @@ impl Default for Config {
             museai_notary_token: "".into(),
             museai_vm_id: "".into(),
             museai_auto_cleanup_threads: true,
-            museai_thread_retention_secs: 86400,
+            museai_thread_retention_secs: 172800,
             jev_api_keys: vec![],
             jev_base_url: "https://jev-ai.org".into(),
             routing_mode: RoutingMode::Existing,

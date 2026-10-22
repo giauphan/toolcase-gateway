@@ -56,9 +56,9 @@ pub fn run() -> io::Result<()> {
         museai_auto_cleanup_threads: env_or("GW_MUSEAI_AUTO_CLEANUP_THREADS", "true")
             .parse()
             .unwrap_or(true),
-        museai_thread_retention_secs: env_or("GW_MUSEAI_THREAD_RETENTION_SECS", "86400")
+        museai_thread_retention_secs: env_or("GW_MUSEAI_THREAD_RETENTION_SECS", "172800")
             .parse()
-            .unwrap_or(86400),
+            .unwrap_or(172800),
         jev_api_keys: crate::config::parse_jev_api_keys(&env_or("GW_JEV_API_KEYS", "")),
         jev_base_url: env_or("GW_JEV_BASE_URL", "https://jev-ai.org"),
         routing_mode: match env_or("GW_ROUTING_MODE", "existing").as_str() {

@@ -47,5 +47,42 @@ fn cleanup_expired_video_jobs_removes_only_eligible_records() {
     assert!(load_video_job(&pinned_id).is_ok());
     assert!(load_video_job(&active_id).is_ok());
 
+    // Also verify cleanup_cycle_once purges expired jobs and associated media files
+    std::env::set_var("GW_MUSEAI_THREAD_RETENTION_SECS", "1");
+    let cycle_expired_id = format!("video-cycle-expired-{}", uuid::Uuid::new_v4());
+    let _ =
+        toolcase_gateway::museai::video::save_video_media(&cycle_expired_id, b"dummy mp4 media");
+    assert!(toolcase_gateway::museai::video::has_video_media(
+        &cycle_expired_id
+    ));
+
+    save_video_job(&VideoJobRecord {
+        job_id: cycle_expired_id.clone(),
+        owner_id: "user-cleanup".into(),
+        model: "muse-video".into(),
+        requested_model: "muse-video".into(),
+        prompt: "cycle test".into(),
+        aspect_ratio: "16:9".into(),
+        duration: 5,
+        thread_id: Some("thread-mock-expired".into()),
+        created_at: 1,
+        last_activity_at: 1,
+        pinned: false,
+        status: "completed".into(),
+        media_validated: true,
+        output_verified: true,
+        video_url: format!("/muse-ai/v1/videos/{cycle_expired_id}/content"),
+        revisions: vec![],
+        ..Default::default()
+    })
+    .unwrap();
+
+    let (_threads_cleaned, jobs_cleaned) = toolcase_gateway::museai::cleanup_cycle_once();
+    assert!(jobs_cleaned >= 1);
+    assert!(load_video_job(&cycle_expired_id).is_err());
+    assert!(!toolcase_gateway::museai::video::has_video_media(
+        &cycle_expired_id
+    ));
+
     std::fs::remove_dir_all(state_dir).unwrap();
 }
