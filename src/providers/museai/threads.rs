@@ -122,12 +122,13 @@ pub fn cleanup_cycle_once() -> (usize, usize) {
         })
         .unwrap_or(0);
 
-    if threads_cleaned > 0 || jobs_cleaned > 0 {
+    let logs_cleaned = crate::runtime::logger::cleanup_expired_logs_default().unwrap_or(0);
+    if threads_cleaned > 0 || jobs_cleaned > 0 || logs_cleaned > 0 {
         crate::runtime::logger::log_message(
             "INFO",
             "museai:cleanup",
             &format!(
-                "automatic cycle purged {threads_cleaned} tracked threads and {jobs_cleaned} expired jobs"
+                "automatic cycle purged {threads_cleaned} tracked threads, {jobs_cleaned} expired jobs, and {logs_cleaned} expired log files"
             ),
         );
     }

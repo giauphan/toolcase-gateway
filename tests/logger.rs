@@ -2,19 +2,22 @@ use std::fs;
 use std::sync::Arc;
 use std::thread;
 use toolcase_gateway::runtime::logger::{
-    format_timestamp, sanitize_log_message, LogConfig, Logger,
+    cleanup_expired_logs, format_date, format_timestamp, sanitize_log_message, LogConfig, Logger,
 };
 
 #[test]
-fn test_timestamp_formatting() {
-    // 0 is 1970-01-01T00:00:00Z
+fn test_timestamp_and_date_formatting() {
     assert_eq!(format_timestamp(0), "1970-01-01T00:00:00Z");
+    assert_eq!(format_date(0), "1970-01-01");
 
-    // 1792641171 (from previous session timestamps in 2026)
     let ts = format_timestamp(1792641171);
     assert!(ts.starts_with("2026-"));
     assert!(ts.ends_with('Z'));
     assert_eq!(ts.len(), 20);
+
+    let d = format_date(1792641171);
+    assert_eq!(d.len(), 10);
+    assert!(ts.starts_with(&d));
 }
 
 #[test]
@@ -36,29 +39,80 @@ fn test_sanitize_log_message() {
 }
 
 #[test]
-fn test_logger_creates_directory_and_writes_file() {
-    let test_dir = std::env::temp_dir().join(format!("gw_log_test_{}", uuid::Uuid::new_v4()));
+fn test_framework_multi_stream_logging() {
+    let test_dir = std::env::temp_dir().join(format!("gw_multi_log_test_{}", uuid::Uuid::new_v4()));
     let logger = Logger::new(LogConfig {
         enabled: true,
         console: false,
+        daily: true,
         dir: test_dir.clone(),
         file_name: "gateway.log".to_string(),
+        retention_days: 14,
     });
 
-    let test_msg = "Gateway server test initialization message";
-    logger.log("INFO", "test_target", test_msg);
-
-    let log_file = test_dir.join("gateway.log");
-    assert!(
-        log_file.is_file(),
-        "Expected log file to exist at {:?}",
-        log_file
+    let today = format_date(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
     );
 
-    let content = fs::read_to_string(&log_file).unwrap();
-    assert!(content.contains("[INFO]"));
-    assert!(content.contains("[test_target]"));
-    assert!(content.contains(test_msg));
+    // 1. Info log
+    logger.log("INFO", "server", "Server successfully bound on port 20129");
+    let gw_file = test_dir.join("gateway.log");
+    let daily_gw_file = test_dir.join(format!("gateway-{today}.log"));
+    assert!(gw_file.is_file(), "gateway.log must exist");
+    assert!(daily_gw_file.is_file(), "gateway-YYYY-MM-DD.log must exist");
+    let gw_content = fs::read_to_string(&gw_file).unwrap();
+    assert!(gw_content.contains("[INFO]"));
+    assert!(gw_content.contains("Server successfully bound on port 20129"));
+
+    // 2. Error and Warning logs
+    logger.log("WARN", "proxy", "Upstream target returned 429 slow down");
+    logger.log("ERROR", "handler", "Database connection reset");
+    let err_file = test_dir.join("error.log");
+    let daily_err_file = test_dir.join(format!("error-{today}.log"));
+    assert!(err_file.is_file(), "error.log must exist");
+    assert!(daily_err_file.is_file(), "error-YYYY-MM-DD.log must exist");
+    let err_content = fs::read_to_string(&err_file).unwrap();
+    assert!(err_content.contains("[WARN]"));
+    assert!(err_content.contains("[ERROR]"));
+    assert!(err_content.contains("Upstream target returned 429"));
+    assert!(err_content.contains("Database connection reset"));
+    // Info message should NOT be in error.log
+    assert!(!err_content.contains("Server successfully bound"));
+
+    // 3. Access log
+    logger.log_access("POST", "/muse-ai/v1/create-video", "192.168.1.100");
+    let acc_file = test_dir.join("access.log");
+    let daily_acc_file = test_dir.join(format!("access-{today}.log"));
+    assert!(acc_file.is_file(), "access.log must exist");
+    assert!(daily_acc_file.is_file(), "access-YYYY-MM-DD.log must exist");
+    let acc_content = fs::read_to_string(&acc_file).unwrap();
+    assert!(acc_content.contains("[ACCESS]"));
+    assert!(acc_content.contains("POST /muse-ai/v1/create-video"));
+    assert!(acc_content.contains("192.168.1.100"));
+
+    let _ = fs::remove_dir_all(test_dir);
+}
+
+#[test]
+fn test_cleanup_expired_daily_logs() {
+    let test_dir =
+        std::env::temp_dir().join(format!("gw_cleanup_log_test_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&test_dir).unwrap();
+
+    // Create an active log and an old daily log
+    let active_log = test_dir.join("gateway.log");
+    let old_daily_log = test_dir.join("gateway-2020-01-01.log");
+    fs::write(&active_log, b"active content").unwrap();
+    fs::write(&old_daily_log, b"old content").unwrap();
+
+    // With retention 0, nothing is cleaned
+    assert_eq!(cleanup_expired_logs(&test_dir, 0).unwrap(), 0);
+
+    // Primary gateway.log must never be deleted
+    assert!(active_log.is_file());
 
     let _ = fs::remove_dir_all(test_dir);
 }
@@ -70,8 +124,10 @@ fn test_logger_concurrent_writes() {
     let logger = Arc::new(Logger::new(LogConfig {
         enabled: true,
         console: false,
+        daily: true,
         dir: test_dir.clone(),
         file_name: "gateway.log".to_string(),
+        retention_days: 14,
     }));
 
     let thread_count = 10;
@@ -82,11 +138,19 @@ fn test_logger_concurrent_writes() {
         let logger_clone = Arc::clone(&logger);
         let handle = thread::spawn(move || {
             for i in 0..iterations_per_thread {
-                logger_clone.log(
-                    "DEBUG",
-                    &format!("worker_{t}"),
-                    &format!("thread iteration message {i}"),
-                );
+                if i % 2 == 0 {
+                    logger_clone.log(
+                        "ERROR",
+                        &format!("worker_{t}"),
+                        &format!("thread iteration error {i}"),
+                    );
+                } else {
+                    logger_clone.log_access(
+                        "GET",
+                        &format!("/api/test/{i}"),
+                        &format!("10.0.0.{t}"),
+                    );
+                }
             }
         });
         handles.push(handle);
@@ -96,12 +160,21 @@ fn test_logger_concurrent_writes() {
         h.join().unwrap();
     }
 
-    let log_file = test_dir.join("gateway.log");
-    assert!(log_file.is_file());
+    let gw_file = test_dir.join("gateway.log");
+    let err_file = test_dir.join("error.log");
+    let acc_file = test_dir.join("access.log");
 
-    let content = fs::read_to_string(&log_file).unwrap();
-    let lines: Vec<&str> = content.lines().collect();
-    assert_eq!(lines.len(), thread_count * iterations_per_thread);
+    assert!(gw_file.is_file());
+    assert!(err_file.is_file());
+    assert!(acc_file.is_file());
+
+    let gw_lines = fs::read_to_string(&gw_file).unwrap().lines().count();
+    let err_lines = fs::read_to_string(&err_file).unwrap().lines().count();
+    let acc_lines = fs::read_to_string(&acc_file).unwrap().lines().count();
+
+    assert_eq!(gw_lines, thread_count * iterations_per_thread);
+    assert_eq!(err_lines, thread_count * (iterations_per_thread / 2));
+    assert_eq!(acc_lines, thread_count * (iterations_per_thread / 2));
 
     let _ = fs::remove_dir_all(test_dir);
 }

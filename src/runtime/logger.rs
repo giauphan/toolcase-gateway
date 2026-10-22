@@ -1,8 +1,8 @@
-//! Thread-safe file and console logging infrastructure.
+//! Thread-safe multi-stream framework logging infrastructure.
 #![forbid(unsafe_code)]
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,8 +11,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct LogConfig {
     pub enabled: bool,
     pub console: bool,
+    pub daily: bool,
     pub dir: PathBuf,
     pub file_name: String,
+    pub retention_days: u64,
 }
 
 impl Default for LogConfig {
@@ -23,14 +25,23 @@ impl Default for LogConfig {
         let console = std::env::var("GW_LOG_CONSOLE")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(true);
+        let daily = std::env::var("GW_LOG_DAILY")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(true);
         let dir = PathBuf::from(std::env::var("GW_LOG_DIR").unwrap_or_else(|_| "logs".to_string()));
         let file_name = std::env::var("GW_LOG_FILE").unwrap_or_else(|_| "gateway.log".to_string());
+        let retention_days = std::env::var("GW_LOG_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(14);
 
         Self {
             enabled,
             console,
+            daily,
             dir,
             file_name,
+            retention_days,
         }
     }
 }
@@ -41,13 +52,28 @@ pub struct Logger {
 
 struct LogWriter {
     config: LogConfig,
-    file: Option<File>,
+    current_date: String,
+    gateway_file: Option<File>,
+    daily_gateway_file: Option<File>,
+    error_file: Option<File>,
+    daily_error_file: Option<File>,
+    access_file: Option<File>,
+    daily_access_file: Option<File>,
 }
 
 impl Logger {
     pub fn new(config: LogConfig) -> Self {
         Self {
-            inner: Mutex::new(LogWriter { config, file: None }),
+            inner: Mutex::new(LogWriter {
+                config,
+                current_date: String::new(),
+                gateway_file: None,
+                daily_gateway_file: None,
+                error_file: None,
+                daily_error_file: None,
+                access_file: None,
+                daily_access_file: None,
+            }),
         }
     }
 
@@ -57,20 +83,71 @@ impl Logger {
         }
     }
 
+    pub fn log_access(&self, method: &str, path: &str, client_ip: &str) {
+        if let Ok(mut writer) = self.inner.lock() {
+            writer.write_access_entry(method, path, client_ip);
+        }
+    }
+
     pub fn set_dir<P: AsRef<Path>>(&self, dir: P) {
         if let Ok(mut writer) = self.inner.lock() {
             writer.set_dir(dir.as_ref().to_path_buf());
         }
     }
+
+    pub fn cleanup_logs(&self) -> io::Result<usize> {
+        if let Ok(writer) = self.inner.lock() {
+            cleanup_expired_logs(&writer.config.dir, writer.config.retention_days)
+        } else {
+            Ok(0)
+        }
+    }
+}
+
+fn open_append(dir: &Path, filename: &str) -> Option<File> {
+    if let Err(e) = fs::create_dir_all(dir) {
+        eprintln!("[logger] failed to create log dir {:?}: {e}", dir);
+        return None;
+    }
+    let path = dir.join(filename);
+    match OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            eprintln!("[logger] failed to open log file {:?}: {e}", path);
+            None
+        }
+    }
+}
+
+fn write_line(file: &mut Option<File>, dir: &Path, filename: &str, line: &str) {
+    if file.is_none() {
+        *file = open_append(dir, filename);
+    }
+    if let Some(ref mut f) = file {
+        let _ = f.write_all(line.as_bytes());
+        let _ = f.flush();
+    }
 }
 
 impl LogWriter {
+    fn check_date_roll(&mut self, today: &str) {
+        if self.current_date != today {
+            self.current_date = today.to_string();
+            self.daily_gateway_file = None;
+            self.daily_error_file = None;
+            self.daily_access_file = None;
+        }
+    }
+
     fn write_entry(&mut self, level: &str, target: &str, msg: &str) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
         let ts = format_timestamp(now);
+        let today = format_date(now);
+        self.check_date_roll(&today);
+
         let sanitized = sanitize_log_message(msg);
         let line = format!("[{ts}] [{level}] [{target}] {sanitized}\n");
 
@@ -79,42 +156,87 @@ impl LogWriter {
         }
 
         if self.config.enabled {
-            self.write_to_file(&line);
-        }
-    }
-
-    fn write_to_file(&mut self, line: &str) {
-        if self.file.is_none() {
-            if let Err(e) = fs::create_dir_all(&self.config.dir) {
-                eprintln!(
-                    "[logger] failed to create log dir {:?}: {e}",
-                    self.config.dir
+            // 1. General gateway logs
+            let main_name = self.config.file_name.clone();
+            write_line(&mut self.gateway_file, &self.config.dir, &main_name, &line);
+            if self.config.daily {
+                let daily_name = format!("gateway-{today}.log");
+                write_line(
+                    &mut self.daily_gateway_file,
+                    &self.config.dir,
+                    &daily_name,
+                    &line,
                 );
-                return;
             }
-            let file_path = self.config.dir.join(&self.config.file_name);
-            match OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&file_path)
-            {
-                Ok(f) => self.file = Some(f),
-                Err(e) => {
-                    eprintln!("[logger] failed to open log file {:?}: {e}", file_path);
-                    return;
+
+            // 2. Error streams for WARN and ERROR
+            if level.eq_ignore_ascii_case("warn") || level.eq_ignore_ascii_case("error") {
+                write_line(&mut self.error_file, &self.config.dir, "error.log", &line);
+                if self.config.daily {
+                    let daily_err = format!("error-{today}.log");
+                    write_line(
+                        &mut self.daily_error_file,
+                        &self.config.dir,
+                        &daily_err,
+                        &line,
+                    );
                 }
             }
         }
+    }
 
-        if let Some(ref mut f) = self.file {
-            let _ = f.write_all(line.as_bytes());
-            let _ = f.flush();
+    fn write_access_entry(&mut self, method: &str, path: &str, client_ip: &str) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let ts = format_timestamp(now);
+        let today = format_date(now);
+        self.check_date_roll(&today);
+
+        let sanitized_path = sanitize_log_message(path);
+        let line = format!("[{ts}] [ACCESS] {client_ip} \"{method} {sanitized_path}\"\n");
+
+        if self.config.console {
+            eprint!("{line}");
+        }
+
+        if self.config.enabled {
+            // 1. Access logs
+            write_line(&mut self.access_file, &self.config.dir, "access.log", &line);
+            if self.config.daily {
+                let daily_acc = format!("access-{today}.log");
+                write_line(
+                    &mut self.daily_access_file,
+                    &self.config.dir,
+                    &daily_acc,
+                    &line,
+                );
+            }
+
+            // 2. Also mirror to gateway log
+            let main_name = self.config.file_name.clone();
+            write_line(&mut self.gateway_file, &self.config.dir, &main_name, &line);
+            if self.config.daily {
+                let daily_name = format!("gateway-{today}.log");
+                write_line(
+                    &mut self.daily_gateway_file,
+                    &self.config.dir,
+                    &daily_name,
+                    &line,
+                );
+            }
         }
     }
 
     fn set_dir(&mut self, dir: PathBuf) {
         self.config.dir = dir;
-        self.file = None;
+        self.gateway_file = None;
+        self.daily_gateway_file = None;
+        self.error_file = None;
+        self.daily_error_file = None;
+        self.access_file = None;
+        self.daily_access_file = None;
     }
 }
 
@@ -129,12 +251,28 @@ pub fn log_message(level: &str, target: &str, msg: &str) {
     default_logger().log(level, target, msg);
 }
 
+/// Log an HTTP request access entry to the global logger.
+pub fn log_access(method: &str, path: &str, client_ip: &str) {
+    default_logger().log_access(method, path, client_ip);
+}
+
 /// Set the log output directory at runtime for the global logger.
 pub fn set_log_dir<P: AsRef<Path>>(dir: P) {
     default_logger().set_dir(dir);
 }
 
-/// Convert seconds since UNIX epoch to an ISO-8601 UTC string.
+/// Trigger log retention cleanup on default log directory.
+pub fn cleanup_expired_logs_default() -> io::Result<usize> {
+    default_logger().cleanup_logs()
+}
+
+/// Convert seconds since UNIX epoch to an ISO-8601 UTC date string (YYYY-MM-DD).
+pub fn format_date(secs: u64) -> String {
+    let ts = format_timestamp(secs);
+    ts[..10].to_string()
+}
+
+/// Convert seconds since UNIX epoch to an ISO-8601 UTC timestamp string.
 pub fn format_timestamp(secs: u64) -> String {
     let second = secs % 60;
     let minute = (secs / 60) % 60;
@@ -156,6 +294,47 @@ pub fn format_timestamp(secs: u64) -> String {
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         y, m, d, hour, minute, second
     )
+}
+
+/// Clean up rotated daily logs older than `retention_days`.
+pub fn cleanup_expired_logs(dir: &Path, retention_days: u64) -> io::Result<usize> {
+    if !dir.is_dir() || retention_days == 0 {
+        return Ok(0);
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let max_age_secs = retention_days * 86400;
+    let mut count = 0;
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    let mtime = modified
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    if now > mtime && (now - mtime) > max_age_secs {
+                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                            // Only clean daily date-stamped files
+                            if name.contains('-')
+                                && name.ends_with(".log")
+                                && fs::remove_file(&path).is_ok()
+                            {
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(count)
 }
 
 /// Sanitize potential secrets (tokens, session cookies, api keys) from log messages.
