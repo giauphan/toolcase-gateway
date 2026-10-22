@@ -143,41 +143,73 @@ impl MuseNoiseSession {
         let mut payload = vec![0u8; 65535];
 
         let message_one_payload = get_primary_message_one_payload();
-        println!(
-            "[museai_noise] Handshake Phase: Sending message 1 (length: {})",
-            message_one_payload.len()
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_noise",
+            &format!(
+                "Handshake Phase: Sending message 1 (length: {})",
+                message_one_payload.len()
+            ),
         );
         let length = self.write_handshake_message(&message_one_payload, &mut message)?;
         socket.send_binary(&message[..length])?;
 
-        println!("[museai_noise] Handshake Phase: Waiting for message 2");
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_noise",
+            "Handshake Phase: Waiting for message 2",
+        );
         let message_two = socket.read_binary()?;
-        println!(
-            "[museai_noise] Handshake Phase: Received message 2 (length: {})",
-            message_two.len()
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_noise",
+            &format!(
+                "Handshake Phase: Received message 2 (length: {})",
+                message_two.len()
+            ),
         );
         let payload_length = self.read_handshake_message(&message_two, &mut payload)?;
-        println!(
-            "[museai_noise] Handshake Phase: Message 2 decrypted successfully (payload length: {})",
-            payload_length
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_noise",
+            &format!(
+                "Handshake Phase: Message 2 decrypted successfully (payload length: {})",
+                payload_length
+            ),
         );
 
         let msg3_payload = if payload_length > 0 {
-            println!("[museai_noise] Handshake Phase: CVM challenge detected, generating message 3 credentials");
+            crate::runtime::logger::log_message(
+                "INFO",
+                "museai_noise",
+                "Handshake Phase: CVM challenge detected, generating message 3 credentials",
+            );
             encode_confidential_vm_message_three(notary_token)
         } else {
-            println!("[museai_noise] Handshake Phase: No CVM challenge, empty message 3");
+            crate::runtime::logger::log_message(
+                "INFO",
+                "museai_noise",
+                "Handshake Phase: No CVM challenge, empty message 3",
+            );
             vec![]
         };
 
-        println!(
-            "[museai_noise] Handshake Phase: Sending message 3 (length: {})",
-            msg3_payload.len()
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_noise",
+            &format!(
+                "Handshake Phase: Sending message 3 (length: {})",
+                msg3_payload.len()
+            ),
         );
         let length = self.write_handshake_message(&msg3_payload, &mut message)?;
         socket.send_binary(&message[..length])?;
         self.into_transport_mode()?;
-        println!("[museai_noise] Handshake Phase: Transport split completed");
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_noise",
+            "Handshake Phase: Transport split completed",
+        );
         Ok(())
     }
 

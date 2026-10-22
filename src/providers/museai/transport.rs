@@ -99,9 +99,10 @@ impl MuseWebSocket {
 
     pub fn send_binary(&mut self, message: &[u8]) -> io::Result<()> {
         self.apply_deadline()?;
-        println!(
-            "[museai_transport] Sending binary frame (length: {})",
-            message.len()
+        crate::runtime::logger::log_message(
+            "DEBUG",
+            "museai_transport",
+            &format!("Sending binary frame (length: {})", message.len()),
         );
         if message.len() > MAX_MUSE_WS_FRAME_BYTES {
             return Err(io::Error::new(
@@ -177,9 +178,13 @@ impl MuseWebSocket {
             let len = session
                 .encrypt(&frame, &mut encrypted)
                 .map_err(io::Error::other)?;
-            println!(
-                "[museai_transport] Sending ApplicationRequest frame with full body (len: {})",
-                len
+            crate::runtime::logger::log_message(
+                "DEBUG",
+                "museai_transport",
+                &format!(
+                    "Sending ApplicationRequest frame with full body (len: {})",
+                    len
+                ),
             );
             self.send_binary(&encrypted[..len])?;
         }

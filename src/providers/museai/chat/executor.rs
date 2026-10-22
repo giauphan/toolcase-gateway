@@ -34,6 +34,12 @@ pub fn request_museai_chat_completion(
     let req_id = Uuid::new_v4().to_string();
     let ws_url = build_museai_ws_url(&config, &req_id)?;
 
+    crate::runtime::logger::log_message(
+        "INFO",
+        "museai_chat",
+        &format!("Connecting to Muse CVM WebSocket (origin: {base_origin})"),
+    );
+
     let mut socket = MuseWebSocket::connect(&ws_url, base_origin, "")?;
     let mut session = MuseNoiseSession::new_initiator(NOISE_PATTERN_XX, None)
         .map_err(|e| io::Error::other(format!("Noise initiator error: {e}")))?;
@@ -75,7 +81,11 @@ pub fn request_museai_chat_completion(
     let payload_bytes = serde_json::to_vec(&chat_payload)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
-    debug_log("Sending encrypted POST /chat/stream over Noise...");
+    crate::runtime::logger::log_message(
+        "INFO",
+        "museai_chat",
+        "Sending encrypted POST /chat/stream over Noise XX session",
+    );
 
     socket.send_encrypted_service_request(
         &mut session,
@@ -228,9 +238,18 @@ pub fn request_museai_chat_completion(
     }
 
     if let Some(ref raw_url) = video_url {
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_chat",
+            &format!("Resolved video artifact URL: {raw_url}"),
+        );
         if crate::providers::museai::video::is_vm_media_url(raw_url) {
             if let Some(vm_path) = crate::providers::museai::video::extract_vm_media_path(raw_url) {
-                debug_log(&format!("Fetching internal VM media over Noise: {vm_path}"));
+                crate::runtime::logger::log_message(
+                    "INFO",
+                    "museai_chat",
+                    &format!("Fetching internal VM media over Noise: {vm_path}"),
+                );
                 let fetch_stream_id = active_stream_id.max(2) + 1;
                 match crate::providers::museai::video::fetch_vm_media_over_noise(
                     &mut socket,
@@ -239,10 +258,14 @@ pub fn request_museai_chat_completion(
                     &vm_path,
                 ) {
                     Ok(media_bytes) => {
-                        debug_log(&format!(
-                            "Fetched {} bytes of VM video media",
-                            media_bytes.len()
-                        ));
+                        crate::runtime::logger::log_message(
+                            "INFO",
+                            "museai_chat",
+                            &format!(
+                                "Fetched and cached {} bytes of VM video media",
+                                media_bytes.len()
+                            ),
+                        );
                         if let Some(ref jid) = job_id_hint {
                             let _ = crate::providers::museai::video::save_video_media(
                                 jid,
@@ -251,7 +274,11 @@ pub fn request_museai_chat_completion(
                         }
                     }
                     Err(e) => {
-                        debug_log(&format!("Failed to fetch VM media over Noise: {e}"));
+                        crate::runtime::logger::log_message(
+                            "ERROR",
+                            "museai_chat",
+                            &format!("Failed to fetch VM media over Noise: {e}"),
+                        );
                     }
                 }
             }
@@ -267,6 +294,14 @@ pub fn request_museai_chat_completion(
         if config.museai_thread_retention_secs == 0 {
             let _ = crate::providers::museai::delete_muse_thread(base_origin, &thread_id, &config);
         } else {
+            crate::runtime::logger::log_message(
+                "INFO",
+                "museai_chat",
+                &format!(
+                    "Registered thread {} with retention TTL {}s",
+                    thread_id, config.museai_thread_retention_secs
+                ),
+            );
             crate::providers::museai::register_thread(
                 thread_id.clone(),
                 base_origin.to_string(),

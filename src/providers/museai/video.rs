@@ -200,6 +200,14 @@ where
     let completion = match request_completion(&req.request_json, config, true) {
         Ok(c) => c,
         Err(e) => {
+            crate::runtime::logger::log_message(
+                "ERROR",
+                "museai_video",
+                &format!(
+                    "Video generation request failed for job {}: {e}",
+                    req.allocated_job_id
+                ),
+            );
             if req.existing_job.is_none() {
                 let (status, approval_status) = if e
                     .get_ref()
@@ -329,6 +337,15 @@ where
         "artifact_reported"
     };
 
+    crate::runtime::logger::log_message(
+        "INFO",
+        "museai_video",
+        &format!(
+            "Video generation pipeline completed for job {} with URL: {} (status={})",
+            req.allocated_job_id, video_url, rev_status
+        ),
+    );
+
     if let Some(parent) = req.existing_job {
         let updated = super::lifecycle::append_job_revision(
             &parent.job_id,
@@ -419,6 +436,15 @@ where
     if let Some(existing) = super::lifecycle::reserve_video_job(&init_record)? {
         return video_job_response(existing);
     }
+
+    crate::runtime::logger::log_message(
+        "INFO",
+        "museai_video",
+        &format!(
+            "Reserved and submitted video job {} for prompt '{}' (model={}, ratio={}, duration={}s)",
+            req.allocated_job_id, req.prompt, req.requested_model, req.aspect_ratio, req.duration
+        ),
+    );
 
     let response = serde_json::json!({
         "id": req.allocated_job_id,
@@ -674,7 +700,11 @@ pub fn build_video_result_with_job_id(
         record.status = status.to_string();
     }
     if let Err(e) = super::lifecycle::save_video_job(&record) {
-        eprintln!("[museai_video] failed to persist video job {job_id}: {e}");
+        crate::runtime::logger::log_message(
+            "ERROR",
+            "museai_video",
+            &format!("Failed to persist video job {job_id}: {e}"),
+        );
     }
 
     Ok(serde_json::json!({
