@@ -33,7 +33,7 @@ impl Default for LogConfig {
         let retention_days = std::env::var("GW_LOG_RETENTION_DAYS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(14);
+            .unwrap_or(2);
 
         Self {
             enabled,
@@ -57,6 +57,8 @@ struct LogWriter {
     daily_gateway_file: Option<File>,
     error_file: Option<File>,
     daily_error_file: Option<File>,
+    access_file: Option<File>,
+    daily_access_file: Option<File>,
 }
 
 impl Logger {
@@ -69,6 +71,8 @@ impl Logger {
                 daily_gateway_file: None,
                 error_file: None,
                 daily_error_file: None,
+                access_file: None,
+                daily_access_file: None,
             }),
         }
     }
@@ -76,6 +80,12 @@ impl Logger {
     pub fn log(&self, level: &str, target: &str, msg: &str) {
         if let Ok(mut writer) = self.inner.lock() {
             writer.write_entry(level, target, msg);
+        }
+    }
+
+    pub fn log_access(&self, method: &str, path: &str, client_ip: &str) {
+        if let Ok(mut writer) = self.inner.lock() {
+            writer.write_access_entry(method, path, client_ip);
         }
     }
 
@@ -125,6 +135,8 @@ impl LogWriter {
             self.current_date = today.to_string();
             self.daily_gateway_file = None;
             self.daily_error_file = None;
+            self.daily_access_file = None;
+            let _ = cleanup_expired_logs(&self.config.dir, self.config.retention_days);
         }
     }
 
@@ -174,12 +186,58 @@ impl LogWriter {
         }
     }
 
+    fn write_access_entry(&mut self, method: &str, path: &str, client_ip: &str) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let ts = format_timestamp(now);
+        let today = format_date(now);
+        self.check_date_roll(&today);
+
+        let sanitized_path = sanitize_log_message(path);
+        let line = format!("[{ts}] [ACCESS] {client_ip} \"{method} {sanitized_path}\"\n");
+
+        if self.config.console {
+            eprint!("{line}");
+        }
+
+        if self.config.enabled {
+            // 1. Access logs
+            write_line(&mut self.access_file, &self.config.dir, "access.log", &line);
+            if self.config.daily {
+                let daily_acc = format!("access-{today}.log");
+                write_line(
+                    &mut self.daily_access_file,
+                    &self.config.dir,
+                    &daily_acc,
+                    &line,
+                );
+            }
+
+            // 2. Mirror to gateway log
+            let main_name = self.config.file_name.clone();
+            write_line(&mut self.gateway_file, &self.config.dir, &main_name, &line);
+            if self.config.daily {
+                let daily_name = format!("gateway-{today}.log");
+                write_line(
+                    &mut self.daily_gateway_file,
+                    &self.config.dir,
+                    &daily_name,
+                    &line,
+                );
+            }
+        }
+    }
+
     fn set_dir(&mut self, dir: PathBuf) {
         self.config.dir = dir;
         self.gateway_file = None;
         self.daily_gateway_file = None;
         self.error_file = None;
         self.daily_error_file = None;
+        self.access_file = None;
+        self.daily_access_file = None;
     }
 }
 
@@ -192,6 +250,11 @@ pub fn default_logger() -> &'static Logger {
 /// Log a message with a given level and subsystem target to the global logger.
 pub fn log_message(level: &str, target: &str, msg: &str) {
     default_logger().log(level, target, msg);
+}
+
+/// Log an HTTP request access entry to the global logger.
+pub fn log_access(method: &str, path: &str, client_ip: &str) {
+    default_logger().log_access(method, path, client_ip);
 }
 
 /// Set the log output directory at runtime for the global logger.
@@ -234,41 +297,82 @@ pub fn format_timestamp(secs: u64) -> String {
     )
 }
 
+fn extract_date_from_daily_log_filename(name: &str) -> Option<&str> {
+    let stem = name.strip_suffix(".log")?;
+    if stem.len() >= 11 && stem.as_bytes()[stem.len() - 11] == b'-' {
+        let date = &stem[stem.len() - 10..];
+        let b = date.as_bytes();
+        if b[4] == b'-'
+            && b[7] == b'-'
+            && b[0..4].iter().all(u8::is_ascii_digit)
+            && b[5..7].iter().all(u8::is_ascii_digit)
+            && b[8..10].iter().all(u8::is_ascii_digit)
+        {
+            return Some(date);
+        }
+    }
+    None
+}
+
+pub fn parse_date_to_epoch_days(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if s.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    let (y, m, d): (i64, i64, i64) = (
+        s[0..4].parse().ok()?,
+        s[5..7].parse().ok()?,
+        s[8..10].parse().ok()?,
+    );
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || y < 1970 {
+        return None;
+    }
+    let y_adj = if m <= 2 { y - 1 } else { y };
+    let era = (if y_adj >= 0 { y_adj } else { y_adj - 399 }) / 400;
+    let yoe = (y_adj - era * 400) as u64;
+    let m_adj = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * m_adj + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy as u64;
+    let days = era * 146097 + doe as i64 - 719468;
+    (days >= 0).then_some(days as u64)
+}
+
 /// Clean up rotated daily logs older than `retention_days`.
 pub fn cleanup_expired_logs(dir: &Path, retention_days: u64) -> io::Result<usize> {
     if !dir.is_dir() || retention_days == 0 {
         return Ok(0);
     }
-    let now = SystemTime::now()
+    let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let max_age_secs = retention_days * 86400;
+    let (now_days, max_age_secs) = (now_secs / 86400, retention_days * 86400);
     let mut count = 0;
+
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_file() {
                 continue;
             }
-            if let Ok(metadata) = entry.metadata() {
-                if let Ok(modified) = metadata.modified() {
-                    let mtime = modified
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    if now > mtime && (now - mtime) > max_age_secs {
-                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            // Only clean daily date-stamped files
-                            if name.contains('-')
-                                && name.ends_with(".log")
-                                && fs::remove_file(&path).is_ok()
-                            {
-                                count += 1;
-                            }
-                        }
-                    }
-                }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            // Only clean daily date-stamped files (*-YYYY-MM-DD.log)
+            // Never clean primary log files like gateway.log, error.log, access.log
+            let Some(date_str) = extract_date_from_daily_log_filename(name) else {
+                continue;
+            };
+
+            let by_date = parse_date_to_epoch_days(date_str)
+                .is_some_and(|d| now_days > d && now_days - d >= retention_days);
+            let by_mtime = entry.metadata().and_then(|m| m.modified()).is_ok_and(|m| {
+                let mtime = m.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                now_secs > mtime && now_secs - mtime >= max_age_secs
+            });
+
+            if (by_date || by_mtime) && fs::remove_file(&path).is_ok() {
+                count += 1;
             }
         }
     }
