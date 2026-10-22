@@ -16,23 +16,32 @@ Key features:
 
 ### 2.1 Create Video (`POST /muse-ai/v1/create-video`)
 
-Submits a new text-to-video generation task.
+Submits a new text-to-video generation task. Supports both **synchronous** (blocking until completion) and **asynchronous** (non-blocking submission and polling) execution modes.
 
-#### Request Payload
-```json
-POST /muse-ai/v1/create-video
-Content-Type: application/json
+#### Execution Modes
+- **Synchronous Mode (Wait for Completion)**:
+  - Activated by query parameter `?wait=true` or `?sync=true`, request body field `"wait": true`, or header `Prefer: respond-async=false`.
+  - Default for command-line clients such as `curl`.
+  - Holds the HTTP connection open until the Confidential VM finishes video synthesis and the gateway downloads and validates the internal media over Noise.
+  - Directly returns `status: "completed"`, `video_url`, and `full_video_url`.
+- **Asynchronous Mode (Background Submission)**:
+  - Activated by query parameter `?async=true`, request body field `"async": true`, or browser callers without sync flags.
+  - Immediately returns `status: "submitting"` and an allocated job ID.
+  - The client polls `GET /muse-ai/v1/videos/{id}` until finished.
 
-{
-  "prompt": "A small orange fox wearing a blue scarf rides a skateboard through a colorful city park, bouncy animation, bright morning light.",
-  "model": "muse-video",      // optional, defaults to "muse-video"
-  "aspect_ratio": "16:9",      // optional, defaults to "16:9"
-  "duration": 5,               // optional, defaults to 5 seconds
-  "idempotency_key": "job-8814-fox" // optional
-}
+#### Synchronous Request Example
+```bash
+curl -X POST "http://127.0.0.1:20130/muse-ai/v1/create-video?wait=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A small orange fox wearing a blue scarf rides a skateboard through a colorful city park, bouncy animation, bright morning light.",
+    "model": "muse-video",
+    "aspect_ratio": "16:9",
+    "duration": 5
+  }'
 ```
 
-#### Response (`200 OK`)
+#### Synchronous Response (`200 OK`)
 ```json
 {
   "id": "video-123e4567-e89b-12d3-a456-426614174000",
@@ -46,11 +55,25 @@ Content-Type: application/json
   "prompt": "A small orange fox wearing a blue scarf rides a skateboard through a colorful city park...",
   "requested_aspect_ratio": "16:9",
   "requested_duration": 5,
-  "status": "artifact_reported",
+  "status": "completed",
   "provider_status": "artifact_url_reported",
-  "output_verified": false,
-  "media_validated": false,
-  "video_url": "https://cdn.muse.ai/files/v1.mp4"
+  "output_verified": true,
+  "media_validated": true,
+  "video_url": "/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content",
+  "full_video_url": "http://127.0.0.1:20130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content"
+}
+```
+
+#### Asynchronous Response (`200 OK`)
+When called asynchronously, the endpoint returns immediately with:
+```json
+{
+  "id": "video-123e4567-e89b-12d3-a456-426614174000",
+  "object": "video.generation",
+  "created": 1728000000,
+  "status": "submitting",
+  "video_url": "",
+  "full_video_url": ""
 }
 ```
 
@@ -63,6 +86,7 @@ Retrieves status, artifacts, and approval details for a specific video job.
 #### Request
 ```http
 GET /muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000
+Host: 127.0.0.1:20130
 ```
 
 #### Response (`200 OK`)
@@ -72,12 +96,13 @@ GET /muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000
   "object": "video.generation",
   "created": 1728000000,
   "provider": "muse_chat",
-  "status": "artifact_reported",
-  "approval_status": "approved",
-  "approval_id": "app-42",
-  "output_verified": false,
-  "media_validated": false,
-  "video_url": "https://cdn.muse.ai/files/v1.mp4",
+  "status": "completed",
+  "approval_status": null,
+  "approval_id": null,
+  "output_verified": true,
+  "media_validated": true,
+  "video_url": "/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content",
+  "full_video_url": "http://127.0.0.1:20130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content",
   "prompt": "A small orange fox wearing a blue scarf rides a skateboard...",
   "model": "muse-video",
   "requested_model": "muse-video",
@@ -91,7 +116,37 @@ GET /muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000
 
 ---
 
-### 2.3 Update Video Prompt (`PUT /muse-ai/v1/videos/{id}`)
+### 2.3 Video Media Content & Streaming (`GET /muse-ai/v1/videos/{id}/content`)
+
+Streams genuine ISO MP4 bytes for verified and downloaded video artifacts directly from the gateway.
+
+#### Features:
+- **Range Header Support**: Responds with `206 Partial Content` and `Content-Range: bytes start-end/total` for browser video seeking and scrub bars.
+- **HEAD Method Support**: Allows clients and media players to inspect `Content-Length`, `Content-Type: video/mp4`, and `Accept-Ranges: bytes` without transferring body bytes.
+- **CORS Headers**: Sends `Access-Control-Allow-Origin: *` for direct embedding into web applications.
+- **Download Alias**: Supports `GET /muse-ai/v1/videos/{id}/download` as a drop-in alias.
+
+#### Request Example
+```bash
+curl -I http://127.0.0.1:20130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content
+```
+
+#### Response (`200 OK`)
+```http
+HTTP/1.1 200 OK
+Content-Type: video/mp4
+Content-Length: 5925734
+Accept-Ranges: bytes
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Headers: Range, Content-Type, Accept
+Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges
+Content-Disposition: inline; filename="video-123e4567-e89b-12d3-a456-426614174000.mp4"
+Connection: close
+```
+
+---
+
+### 2.4 Update Video Prompt (`PUT /muse-ai/v1/videos/{id}`)
 
 Updates the prompt of an existing video job and records a revision.
 
@@ -118,7 +173,7 @@ Content-Type: application/json
 
 ---
 
-### 2.4 Delete Thread (`DELETE /muse-ai/v1/threads/{id}`)
+### 2.5 Delete Thread (`DELETE /muse-ai/v1/threads/{id}`)
 
 Cleans up an active thread on the Muse upstream server.
 
