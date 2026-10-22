@@ -224,7 +224,7 @@ pub fn now_secs() -> u64 {
 
 pub fn debug_log_lifecycle(msg: &str) {
     if std::env::var("MUSEAI_DEBUG").is_ok() {
-        eprintln!("[museai_lifecycle] {msg}");
+        crate::runtime::logger::log_message("DEBUG", "museai_lifecycle", msg);
     }
 }
 

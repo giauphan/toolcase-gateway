@@ -8,6 +8,7 @@
 scripts/__pycache__
 scripts/patches/
 gateway.log
+/logs
 .claude/worktrees
 tests/__pycache__
 .gw_state

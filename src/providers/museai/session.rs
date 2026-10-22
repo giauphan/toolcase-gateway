@@ -3,7 +3,7 @@ use std::io;
 
 fn debug_log(msg: &str) {
     if std::env::var("MUSEAI_DEBUG").is_ok() {
-        eprintln!("[museai_session] {msg}");
+        crate::runtime::logger::log_message("DEBUG", "museai_session", msg);
     }
 }
 

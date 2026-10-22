@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn debug_log(msg: &str) {
     if std::env::var("MUSEAI_DEBUG").is_ok() {
-        eprintln!("[museai_threads] {msg}");
+        crate::runtime::logger::log_message("DEBUG", "museai_threads", msg);
     }
 }
 
@@ -123,8 +123,12 @@ pub fn cleanup_cycle_once() -> (usize, usize) {
         .unwrap_or(0);
 
     if threads_cleaned > 0 || jobs_cleaned > 0 {
-        eprintln!(
-            "[museai:cleanup] automatic cycle purged {threads_cleaned} tracked threads and {jobs_cleaned} expired jobs"
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai:cleanup",
+            &format!(
+                "automatic cycle purged {threads_cleaned} tracked threads and {jobs_cleaned} expired jobs"
+            ),
         );
     }
 
@@ -136,9 +140,13 @@ pub fn start_cleanup_worker() {
 }
 
 pub fn start_cleanup_worker_with_interval(interval: Duration) {
-    eprintln!(
-        "[museai:cleanup] background cleanup daemon worker started (interval: {:?})",
-        interval
+    crate::runtime::logger::log_message(
+        "INFO",
+        "museai:cleanup",
+        &format!(
+            "background cleanup daemon worker started (interval: {:?})",
+            interval
+        ),
     );
     thread::spawn(move || loop {
         thread::sleep(interval);

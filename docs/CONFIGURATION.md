@@ -66,6 +66,10 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_PRISM_BASE_URL` | `https://prism.openai.com` | URL | Prism | Upstream base URL for dedicated Prism completions. |
 | `GW_PRISM_PROJECT_ID` | *(built-in default)* | string | Prism | Default project ID for Prism sessions. |
 | `GW_PRISM_DEFAULT_MODEL` | `gpt-5.6-sol` | string | Prism | Default reasoning model for Prism requests. |
+| `GW_LOG_DIR` | `logs` | path | Logging | Directory where runtime log files are automatically created and stored. |
+| `GW_LOG_FILE` | `gateway.log` | string | Logging | Primary log filename within `GW_LOG_DIR`. |
+| `GW_LOG_ENABLED` | `true` | bool | Logging | Persist log entries to disk in `GW_LOG_DIR`. |
+| `GW_LOG_CONSOLE` | `true` | bool | Logging | Mirror formatted log entries to standard error (`stderr`). |
 
 ---
 

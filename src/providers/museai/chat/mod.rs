@@ -13,6 +13,6 @@ pub use stream::MuseChatStream;
 
 pub(super) fn debug_log(msg: &str) {
     if std::env::var("MUSEAI_DEBUG").is_ok() {
-        eprintln!("[museai_chat] {msg}");
+        crate::runtime::logger::log_message("DEBUG", "museai_chat", msg);
     }
 }

@@ -130,12 +130,22 @@ pub fn run() -> io::Result<()> {
     );
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     let config = store.snapshot();
-    eprintln!(
-        "[toolcase-gateway] {listen_host}:{listen_port} -> {}:{}",
-        config.target_host, config.target_port
+    crate::runtime::logger::log_message(
+        "INFO",
+        "toolcase-gateway",
+        &format!(
+            "{listen_host}:{listen_port} -> {}:{}",
+            config.target_host, config.target_port
+        ),
     );
     if listen_host != "127.0.0.1" && listen_host != "::1" && listen_host != "localhost" {
-        eprintln!("[toolcase-gateway] WARNING: listening on {listen_host} exposes an unauthenticated proxy; put it behind an authenticating front end");
+        crate::runtime::logger::log_message(
+            "WARN",
+            "toolcase-gateway",
+            &format!(
+                "listening on {listen_host} exposes an unauthenticated proxy; put it behind an authenticating front end"
+            ),
+        );
     }
     if config.museai_auto_cleanup_threads && config.museai_thread_retention_secs > 0 {
         crate::museai::start_cleanup_worker();
@@ -165,7 +175,11 @@ pub fn run() -> io::Result<()> {
                     error.kind(),
                     ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
                 ) {
-                    eprintln!("[toolcase-gateway] request failed: {}", error.kind());
+                    crate::runtime::logger::log_message(
+                        "ERROR",
+                        "toolcase-gateway",
+                        &format!("request failed: {}", error.kind()),
+                    );
                 }
             }
         });
