@@ -82,7 +82,7 @@ curl -X POST http://127.0.0.1:20129/v1/chat/completions \
 
 ### 3.2 Muse.ai Conversational Model (`muse`)
 
-The `muse` model routes standard OpenAI requests through a native, end-to-end encrypted WebSocket connection directly to a Muse Confidential VM (CVM).
+The `muse` model routes standard OpenAI requests through a native, end-to-end encrypted WebSocket connection directly to a Muse Confidential VM (CVM). See [`docs/muse-chat.md`](muse-chat.md) for the full conversational chat guide.
 
 #### Cryptographic Architecture
 1. **VM Wake & Notary Token**: Wakes the remote CVM via `POST /api/hatch/vm/wake` and fetches a notary token from `POST /api/hatch/token`.
