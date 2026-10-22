@@ -105,27 +105,98 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
 #[derive(serde::Deserialize)]
 struct AddAccountsPayload {
     provider: Option<String>,
+    label: Option<String>,
     api_keys: Option<serde_json::Value>,
     keys: Option<serde_json::Value>,
+    accounts: Option<serde_json::Value>,
 }
 
-fn extract_keys_from_value(value: &serde_json::Value) -> Vec<String> {
-    match value {
+fn parse_string_entries(s: &str, default_label: Option<&str>) -> Vec<(String, Option<String>)> {
+    s.split(&['\n', '\r', ','][..])
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            if let Some((lbl, key)) = line.split_once(':').or_else(|| line.split_once('=')) {
+                let lbl = lbl.trim();
+                let key = key.trim();
+                if !lbl.is_empty() && !key.is_empty() {
+                    return (key.to_string(), Some(lbl.to_string()));
+                }
+            }
+            (line.to_string(), default_label.map(str::to_string))
+        })
+        .collect()
+}
+
+fn extract_entry_from_value(
+    val: &serde_json::Value,
+    default_label: Option<&str>,
+) -> Vec<(String, Option<String>)> {
+    match val {
         serde_json::Value::Array(arr) => arr
             .iter()
-            .filter_map(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
+            .flat_map(|item| extract_entry_from_value(item, default_label))
             .collect(),
-        serde_json::Value::String(s) => s
-            .split(&['\n', '\r', ','][..])
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect(),
+        serde_json::Value::Object(map) => {
+            let key = map
+                .get("api_key")
+                .or_else(|| map.get("key"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let label = map
+                .get("label")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .or_else(|| default_label.map(str::to_string));
+            if let Some(k) = key {
+                vec![(k.to_string(), label)]
+            } else {
+                Vec::new()
+            }
+        }
+        serde_json::Value::String(s) => parse_string_entries(s, default_label),
         _ => Vec::new(),
     }
+}
+
+fn extract_account_entries(payload: &AddAccountsPayload) -> Vec<(String, Option<String>)> {
+    let mut entries = Vec::new();
+    let default_label = payload
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    if let Some(ref val) = payload.accounts {
+        entries.extend(extract_entry_from_value(val, default_label));
+    }
+    if let Some(ref val) = payload.api_keys {
+        entries.extend(extract_entry_from_value(val, default_label));
+    }
+    if let Some(ref val) = payload.keys {
+        entries.extend(extract_entry_from_value(val, default_label));
+    }
+
+    if let Some(dl) = default_label {
+        let count = entries
+            .iter()
+            .filter(|(_, l)| l.as_deref() == Some(dl))
+            .count();
+        if count > 1 {
+            let mut sub_idx = 1;
+            for (_, l) in &mut entries {
+                if l.as_deref() == Some(dl) {
+                    *l = Some(format!("{dl}-{sub_idx}"));
+                    sub_idx += 1;
+                }
+            }
+        }
+    }
+
+    entries
 }
 
 pub fn handle_add_provider_accounts(
@@ -156,15 +227,9 @@ pub fn handle_add_provider_accounts(
         );
     }
 
-    let mut keys = Vec::new();
-    if let Some(ref val) = payload.api_keys {
-        keys.extend(extract_keys_from_value(val));
-    }
-    if let Some(ref val) = payload.keys {
-        keys.extend(extract_keys_from_value(val));
-    }
+    let entries = extract_account_entries(&payload);
 
-    if keys.is_empty() {
+    if entries.is_empty() {
         return write_error(
             client,
             400,
@@ -173,7 +238,7 @@ pub fn handle_add_provider_accounts(
         );
     }
 
-    let added_count = store.add_jev_keys(&keys);
+    let added_count = store.add_jev_accounts(&entries);
     let _ = store.save_to_persistent_file();
 
     let accounts: Vec<serde_json::Value> = store

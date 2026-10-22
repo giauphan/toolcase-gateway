@@ -43,7 +43,7 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_IO_TIMEOUT_SECS` | `120` | u64 | Runtime | Socket read and write timeout in seconds (`0` disables timeout). |
 | `GW_RETRY_BASE_DELAY_MS` | `100` | u64 | OmniRoute | Base backoff delay in milliseconds before candidate failover. |
 | `GW_MAX_RETRY_DELAY_MS` | `5000` | u64 | OmniRoute | Maximum backoff delay cap in milliseconds. |
-| `GW_JEV_API_KEYS` | *(empty)* | csv | Jev AI | Comma-separated list of Jev API keys (`sk-glm...`) for account pool rotation. |
+| `GW_JEV_API_KEYS` | *(empty)* | csv | Jev AI | Comma-separated list of Jev API keys (`sk-glm...`) for account pool rotation. Entries can include optional label prefixes (`label:key` or `label=key`). |
 | `GW_JEV_BASE_URL` | `https://jev-ai.org` | URL | Jev AI | Target base URL for the Jev Decision API. |
 | `GW_JEV_ENABLED` | `false` | bool | Jev AI | Flag indicating whether Jev provider routing is active. |
 | `GW_JEV_SHADOW_MODE` | `true` | bool | Jev AI | Enables non-blocking shadow routing evaluation for telemetry. |
@@ -148,4 +148,4 @@ http://127.0.0.1:20129/gateway-config/dashboard
 
 - **Gateway Configuration**: Adjust upstream OmniRoute host, port, default model, I/O timeout, and fallback model chains.
 - **Muse AI Subsystem**: Configure REST and WebSocket endpoints, VM ID, bearer tokens, session cookies, default video prompt, and Sentinel auto-approval rules. Leaving credential fields blank preserves currently active tokens.
-- **Provider Account Pool**: View active Jev AI accounts with short labels and masked keys. Paste new keys (comma- or newline-separated) to dynamically expand the round-robin rotation pool without restarting the server.
+- **Provider Account Pool**: View active Jev AI accounts with descriptive labels and masked keys. Paste new keys (comma- or newline-separated) with optional labels (using the dedicated Label input or inline `label:key` / `label=key` syntax) to dynamically expand the round-robin rotation pool without restarting the server. Custom labels persist to standalone JSON configuration.

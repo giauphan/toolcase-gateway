@@ -14,6 +14,20 @@ fn parse_jev_api_keys_trims_and_ignores_empty_entries() {
 }
 
 #[test]
+fn parse_jev_accounts_parses_labels_and_generates_fallbacks() {
+    let accounts = toolcase_gateway::config::parse_jev_accounts(
+        "prod-primary:sk-111, staging=sk-222, sk-333333333333",
+    );
+    assert_eq!(accounts.len(), 3);
+    assert_eq!(accounts[0].label, "prod-primary");
+    assert_eq!(accounts[0].api_key, "sk-111");
+    assert_eq!(accounts[1].label, "staging");
+    assert_eq!(accounts[1].api_key, "sk-222");
+    assert_eq!(accounts[2].label, "account-3 (..3333)");
+    assert_eq!(accounts[2].api_key, "sk-333333333333");
+}
+
+#[test]
 fn test_jev_account_pool_round_robin() {
     let keys = vec!["key1".to_string(), "key2".to_string(), "key3".to_string()];
     let pool = JevAccountPool::new(&keys);

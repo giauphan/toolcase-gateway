@@ -393,3 +393,166 @@ fn dashboard_account_addition_enables_jev_upstream_forwarding_live() {
     upstream_handle.join().unwrap();
     let _ = fs::remove_file(tmp_env);
 }
+
+#[test]
+fn dashboard_accounts_add_with_custom_label() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+    let payload =
+        br#"{"provider":"jev","label":"prod-primary","api_keys":["sk-glm5-custom11111"]}"#;
+    let (head, body) = request_gateway("POST", "/api/v1/dashboard/accounts", payload, &store);
+    assert_eq!(head.status, 200);
+
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["added_count"], 1);
+
+    let accounts = json["accounts"].as_array().unwrap();
+    let added = accounts
+        .iter()
+        .find(|a| a["label"] == "prod-primary")
+        .unwrap();
+    assert!(added["masked_key"].as_str().unwrap().contains("..."));
+
+    // Check pool directly
+    let pool_accounts = store.jev_pool().accounts();
+    let matched = pool_accounts
+        .iter()
+        .find(|a| a.label == "prod-primary")
+        .unwrap();
+    assert_eq!(matched.api_key, "sk-glm5-custom11111");
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}
+
+#[test]
+fn dashboard_accounts_add_multiple_keys_with_common_label() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let mut cfg = test_config();
+    cfg.jev_api_keys = vec![];
+    let store = ConfigStore::new(cfg, tmp_env.clone());
+
+    let payload = br#"{"provider":"jev","label":"cluster-node","api_keys":["sk-k1-11111111","sk-k2-22222222"]}"#;
+    let (head, body) = request_gateway("POST", "/api/v1/dashboard/accounts", payload, &store);
+    assert_eq!(head.status, 200);
+
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["added_count"], 2);
+
+    let accounts = store.jev_pool().accounts();
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[0].label, "cluster-node-1");
+    assert_eq!(accounts[1].label, "cluster-node-2");
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}
+
+#[test]
+fn dashboard_accounts_add_inline_labels_and_structured_accounts() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let mut cfg = test_config();
+    cfg.jev_api_keys = vec![];
+    let store = ConfigStore::new(cfg, tmp_env.clone());
+
+    // 1. Ingest via inline labels in textarea
+    let payload = br#"{"provider":"jev","api_keys":["east-worker:sk-east-111111","west-worker=sk-west-222222"]}"#;
+    let (head, _) = request_gateway("POST", "/api/v1/dashboard/accounts", payload, &store);
+    assert_eq!(head.status, 200);
+
+    let accounts = store.jev_pool().accounts();
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[0].label, "east-worker");
+    assert_eq!(accounts[0].api_key, "sk-east-111111");
+    assert_eq!(accounts[1].label, "west-worker");
+    assert_eq!(accounts[1].api_key, "sk-west-222222");
+
+    // 2. Ingest via structured accounts JSON
+    let struct_payload = br#"{"provider":"jev","accounts":[{"key":"sk-struct-333333","label":"struct-alpha"},{"api_key":"sk-struct-444444","label":"struct-beta"}]}"#;
+    let (head2, _) = request_gateway("POST", "/api/v1/dashboard/accounts", struct_payload, &store);
+    assert_eq!(head2.status, 200);
+
+    let accounts2 = store.jev_pool().accounts();
+    assert_eq!(accounts2.len(), 4);
+    assert_eq!(accounts2[2].label, "struct-alpha");
+    assert_eq!(accounts2[2].api_key, "sk-struct-333333");
+    assert_eq!(accounts2[3].label, "struct-beta");
+    assert_eq!(accounts2[3].api_key, "sk-struct-444444");
+
+    // 3. Update existing label for an account
+    let update_payload = br#"{"provider":"jev","accounts":[{"key":"sk-east-111111","label":"east-primary-promoted"}]}"#;
+    let (head3, body3) =
+        request_gateway("POST", "/api/v1/dashboard/accounts", update_payload, &store);
+    assert_eq!(head3.status, 200);
+
+    let json3: serde_json::Value = serde_json::from_slice(&body3).unwrap();
+    assert_eq!(json3["total_accounts"], 4); // Not duplicated
+    let accounts3 = store.jev_pool().accounts();
+    assert_eq!(accounts3[0].label, "east-primary-promoted");
+
+    // 4. Persistence across store reload
+    let mut reload_cfg = test_config();
+    reload_cfg.jev_api_keys = vec![]; // simulate fresh start; keys come from stored accounts only
+    let loaded_store = ConfigStore::new_with_limits_and_config_file(
+        reload_cfg,
+        tmp_env.clone(),
+        store.config_file.clone(),
+        256,
+        64 * 1024 * 1024,
+    );
+    let loaded_accounts = loaded_store.jev_pool().accounts();
+    assert_eq!(loaded_accounts.len(), 4);
+    assert_eq!(loaded_accounts[0].label, "east-primary-promoted");
+    assert_eq!(loaded_accounts[0].api_key, "sk-east-111111");
+    assert_eq!(loaded_accounts[1].label, "west-worker");
+    assert_eq!(loaded_accounts[2].label, "struct-alpha");
+    assert_eq!(loaded_accounts[3].label, "struct-beta");
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}
+
+#[test]
+fn dashboard_accounts_persistent_labeled_and_extra_env_keys_merged() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let mut cfg = test_config();
+    cfg.jev_api_keys = vec![];
+    let store = ConfigStore::new(cfg, tmp_env.clone());
+
+    // Ingest 2 accounts with custom labels
+    let payload = br#"{"provider":"jev","accounts":[{"key":"sk-stored-1","label":"primary-labeled"},{"key":"sk-stored-2","label":"backup-labeled"}]}"#;
+    let (head, _) = request_gateway("POST", "/api/v1/dashboard/accounts", payload, &store);
+    assert_eq!(head.status, 200);
+
+    // Simulate restart where GW_JEV_API_KEYS has an extra key not in storage
+    let mut restart_cfg = test_config();
+    restart_cfg.jev_api_keys = vec!["sk-stored-1".into(), "sk-new-from-env".into()];
+    let reloaded_store = ConfigStore::new_with_limits_and_config_file(
+        restart_cfg,
+        tmp_env.clone(),
+        store.config_file.clone(),
+        256,
+        64 * 1024 * 1024,
+    );
+
+    let reloaded_accounts = reloaded_store.jev_pool().accounts();
+    assert_eq!(reloaded_accounts.len(), 3);
+    assert_eq!(reloaded_accounts[0].label, "primary-labeled");
+    assert_eq!(reloaded_accounts[0].api_key, "sk-stored-1");
+    assert_eq!(reloaded_accounts[1].label, "backup-labeled");
+    assert_eq!(reloaded_accounts[1].api_key, "sk-stored-2");
+    assert_eq!(reloaded_accounts[2].api_key, "sk-new-from-env");
+    assert_eq!(reloaded_accounts[2].label, "account-3 (..-env)");
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}

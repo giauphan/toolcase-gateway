@@ -249,8 +249,14 @@ button:disabled{opacity:.5;cursor:not-allowed}
       </div>
 
       <div class="field-group">
+        <label for="label-input">Account Label (Optional)</label>
+        <input type="text" id="label-input" name="label" placeholder="e.g. prod-primary, team-east, or leave blank for auto-labeling">
+        <div class="hint">Optional label applied to the key(s). You can also prefix individual lines as <code>label:api_key</code> or <code>label=api_key</code> below.</div>
+      </div>
+
+      <div class="field-group">
         <label for="keys-input">API Key(s)</label>
-        <textarea id="keys-input" name="keys" rows="3" placeholder="Enter one or more API keys (comma-separated or one per line), e.g.&#10;sk-glm5-00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b&#10;sk-glm5-anotheraccounttoken..."></textarea>
+        <textarea id="keys-input" name="keys" rows="3" placeholder="Enter one or more API keys (comma-separated or one per line), e.g.&#10;sk-glm5-00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b&#10;prod-backup:sk-glm5-anotheraccounttoken..."></textarea>
         <div class="hint">Newly added keys will immediately join the live candidate pool and persist to dedicated JSON storage.</div>
       </div>
 
@@ -306,6 +312,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const cfgMuseApprovalTimeout = document.getElementById('cfg-muse-approval-timeout');
 
   const addForm = document.getElementById('add-form');
+  const labelInput = document.getElementById('label-input');
   const keysInput = document.getElementById('keys-input');
   const submitBtn = document.getElementById('submit-btn');
   const okMsg = document.getElementById('ok-msg');
@@ -553,13 +560,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
     submitBtn.disabled = true;
     submitBtn.textContent = 'Adding...';
 
+    const payload = {
+      provider: 'jev',
+      api_keys: keys
+    };
+    const labelVal = labelInput ? labelInput.value.trim() : '';
+    if (labelVal) {
+      payload.label = labelVal;
+    }
+
     fetch('/api/v1/dashboard/accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'jev',
-        api_keys: keys
-      })
+      body: JSON.stringify(payload)
     })
     .then(function(res) {
       return res.json().then(function(json) {
@@ -575,6 +588,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
         errMsg.style.display = 'block';
       } else {
         keysInput.value = '';
+        if (labelInput) labelInput.value = '';
         okMsg.textContent = 'Success! Added ' + res.data.added_count + ' new key(s). Total accounts in pool: ' + res.data.total_accounts + '.';
         okMsg.style.display = 'block';
         loadOverview();

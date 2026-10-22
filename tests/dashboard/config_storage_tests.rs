@@ -76,6 +76,7 @@ fn test_persistent_config_save_load_round_trip() {
         default_model: Some("model-custom".into()),
         io_timeout_secs: Some(45),
         jev_api_keys: Some(vec!["key-a".into(), "key-b".into()]),
+        jev_accounts: None,
         jev_base_url: Some("https://custom.jev".into()),
         museai_base_url: Some("https://muse.custom".into()),
         museai_cookie: Some("cookie-123".into()),

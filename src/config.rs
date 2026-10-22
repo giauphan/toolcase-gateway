@@ -19,6 +19,11 @@ pub fn parse_jev_api_keys(value: &str) -> Vec<String> {
         .collect()
 }
 
+pub fn parse_jev_accounts(value: &str) -> Vec<crate::providers::jev::accounts::JevAccount> {
+    let keys = parse_jev_api_keys(value);
+    crate::providers::jev::accounts::JevAccountPool::new(&keys).accounts()
+}
+
 pub fn env_or_duration_ms(key: &str, fallback: u64) -> u64 {
     env::var(key)
         .ok()
@@ -156,6 +161,11 @@ pub struct Config {
     pub museai_auto_cleanup_threads: bool,
     pub museai_thread_retention_secs: u64,
     pub jev_api_keys: Vec<String>,
+    /// Labeled accounts loaded from persistent storage.
+    /// When non-empty, pool is initialized from these (with labels), then
+    /// any extra keys from `jev_api_keys` that are not already present are
+    /// added with auto-generated labels.
+    pub jev_labeled_accounts: Vec<crate::providers::jev::accounts::JevAccount>,
     pub jev_base_url: String,
     pub routing_mode: RoutingMode,
     pub jev_enabled: bool,
@@ -184,6 +194,7 @@ impl Default for Config {
             museai_auto_cleanup_threads: true,
             museai_thread_retention_secs: 172800,
             jev_api_keys: vec![],
+            jev_labeled_accounts: vec![],
             jev_base_url: "https://jev-ai.org".into(),
             routing_mode: RoutingMode::Existing,
             jev_enabled: false,
@@ -210,6 +221,8 @@ pub struct PersistentConfig {
     pub io_timeout_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jev_api_keys: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_accounts: Option<Vec<crate::providers::jev::accounts::JevAccount>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jev_base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,6 +264,7 @@ impl PersistentConfig {
             default_model: Some(config.default_model.clone()),
             io_timeout_secs: config.io_timeout.map(|d| d.as_secs()),
             jev_api_keys: Some(config.jev_api_keys.clone()),
+            jev_accounts: None,
             jev_base_url: Some(config.jev_base_url.clone()),
             museai_base_url: (!config.museai_base_url.is_empty())
                 .then(|| config.museai_base_url.clone()),
@@ -291,7 +305,25 @@ impl PersistentConfig {
         if let Some(secs) = self.io_timeout_secs {
             config.io_timeout = (secs > 0).then(|| Duration::from_secs(secs));
         }
-        if let Some(ref keys) = self.jev_api_keys {
+        if let Some(ref accounts) = self.jev_accounts {
+            if !accounts.is_empty() {
+                // Load labeled accounts from storage.
+                config.jev_labeled_accounts = accounts.clone();
+                // Merge: keep env-var keys that are not already in stored accounts.
+                let stored: std::collections::HashSet<&str> =
+                    accounts.iter().map(|a| a.api_key.as_str()).collect();
+                let extra: Vec<String> = config
+                    .jev_api_keys
+                    .iter()
+                    .filter(|k| !stored.contains(k.as_str()))
+                    .cloned()
+                    .collect();
+                // jev_api_keys reflects all keys: stored + env extras
+                let mut merged: Vec<String> = accounts.iter().map(|a| a.api_key.clone()).collect();
+                merged.extend(extra);
+                config.jev_api_keys = merged;
+            }
+        } else if let Some(ref keys) = self.jev_api_keys {
             config.jev_api_keys = keys.clone();
         }
         if let Some(ref url) = self.jev_base_url {
@@ -426,9 +458,25 @@ impl ConfigStore {
         max_connections: usize,
         max_in_flight_bytes: usize,
     ) -> Self {
-        let pool = Arc::new(crate::providers::jev::accounts::JevAccountPool::new(
-            &config.jev_api_keys,
-        ));
+        let base_accounts = if !config.jev_labeled_accounts.is_empty() {
+            config.jev_labeled_accounts.clone()
+        } else if let Some(persistent) = load_persistent_config(&config_file) {
+            persistent.jev_accounts.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let pool = if !base_accounts.is_empty() {
+            let p = Arc::new(
+                crate::providers::jev::accounts::JevAccountPool::new_with_accounts(base_accounts),
+            );
+            p.add_keys(&config.jev_api_keys);
+            p
+        } else {
+            Arc::new(crate::providers::jev::accounts::JevAccountPool::new(
+                &config.jev_api_keys,
+            ))
+        };
         Self {
             inner: Arc::new(RwLock::new(config)),
             env_file,
@@ -466,8 +514,18 @@ impl ConfigStore {
         added
     }
 
+    pub fn add_jev_accounts(&self, entries: &[(String, Option<String>)]) -> usize {
+        let added = self.jev_pool.add_account_entries(entries);
+        {
+            let mut conf = self.inner.write().unwrap();
+            conf.jev_api_keys = self.jev_pool.keys();
+        }
+        added
+    }
+
     pub fn save_to_persistent_file(&self) -> std::io::Result<()> {
-        let persistent = PersistentConfig::from_config(&self.snapshot());
+        let mut persistent = PersistentConfig::from_config(&self.snapshot());
+        persistent.jev_accounts = Some(self.jev_pool.accounts());
         save_persistent_config(&self.config_file, &persistent)
     }
 }

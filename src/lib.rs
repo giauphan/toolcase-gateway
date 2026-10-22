@@ -115,6 +115,8 @@ pub fn run() -> io::Result<()> {
             "MUSE_LIVE_VIDEO_PROMPT",
             "A colorful butterfly landing gently on a blooming sunflower, macro video",
         ),
+        // Populated by apply_to when persistent labeled accounts exist.
+        jev_labeled_accounts: vec![],
     };
     let mut config = config;
     let config_file = crate::config::resolve_config_file();

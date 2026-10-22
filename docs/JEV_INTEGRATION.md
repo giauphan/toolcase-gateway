@@ -172,21 +172,34 @@ You can configure Jev API keys statically or dynamically:
 
 1. **Dynamic Dashboard Management (Recommended)**:
    - Open `/gateway-config/dashboard` in your browser.
-   - Paste one or more Jev API keys under the **Provider Accounts** section.
-   - Keys are immediately activated in memory and persisted to `gateway_config.json` with POSIX `0600` permissions (never modifying `.env`).
+   - Paste one or more Jev API keys under the **Add Multi API Keys / Accounts** section, with an optional account label.
+   - Keys and labels are immediately activated in memory and persisted to `gateway_config.json` with POSIX `0600` permissions (never modifying `.env`).
    - Or use the REST endpoint:
      ```bash
      curl -X POST http://127.0.0.1:20129/api/v1/dashboard/accounts \
        -H "Content-Type: application/json" \
        -d '{
          "provider": "jev",
+         "label": "primary-cluster",
          "api_keys": ["sk-jev-account1-...", "sk-jev-account2-..."]
+       }'
+     ```
+     You can also supply structured accounts or inline labels:
+     ```bash
+     curl -X POST http://127.0.0.1:20129/api/v1/dashboard/accounts \
+       -H "Content-Type: application/json" \
+       -d '{
+         "provider": "jev",
+         "accounts": [
+           { "key": "sk-jev-account1-...", "label": "prod-worker-1" },
+           { "key": "sk-jev-account2-...", "label": "prod-worker-2" }
+         ]
        }'
      ```
 
 2. **Environment Variables**:
    ```bash
-   GW_JEV_API_KEYS="<key-1>,<key-2>,<key-3>"
+   GW_JEV_API_KEYS="primary:sk-key-1,secondary:sk-key-2,sk-key-3"
    GW_JEV_BASE_URL="https://jev-ai.org"
    ```
 
