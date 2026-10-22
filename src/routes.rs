@@ -257,7 +257,7 @@ fn route_request_impl(
 
     if clean_path == "/muse-ai/v1/create-video" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::museai::handle_create_video(client, &request.body, config)
+            crate::museai::handle_create_video_request(client, request, config)
         } else {
             write_error(
                 client,
@@ -291,7 +291,7 @@ fn route_request_impl(
             return crate::museai::handle_update_video_prompt(client, sub, &request.body);
         }
         if request.method.eq_ignore_ascii_case("get") {
-            return crate::museai::handle_get_video(client, sub);
+            return crate::museai::handle_get_video_request(client, sub, request);
         }
         return write_error(
             client,
