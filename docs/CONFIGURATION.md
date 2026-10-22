@@ -54,7 +54,7 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_MUSEAI_VM_ID` | *(empty)* | string | Muse AI | Identifier of the target Confidential VM instance. |
 | `GW_MUSEAI_COOKIE` | *(empty)* | string | Muse AI | Session cookie (`hatch_sess=...`) for REST and WebSocket bootstrap. |
 | `GW_MUSEAI_AUTO_CLEANUP_THREADS` | `true` | bool | Muse AI | Automatically clean up background worker threads after retention expiry. |
-| `GW_MUSEAI_THREAD_RETENTION_SECS` | `86400` | u64 | Muse AI | Duration in seconds before inactive worker threads are reclaimed. |
+| `GW_MUSEAI_THREAD_RETENTION_SECS` | `172800` | u64 | Muse AI | Duration in seconds before inactive worker sessions, video jobs, and media are reclaimed (default 2 days: 172800s). |
 | `MUSE_LIVE_VIDEO_PROMPT` | *(built-in prompt)* | string | Muse Video | Default prompt template used when generating videos without explicit prompt. |
 | `GW_MUSE_APPROVAL_MODE` | `off` | enum | Muse Sentinel | Approval mode: `off` (fail-closed), `observe` (log only), or `on` (scoped auto-approval). |
 | `GW_MUSE_APPROVAL_ALLOWED_DESTINATIONS` | *(empty)* | csv | Muse Sentinel | Comma-separated domain patterns permitted for auto-approval (e.g. `muse.ai`). |
