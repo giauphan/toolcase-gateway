@@ -75,7 +75,34 @@ pub fn run() -> io::Result<()> {
         jev_credit_cooldown_secs: env_or("GW_JEV_CREDIT_COOLDOWN_SECS", "300")
             .parse()
             .unwrap_or(300),
-        jev_openrouter_accounts: vec![],
+        jev_openrouter_accounts: {
+            let mut or_accs = Vec::new();
+            let keys_raw = env_or("GW_JEV_OPENROUTER_API_KEYS", "");
+            for k in crate::config::parse_openrouter_api_keys(&keys_raw) {
+                let (lbl, key) = crate::providers::jev::accounts::parse_entry_label(&k, None);
+                let label = lbl.unwrap_or_else(|| "openrouter-key".into());
+                or_accs.push(crate::providers::jev::accounts::OpenRouterAccount {
+                    api_key: key,
+                    cookie: String::new(),
+                    label,
+                });
+            }
+            let cookies_raw = env_or("GW_JEV_OPENROUTER_COOKIES", "");
+            for c in cookies_raw
+                .split(['\r', '\n'])
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                let (lbl, cookie) = crate::providers::jev::accounts::parse_entry_label(c, None);
+                let label = lbl.unwrap_or_else(|| "openrouter-cookie".into());
+                or_accs.push(crate::providers::jev::accounts::OpenRouterAccount {
+                    api_key: String::new(),
+                    cookie,
+                    label,
+                });
+            }
+            or_accs
+        },
         routing_mode: match env_or("GW_ROUTING_MODE", "existing").as_str() {
             "existing" => crate::config::RoutingMode::Existing,
             "round_robin" => crate::config::RoutingMode::RoundRobin,

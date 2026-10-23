@@ -136,16 +136,34 @@ struct AddAccountsPayload {
     accounts: Option<serde_json::Value>,
 }
 
-fn parse_string_entries(s: &str, default_label: Option<&str>) -> Vec<(String, Option<String>)> {
-    s.split(&['\n', '\r', ','][..])
+fn parse_string_entries(
+    s: &str,
+    default_label: Option<&str>,
+    is_cookie: bool,
+) -> Vec<(String, Option<String>)> {
+    let delimiters: &[char] = if is_cookie {
+        &['\n', '\r']
+    } else {
+        &['\n', '\r', ',']
+    };
+    s.split(delimiters)
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(|line| {
-            if let Some((lbl, key)) = line.split_once(':').or_else(|| line.split_once('=')) {
+            if let Some((lbl, val)) = line.split_once(':') {
                 let lbl = lbl.trim();
-                let key = key.trim();
-                if !lbl.is_empty() && !key.is_empty() {
-                    return (key.to_string(), Some(lbl.to_string()));
+                let val = val.trim();
+                if !lbl.is_empty() && !val.is_empty() && !lbl.contains('=') && !lbl.contains(';') {
+                    return (val.to_string(), Some(lbl.to_string()));
+                }
+            }
+            if !is_cookie {
+                if let Some((lbl, key)) = line.split_once('=') {
+                    let lbl = lbl.trim();
+                    let key = key.trim();
+                    if !lbl.is_empty() && !key.is_empty() && key.starts_with("sk-") {
+                        return (key.to_string(), Some(lbl.to_string()));
+                    }
                 }
             }
             (line.to_string(), default_label.map(str::to_string))
@@ -156,16 +174,18 @@ fn parse_string_entries(s: &str, default_label: Option<&str>) -> Vec<(String, Op
 fn extract_entry_from_value(
     val: &serde_json::Value,
     default_label: Option<&str>,
+    is_cookie: bool,
 ) -> Vec<(String, Option<String>)> {
     match val {
         serde_json::Value::Array(arr) => arr
             .iter()
-            .flat_map(|item| extract_entry_from_value(item, default_label))
+            .flat_map(|item| extract_entry_from_value(item, default_label, is_cookie))
             .collect(),
         serde_json::Value::Object(map) => {
             let key = map
                 .get("api_key")
                 .or_else(|| map.get("key"))
+                .or_else(|| map.get("cookie"))
                 .and_then(|v| v.as_str())
                 .map(str::trim)
                 .filter(|s| !s.is_empty());
@@ -182,12 +202,15 @@ fn extract_entry_from_value(
                 Vec::new()
             }
         }
-        serde_json::Value::String(s) => parse_string_entries(s, default_label),
+        serde_json::Value::String(s) => parse_string_entries(s, default_label, is_cookie),
         _ => Vec::new(),
     }
 }
 
-fn extract_account_entries(payload: &AddAccountsPayload) -> Vec<(String, Option<String>)> {
+fn extract_account_entries(
+    payload: &AddAccountsPayload,
+    is_cookie: bool,
+) -> Vec<(String, Option<String>)> {
     let mut entries = Vec::new();
     let default_label = payload
         .label
@@ -196,13 +219,13 @@ fn extract_account_entries(payload: &AddAccountsPayload) -> Vec<(String, Option<
         .filter(|s| !s.is_empty());
 
     if let Some(ref val) = payload.accounts {
-        entries.extend(extract_entry_from_value(val, default_label));
+        entries.extend(extract_entry_from_value(val, default_label, is_cookie));
     }
     if let Some(ref val) = payload.api_keys {
-        entries.extend(extract_entry_from_value(val, default_label));
+        entries.extend(extract_entry_from_value(val, default_label, is_cookie));
     }
     if let Some(ref val) = payload.keys {
-        entries.extend(extract_entry_from_value(val, default_label));
+        entries.extend(extract_entry_from_value(val, default_label, is_cookie));
     }
 
     if let Some(dl) = default_label {
@@ -244,22 +267,32 @@ pub fn handle_add_provider_accounts(
         .to_ascii_lowercase();
 
     let is_direct_jev = provider == "jev" || provider == "jev-ai";
-    let is_openrouter_jev = provider == "openrouter"
+    let is_openrouter_key = provider == "openrouter-key"
+        || provider == "openrouter_key"
+        || provider == "openrouter/key"
+        || provider == "openroute-key"
+        || provider == "openroute/key";
+    let is_openrouter_cookie = provider == "openrouter-cookie"
+        || provider == "openrouter_cookie"
+        || provider == "openrouter/cookie"
+        || provider == "openroute-cookie"
+        || provider == "openroute/cookie"
+        || provider == "jev-browser";
+    let is_openrouter_general = provider == "openrouter"
         || provider == "openroute"
         || provider == "openroute/jev"
-        || provider == "openrouter/jev"
-        || provider == "jev-browser";
+        || provider == "openrouter/jev";
 
-    if !is_direct_jev && !is_openrouter_jev {
+    if !is_direct_jev && !is_openrouter_key && !is_openrouter_cookie && !is_openrouter_general {
         return write_error(
             client,
             400,
             "Bad Request",
-            &format!("Unsupported provider '{provider}'. Supported providers: 'jev', 'openrouter' (or 'openroute/jev')"),
+            &format!("Unsupported provider '{provider}'. Supported providers: 'jev', 'openrouter-key', 'openrouter-cookie', 'openrouter'"),
         );
     }
 
-    let entries = extract_account_entries(&payload);
+    let entries = extract_account_entries(&payload, is_openrouter_cookie);
 
     if entries.is_empty() {
         return write_error(
@@ -270,8 +303,15 @@ pub fn handle_add_provider_accounts(
         );
     }
 
-    if is_openrouter_jev {
-        let added_count = store.add_jev_openrouter_accounts(&entries);
+    if is_openrouter_key || is_openrouter_cookie || is_openrouter_general {
+        let force_type = if is_openrouter_key {
+            Some(true)
+        } else if is_openrouter_cookie {
+            Some(false)
+        } else {
+            None
+        };
+        let added_count = store.add_jev_openrouter_typed_accounts(&entries, force_type);
         let _ = store.save_to_persistent_file();
 
         let accounts: Vec<serde_json::Value> = store

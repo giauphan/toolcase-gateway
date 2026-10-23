@@ -47,7 +47,9 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_JEV_BASE_URL` | `https://jev-ai.org` | URL | Jev AI | Target base URL for the direct Jev Decision API. |
 | `GW_JEV_OPENROUTER_BASE_URL` | `https://openrouter.ai` | URL | Jev AI | Upstream base URL for OpenRouter Decisions API (`/api/alpha/decisions`). |
 | `GW_JEV_OPENROUTER_API_KEY` | *(empty)* | string | Jev AI | OpenRouter API key (`sk-or-...`) used for Bearer token authentication to OpenRouter decisions (`/api/alpha/decisions`). |
+| `GW_JEV_OPENROUTER_API_KEYS` | *(empty)* | csv | Jev AI | Comma-separated OpenRouter API keys (`sk-or-...`) with optional label prefixes for pool rotation. |
 | `GW_JEV_OPENROUTER_COOKIE` | *(empty)* | string | Jev AI | Browser session cookie used for OpenRouter decision endpoint authentication when no API key is set. |
+| `GW_JEV_OPENROUTER_COOKIES` | *(empty)* | string | Jev AI | Line-separated OpenRouter browser session cookies with optional label prefixes for pool rotation. |
 | `GW_JEV_OPENROUTER_MODEL` | `typesafe/jev-1.13` | string | Jev AI | Default decision model identifier routed to OpenRouter. |
 | `GW_JEV_OPENROUTER_FALLBACK_MODELS` | *(empty)* | csv | Jev AI | Comma-separated fallback decision models attempted on OpenRouter if primary decision model fails. |
 | `GW_JEV_OPENROUTER_ENABLED` | `true` | bool | Jev AI | Flag indicating whether failover to OpenRouter browser provider is enabled. |

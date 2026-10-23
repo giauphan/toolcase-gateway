@@ -311,10 +311,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <h2>Add Multi API Keys / Accounts</h2>
     <form id="add-form">
       <div class="field-group">
-        <label for="provider-select">Provider</label>
+        <label for="provider-select">Provider / Account Type</label>
         <select id="provider-select" name="provider">
-          <option value="jev" selected>Jev AI Decision API (Direct API Keys)</option>
-          <option value="openrouter">OpenRouter / JEV Browser (Cookie Session Pool)</option>
+          <option value="jev" selected>Direct Jev AI API Keys (sk-glm...)</option>
+          <option value="openrouter-key">OpenRouter Decision API Keys (Bearer Tokens sk-or-...)</option>
+          <option value="openrouter-cookie">OpenRouter Browser Session Cookies</option>
         </select>
       </div>
 
@@ -325,8 +326,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
       </div>
 
       <div class="field-group">
-        <label for="keys-input">API Key(s)</label>
-        <textarea id="keys-input" name="keys" rows="3" placeholder="Enter one or more API keys (comma-separated or one per line), e.g.&#10;sk-glm5-00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b&#10;prod-backup:sk-glm5-anotheraccounttoken..."></textarea>
+        <label for="keys-input">API Key(s) / Session Cookie(s)</label>
+        <textarea id="keys-input" name="keys" rows="3" placeholder="Enter one or more API keys or session cookies (comma-separated or one per line), e.g.&#10;sk-or-v1-00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b&#10;prod-backup:sk-or-v1-anotheraccounttoken...&#10;worker-session:or_statsig_stable_id=...; __session=..."></textarea>
         <div class="hint">Newly added keys will immediately join the live candidate pool and persist to dedicated JSON storage.</div>
       </div>
 

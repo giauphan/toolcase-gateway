@@ -206,7 +206,9 @@ The gateway uses a two-layer configuration model:
 | `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated fallback models, rotated across requests. |
 | `GW_JEV_API_KEYS` | empty | Comma-separated Jev AI account keys for credit failover. |
 | `GW_JEV_OPENROUTER_API_KEY` | empty | OpenRouter API key (`sk-or-...`) for Bearer token decision requests. |
+| `GW_JEV_OPENROUTER_API_KEYS` | empty | Comma-separated OpenRouter API keys (`sk-or-...`) for pool rotation. |
 | `GW_JEV_OPENROUTER_COOKIE` | empty | OpenRouter browser session cookie for browser decision failover. |
+| `GW_JEV_OPENROUTER_COOKIES` | empty | Line-separated OpenRouter browser session cookies for pool rotation. |
 | `GW_JEV_OPENROUTER_MODEL` | `typesafe/jev-1.13` | Default decision model identifier routed to OpenRouter. |
 | `GW_JEV_OPENROUTER_FALLBACK_MODELS` | empty | Comma-separated fallback decision models for alternate evaluations. |
 | `GW_JEV_CREDIT_COOLDOWN_SECS` | `300` | Account cooldown window in seconds on HTTP 402. |

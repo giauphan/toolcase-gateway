@@ -19,6 +19,15 @@ pub fn parse_jev_api_keys(value: &str) -> Vec<String> {
         .collect()
 }
 
+pub fn parse_openrouter_api_keys(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 pub fn parse_jev_accounts(value: &str) -> Vec<crate::providers::jev::accounts::JevAccount> {
     let keys = parse_jev_api_keys(value);
     crate::providers::jev::accounts::JevAccountPool::new(&keys).accounts()
@@ -600,7 +609,17 @@ impl ConfigStore {
     }
 
     pub fn add_jev_openrouter_accounts(&self, entries: &[(String, Option<String>)]) -> usize {
-        let added = self.jev_pool.add_openrouter_entries(entries);
+        self.add_jev_openrouter_typed_accounts(entries, None)
+    }
+
+    pub fn add_jev_openrouter_typed_accounts(
+        &self,
+        entries: &[(String, Option<String>)],
+        force_type: Option<bool>,
+    ) -> usize {
+        let added = self
+            .jev_pool
+            .add_openrouter_typed_entries(entries, force_type);
         {
             let mut conf = self.inner.write().unwrap();
             conf.jev_openrouter_accounts = self.jev_pool.openrouter_accounts();

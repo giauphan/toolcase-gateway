@@ -410,6 +410,14 @@ impl JevAccountPool {
     }
 
     pub fn add_openrouter_entries(&self, entries: &[(String, Option<String>)]) -> usize {
+        self.add_openrouter_typed_entries(entries, None)
+    }
+
+    pub fn add_openrouter_typed_entries(
+        &self,
+        entries: &[(String, Option<String>)],
+        force_type: Option<bool>,
+    ) -> usize {
         let mut guard = match self.openrouter_accounts.write() {
             Ok(g) => g,
             Err(_) => return 0,
@@ -431,7 +439,9 @@ impl JevAccountPool {
                 continue;
             }
 
-            let is_key = crate::providers::jev::openrouter::is_openrouter_api_key(&trimmed_str);
+            let is_key = force_type.unwrap_or_else(|| {
+                crate::providers::jev::openrouter::is_openrouter_api_key(&trimmed_str)
+            });
             let num = guard.len() + 1;
             let label_prefix = if is_key {
                 "openrouter-key"
@@ -491,19 +501,29 @@ impl JevAccountPool {
     }
 }
 
-fn parse_entry_label(raw: &str, custom: Option<String>) -> (Option<String>, String) {
+pub(crate) fn parse_entry_label(raw: &str, custom: Option<String>) -> (Option<String>, String) {
     let trimmed = raw.trim();
-    if let Some((lbl, part)) = trimmed.split_once(':').or_else(|| trimmed.split_once('=')) {
+    if let Some(c) = custom {
+        let c_trim = c.trim();
+        if !c_trim.is_empty() {
+            return (Some(c_trim.to_string()), trimmed.to_string());
+        }
+    }
+    if let Some((lbl, part)) = trimmed.split_once(':') {
         let l = lbl.trim();
         let p = part.trim();
-        if !l.is_empty() && !p.is_empty() {
-            (Some(l.to_string()), p.to_string())
-        } else {
-            (custom, trimmed.to_string())
+        if !l.is_empty() && !p.is_empty() && !l.contains(';') && !l.contains('=') {
+            return (Some(l.to_string()), p.to_string());
         }
-    } else {
-        (custom, trimmed.to_string())
     }
+    if let Some((lbl, part)) = trimmed.split_once('=') {
+        let l = lbl.trim();
+        let p = part.trim();
+        if !l.is_empty() && !p.is_empty() && !p.contains(';') && p.starts_with("sk-") {
+            return (Some(l.to_string()), p.to_string());
+        }
+    }
+    (None, trimmed.to_string())
 }
 
 fn auto_label(prefix: &str, num: usize, val: &str) -> String {

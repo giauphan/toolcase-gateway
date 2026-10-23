@@ -693,3 +693,44 @@ fn dashboard_update_jev_config_api_and_persistence() {
     let _ = fs::remove_file(tmp_env);
     let _ = fs::remove_file(store.config_file);
 }
+
+#[test]
+fn dashboard_accounts_openrouter_explicit_key_and_cookie_ingest_and_persistence() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let cfg = test_config();
+    let store = ConfigStore::new(cfg, tmp_env.clone());
+
+    // Ingest with explicit openrouter-key provider
+    let key_payload =
+        br#"{"provider":"openrouter-key","api_keys":["custom-label:sk-or-v1-explicit-key"]}"#;
+    let (head1, body1) = request_gateway("POST", "/api/v1/dashboard/accounts", key_payload, &store);
+    assert_eq!(head1.status, 200);
+    let parsed1: serde_json::Value = serde_json::from_slice(&body1).unwrap();
+    assert_eq!(parsed1["ok"], true);
+    assert_eq!(parsed1["added_count"], 1);
+
+    // Ingest with explicit openrouter-cookie provider
+    let cookie_payload =
+        br#"{"provider":"openrouter-cookie","api_keys":["session-label:or_cookie_token=val"]}"#;
+    let (head2, body2) =
+        request_gateway("POST", "/api/v1/dashboard/accounts", cookie_payload, &store);
+    assert_eq!(head2.status, 200);
+    let parsed2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
+    assert_eq!(parsed2["ok"], true);
+    assert_eq!(parsed2["added_count"], 1);
+
+    let or_accounts = store.jev_pool().openrouter_accounts();
+    assert_eq!(or_accounts.len(), 2);
+    assert_eq!(or_accounts[0].api_key, "sk-or-v1-explicit-key");
+    assert_eq!(or_accounts[0].cookie, "");
+    assert_eq!(or_accounts[0].label, "custom-label");
+
+    assert_eq!(or_accounts[1].api_key, "");
+    assert_eq!(or_accounts[1].cookie, "or_cookie_token=val");
+    assert_eq!(or_accounts[1].label, "session-label");
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}
