@@ -77,6 +77,7 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
                 "name": "OpenRouter JEV (Browser / Cookie / API Key)",
                 "base_url": config.jev_openrouter_base_url,
                 "model": config.jev_openrouter_model,
+                "fallback_models": crate::providers::jev::accounts::effective_fallback_models(&config),
                 "enabled": config.jev_openrouter_enabled,
                 "credit_cooldown_secs": config.jev_credit_cooldown_secs,
                 "masked_cookie": mask_key(&config.jev_openrouter_cookie),
@@ -391,6 +392,7 @@ pub struct UpdateConfigPayload {
     pub jev_openrouter_api_key: Option<String>,
     pub jev_openrouter_cookie: Option<String>,
     pub jev_openrouter_model: Option<String>,
+    pub jev_openrouter_fallback_models: Option<serde_json::Value>,
     pub jev_openrouter_enabled: Option<bool>,
 }
 
@@ -472,6 +474,9 @@ pub fn handle_update_gateway_config(
             if !t.is_empty() {
                 conf.jev_openrouter_model = t.to_string();
             }
+        }
+        if let Some(ref val) = payload.jev_openrouter_fallback_models {
+            conf.jev_openrouter_fallback_models = crate::config::parse_fallback_models(val);
         }
         if let Some(enabled) = payload.jev_openrouter_enabled {
             conf.jev_openrouter_enabled = enabled;

@@ -246,13 +246,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
           <div class="hint">Model identifier used for OpenRouter decisions endpoint (e.g. typesafe/jev-1.13).</div>
         </div>
         <div class="field-group">
-          <label for="cfg-jev-or-enabled">Failover to OpenRouter on Credit Limit</label>
-          <select id="cfg-jev-or-enabled" name="jev_openrouter_enabled">
-            <option value="true" selected>Enabled (Auto-failover on HTTP 402/429)</option>
-            <option value="false">Disabled (Direct accounts only)</option>
-          </select>
-          <div class="hint">Automatically rotate to OpenRouter browser candidate when direct accounts run out of credit.</div>
+          <label for="cfg-jev-or-fallback-models">Step 3 Alternate Decision Models</label>
+          <input type="text" id="cfg-jev-or-fallback-models" name="jev_openrouter_fallback_models" placeholder="baseten/mammoth-1:free, nace-ai/drex-max">
+          <div class="hint">Comma-separated list of alternate models round-robined in Step 3 when primary fails.</div>
         </div>
+      </div>
+
+      <div class="field-group">
+        <label for="cfg-jev-or-enabled">Failover to OpenRouter on Credit Limit</label>
+        <select id="cfg-jev-or-enabled" name="jev_openrouter_enabled">
+          <option value="true" selected>Enabled (Auto-failover on HTTP 402/429)</option>
+          <option value="false">Disabled (Direct accounts only)</option>
+        </select>
+        <div class="hint">Automatically rotate to OpenRouter browser candidate when direct accounts run out of credit.</div>
       </div>
 
       <div class="field-group">
@@ -388,6 +394,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const cfgJevBase = document.getElementById('cfg-jev-base');
   const cfgJevOrBase = document.getElementById('cfg-jev-or-base');
   const cfgJevOrModel = document.getElementById('cfg-jev-or-model');
+  const cfgJevOrFallbackModels = document.getElementById('cfg-jev-or-fallback-models');
   const cfgJevOrEnabled = document.getElementById('cfg-jev-or-enabled');
   const cfgJevOrApiKey = document.getElementById('cfg-jev-or-api-key');
   const cfgJevOrCookie = document.getElementById('cfg-jev-or-cookie');
@@ -435,6 +442,10 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
         if (cfgJevOrBase && !cfgJevOrBase.matches(':focus')) cfgJevOrBase.value = p.openrouter_jev.base_url || 'https://openrouter.ai';
         if (cfgJevOrModel && !cfgJevOrModel.matches(':focus')) cfgJevOrModel.value = p.openrouter_jev.model || 'typesafe/jev-1.13';
+        if (cfgJevOrFallbackModels && !cfgJevOrFallbackModels.matches(':focus')) {
+          const fms = p.openrouter_jev.fallback_models;
+          cfgJevOrFallbackModels.value = Array.isArray(fms) ? fms.join(', ') : (fms || '');
+        }
         if (cfgJevOrEnabled) cfgJevOrEnabled.value = en ? 'true' : 'false';
         if (cfgJevCooldown && !cfgJevCooldown.matches(':focus')) cfgJevCooldown.value = p.openrouter_jev.credit_cooldown_secs || 300;
         if (hintJevApiKey) hintJevApiKey.textContent = p.openrouter_jev.masked_api_key ? ('Current: ' + p.openrouter_jev.masked_api_key) : 'Current: not set';
@@ -681,6 +692,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
         jev_base_url: cfgJevBase ? cfgJevBase.value.trim() : undefined,
         jev_openrouter_base_url: cfgJevOrBase ? cfgJevOrBase.value.trim() : undefined,
         jev_openrouter_model: cfgJevOrModel ? cfgJevOrModel.value.trim() : undefined,
+        jev_openrouter_fallback_models: cfgJevOrFallbackModels ? cfgJevOrFallbackModels.value.trim() : undefined,
         jev_openrouter_enabled: cfgJevOrEnabled ? (cfgJevOrEnabled.value === 'true') : true,
         jev_credit_cooldown_secs: cfgJevCooldown && cfgJevCooldown.value ? parseInt(cfgJevCooldown.value, 10) : undefined,
       };

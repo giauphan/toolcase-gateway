@@ -129,6 +129,13 @@ fn dashboard_overview_returns_masked_keys_and_providers() {
     assert_eq!(accounts[1]["label"], "account-2 (..cdef)");
     assert_eq!(accounts[1]["masked_key"], "sk-glm...cdef");
 
+    let or_fallback_models = json["providers"]["openrouter_jev"]["fallback_models"]
+        .as_array()
+        .unwrap();
+    assert_eq!(or_fallback_models.len(), 2);
+    assert_eq!(or_fallback_models[0], "baseten/mammoth-1:free");
+    assert_eq!(or_fallback_models[1], "nace-ai/drex-max");
+
     // Full key must NEVER be leaked in JSON output
     let body_str = String::from_utf8_lossy(&body);
     assert!(!body_str.contains("00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b"));
@@ -625,6 +632,7 @@ fn dashboard_update_jev_config_api_and_persistence() {
         "jev_openrouter_api_key": "sk-or-v1-testkey123456",
         "jev_openrouter_cookie": "secret-session-cookie-12345",
         "jev_openrouter_model": "typesafe/jev-1.13",
+        "jev_openrouter_fallback_models": ["model-one", "model-two"],
         "jev_openrouter_enabled": true,
         "jev_credit_cooldown_secs": 600
     }"#;
@@ -642,6 +650,10 @@ fn dashboard_update_jev_config_api_and_persistence() {
     assert_eq!(
         parsed["config"]["jev_openrouter_model"],
         "typesafe/jev-1.13"
+    );
+    assert_eq!(
+        parsed["config"]["jev_openrouter_fallback_models"],
+        serde_json::json!(["model-one", "model-two"])
     );
     assert_eq!(parsed["config"]["jev_openrouter_enabled"], true);
     assert_eq!(parsed["config"]["jev_credit_cooldown_secs"], 600);
@@ -664,10 +676,18 @@ fn dashboard_update_jev_config_api_and_persistence() {
         "secret-session-cookie-12345"
     );
     assert_eq!(snapshot.jev_openrouter_model, "typesafe/jev-1.13");
+    assert_eq!(
+        snapshot.jev_openrouter_fallback_models,
+        vec!["model-one".to_string(), "model-two".to_string()]
+    );
     assert_eq!(snapshot.jev_credit_cooldown_secs, 600);
 
     // Verify persistent config file has settings
     let persistent = toolcase_gateway::config::load_persistent_config(&store.config_file).unwrap();
+    assert_eq!(
+        persistent.jev_openrouter_fallback_models.as_ref().unwrap(),
+        &vec!["model-one".to_string(), "model-two".to_string()]
+    );
     assert_eq!(
         persistent.jev_base_url.as_deref(),
         Some("https://custom-jev.ai")

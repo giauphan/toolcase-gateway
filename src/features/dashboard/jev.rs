@@ -13,6 +13,7 @@ pub struct UpdateJevConfigPayload {
     pub jev_openrouter_api_key: Option<String>,
     pub jev_openrouter_cookie: Option<String>,
     pub jev_openrouter_model: Option<String>,
+    pub jev_openrouter_fallback_models: Option<serde_json::Value>,
     pub jev_openrouter_enabled: Option<bool>,
     pub jev_credit_cooldown_secs: Option<u64>,
 }
@@ -91,6 +92,9 @@ pub fn handle_update_jev_config(
                 conf.jev_openrouter_model = trimmed.to_string();
             }
         }
+        if let Some(ref val) = payload.jev_openrouter_fallback_models {
+            conf.jev_openrouter_fallback_models = crate::config::parse_fallback_models(val);
+        }
         if let Some(enabled) = payload.jev_openrouter_enabled {
             conf.jev_openrouter_enabled = enabled;
         }
@@ -111,6 +115,7 @@ pub fn handle_update_jev_config(
             "jev_base_url": snapshot.jev_base_url,
             "jev_openrouter_base_url": snapshot.jev_openrouter_base_url,
             "jev_openrouter_model": snapshot.jev_openrouter_model,
+            "jev_openrouter_fallback_models": snapshot.jev_openrouter_fallback_models,
             "jev_openrouter_enabled": snapshot.jev_openrouter_enabled,
             "jev_credit_cooldown_secs": snapshot.jev_credit_cooldown_secs,
             "jev_openrouter_cookie": mask_key(&snapshot.jev_openrouter_cookie),

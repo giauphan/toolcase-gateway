@@ -43,6 +43,20 @@ pub struct JevAccountPool {
     credit_cooldown_secs: u64,
 }
 
+pub const DEFAULT_FALLBACK_DECISION_MODELS: &[&str] =
+    &["baseten/mammoth-1:free", "nace-ai/drex-max"];
+
+pub fn effective_fallback_models(config: &Config) -> Vec<String> {
+    if !config.jev_openrouter_fallback_models.is_empty() {
+        config.jev_openrouter_fallback_models.clone()
+    } else {
+        DEFAULT_FALLBACK_DECISION_MODELS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+}
+
 impl JevAccountPool {
     pub fn new(keys: &[String]) -> Self {
         let accounts: Vec<JevAccount> = Self::build_accounts(keys, 0);
@@ -197,14 +211,7 @@ impl JevAccountPool {
     }
 
     pub fn rotated_fallback_models(&self, config: &Config) -> Vec<String> {
-        let base_models = if !config.jev_openrouter_fallback_models.is_empty() {
-            config.jev_openrouter_fallback_models.clone()
-        } else {
-            vec![
-                "baseten/mammoth-1:free".to_string(),
-                "nace-ai/drex-max".to_string(),
-            ]
-        };
+        let base_models = effective_fallback_models(config);
         let m_len = base_models.len();
         if m_len <= 1 {
             return base_models;

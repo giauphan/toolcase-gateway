@@ -28,6 +28,25 @@ pub fn parse_openrouter_api_keys(value: &str) -> Vec<String> {
         .collect()
 }
 
+pub fn parse_fallback_models(val: &serde_json::Value) -> Vec<String> {
+    match val {
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        serde_json::Value::String(s) => s
+            .split(&[',', '\n', '\r'][..])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 pub fn parse_jev_accounts(value: &str) -> Vec<crate::providers::jev::accounts::JevAccount> {
     let keys = parse_jev_api_keys(value);
     crate::providers::jev::accounts::JevAccountPool::new(&keys).accounts()
