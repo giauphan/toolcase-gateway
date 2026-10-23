@@ -234,6 +234,27 @@ flowchart TD
 - **Fail-Closed on Bad Input**: Malformed inputs (`400 Bad Request`, `404 Not Found`, `413 Payload Too Large`, `422 Unprocessable Entity`) fail immediately without rotating accounts, preventing capacity waste.
 - **Idempotency Protection**: When an `Idempotency-Key` header is present, it is forwarded across account retries to prevent duplicate billing.
 
+### OpenRouter / JEV Decision Provider & Automatic Failover Cascade
+
+In addition to direct Jev API keys, the gateway supports a structured 4-tier failover cascade when executing decision requests:
+`Direct Jev -> Jev OpenRouter (API Key) -> OpenRouter Different Decision -> OpenRouter Browser (Cookie)`
+
+1. **Automatic Switching on Credit Exhaustion & Failures**:
+   - **Tier 1 (Direct Jev)**: Forwarded to `https://jev-ai.org/api/v1/systemone/`.
+   - **Tier 2 (Jev OpenRouter)**: If direct accounts return HTTP `401`, `402 Payment Required`, `429`, or `5xx`, failover moves immediately to OpenRouter using configured API keys with the primary Jev model (`typesafe/jev-1.13`).
+   - **Tier 3 (OpenRouter Different Decision)**: If the Jev model encounters rate limits or errors, failover automatically attempts alternate decision models (e.g. `anthropic/claude-3-haiku` or `GW_JEV_OPENROUTER_FALLBACK_MODELS`).
+   - **Tier 4 (OpenRouter Browser)**: If API key credits are exhausted, failover switches to OpenRouter browser session cookies.
+2. **Round-Robin on Subsequent Requests ("After")**:
+   - Accounts returning HTTP `402` enter a cooldown window (`GW_JEV_CREDIT_COOLDOWN_SECS`, default 300 seconds).
+   - On subsequent decision requests after a failure, healthy candidates continue to rotate in round-robin order. If direct accounts remain exhausted, subsequent requests immediately and smoothly rotate across OpenRouter API keys and browser sessions.
+3. **API Key & Session Authentication**:
+   - **Bearer API Key**: Configured via `GW_JEV_OPENROUTER_API_KEY`, dashboard, or inbound client request (`Authorization: Bearer sk-or-...`). Uses standard OpenRouter quickstart headers: `Authorization: Bearer <key>`, `HTTP-Referer: https://github.com/giauphan/toolcase-gateway`, and `X-Title: toolcase-gateway`.
+   - **Browser Session Cookie**: Provided via `GW_JEV_OPENROUTER_COOKIE` or dashboard for browser session replay.
+4. **Different Decision Models**:
+   Callers may specify any model compatible with OpenRouter (e.g. `typesafe/jev-1.13`, `anthropic/claude-3-haiku`, etc.) in the request body. If omitted or given as `jev-1.13`, it defaults cleanly to `typesafe/jev-1.13`.
+5. **Multi-Session & Multi-Key Round-Robin**:
+   Multiple OpenRouter API keys and browser sessions can be configured through the Dashboard or account pool, rotating round-robin independently within their respective tiers.
+
 ---
 
 ## 6. Endpoints & Route Mapping
@@ -243,12 +264,13 @@ The gateway normalizes inbound paths and maps them to canonical upstream Jev end
 | Gateway Route | Method | Jev Upstream Route | Description |
 | :--- | :--- | :--- | :--- |
 | `/jev/v1/systemone` | `POST` | `/api/v1/systemone/` | Submit a decision classification task |
+| `/jev/v1/decisions` | `POST` | `/api/v1/systemone/` | Canonical decision alias matching OpenRouter conventions |
 | `/jev/v1/models` | `GET` | `/api/v1/models/` | List supported decision models |
 | `/jev/v1/requests/{id}` | `GET` | `/api/v1/requests/{id}/` | Poll the status of an asynchronous decision |
 | `/jev/v1/requests/{id}/cancel` | `POST` | `/api/v1/requests/{id}/cancel/` | Cancel an active decision request |
 
 > [!NOTE]
-> The prefix `/jev-ai/v1/` is supported as an exact alias for `/jev/v1/`.
+> The prefixes `/jev-ai/v1/`, `/jev/decision`, and `/jev/decisions` are supported as exact aliases for the decision endpoint.
 
 ---
 

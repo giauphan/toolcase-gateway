@@ -74,6 +74,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <div class="desc" id="jev-desc">Multi-account failover pool</div>
     </div>
     <div class="stat-box">
+      <div class="title">OpenRouter JEV Browser</div>
+      <div class="val" id="openrouter-status">--</div>
+      <div class="desc" id="openrouter-desc">Credit limit failover &amp; browser session</div>
+    </div>
+    <div class="stat-box">
       <div class="title">MuseAI Subsystem</div>
       <div class="val" id="muse-status">--</div>
       <div class="desc" id="muse-desc">WebSocket &amp; Video pipeline</div>
@@ -215,6 +220,69 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
   <div class="card">
     <h2>
+      <span>Jev &amp; OpenRouter Decision API Settings</span>
+      <span class="tag ok" id="jev-mode-badge">Active</span>
+    </h2>
+    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
+      Configure upstream direct Jev API and OpenRouter browser session credentials. When direct Jev credit is exhausted (HTTP 402/429), requests automatically fail over and switch to OpenRouter.
+    </p>
+
+    <form id="jev-config-form">
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-jev-base">Direct Jev Base URL</label>
+          <input type="text" id="cfg-jev-base" name="jev_base_url" placeholder="https://jev-ai.org">
+        </div>
+        <div class="field-group">
+          <label for="cfg-jev-or-base">OpenRouter Base URL</label>
+          <input type="text" id="cfg-jev-or-base" name="jev_openrouter_base_url" placeholder="https://openrouter.ai">
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-jev-or-model">OpenRouter Decision Model</label>
+          <input type="text" id="cfg-jev-or-model" name="jev_openrouter_model" placeholder="typesafe/jev-1.13">
+          <div class="hint">Model identifier used for OpenRouter decisions endpoint (e.g. typesafe/jev-1.13).</div>
+        </div>
+        <div class="field-group">
+          <label for="cfg-jev-or-enabled">Failover to OpenRouter on Credit Limit</label>
+          <select id="cfg-jev-or-enabled" name="jev_openrouter_enabled">
+            <option value="true" selected>Enabled (Auto-failover on HTTP 402/429)</option>
+            <option value="false">Disabled (Direct accounts only)</option>
+          </select>
+          <div class="hint">Automatically rotate to OpenRouter browser candidate when direct accounts run out of credit.</div>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label for="cfg-jev-or-api-key">OpenRouter API Key (sk-or-...)</label>
+        <input type="password" id="cfg-jev-or-api-key" name="jev_openrouter_api_key" placeholder="Leave blank to retain current OpenRouter API key...">
+        <div class="hint" id="hint-jev-api-key">Current: not set</div>
+      </div>
+
+      <div class="field-group">
+        <label for="cfg-jev-or-cookie">OpenRouter Browser Session Cookie</label>
+        <textarea id="cfg-jev-or-cookie" name="jev_openrouter_cookie" rows="2" placeholder="Leave blank to retain current OpenRouter cookie..."></textarea>
+        <div class="hint" id="hint-jev-cookie">Current: not set</div>
+      </div>
+
+      <div class="field-group">
+        <label for="cfg-jev-cooldown">Credit Limit Cooldown (Seconds)</label>
+        <input type="number" id="cfg-jev-cooldown" name="jev_credit_cooldown_secs" placeholder="300" min="10" max="86400">
+        <div class="hint">How long an account returning HTTP 402 is demoted before retrying direct account (default: 300s).</div>
+      </div>
+
+      <div class="btns">
+        <button id="save-jev-btn" type="submit">Save Jev &amp; OpenRouter Settings</button>
+      </div>
+      <div class="ok-box" id="jev-ok-msg"></div>
+      <div class="err-box" id="jev-err-msg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>
       <span>Jev AI Provider Multi-Account Pool</span>
       <span class="tag ok" id="jev-count-badge">0 accounts</span>
     </h2>
@@ -226,13 +294,14 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <table>
         <thead>
           <tr>
+            <th>Provider</th>
             <th>Label</th>
-            <th>Masked API Key</th>
+            <th>Masked Credential</th>
             <th>Rotation Status</th>
           </tr>
         </thead>
         <tbody id="jev-accounts-table">
-          <tr><td colspan="3" class="empty-hint">Loading configured accounts...</td></tr>
+          <tr><td colspan="4" class="empty-hint">Loading configured accounts...</td></tr>
         </tbody>
       </table>
     </div>
@@ -244,7 +313,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-group">
         <label for="provider-select">Provider</label>
         <select id="provider-select" name="provider">
-          <option value="jev" selected>Jev AI Decision API (Multi-Account Pool)</option>
+          <option value="jev" selected>Jev AI Decision API (Direct API Keys)</option>
+          <option value="openrouter">OpenRouter / JEV Browser (Cookie Session Pool)</option>
         </select>
       </div>
 
@@ -281,6 +351,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const museStatus = document.getElementById('muse-status');
   const museDesc = document.getElementById('muse-desc');
   const museBadge = document.getElementById('muse-badge');
+  const openrouterStatus = document.getElementById('openrouter-status');
+  const openrouterDesc = document.getElementById('openrouter-desc');
 
   const cfgForm = document.getElementById('config-form');
   const cfgHost = document.getElementById('cfg-host');
@@ -311,7 +383,23 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const cfgMuseApprovalTypes = document.getElementById('cfg-muse-approval-types');
   const cfgMuseApprovalTimeout = document.getElementById('cfg-muse-approval-timeout');
 
+  const jevConfigForm = document.getElementById('jev-config-form');
+  const cfgJevBase = document.getElementById('cfg-jev-base');
+  const cfgJevOrBase = document.getElementById('cfg-jev-or-base');
+  const cfgJevOrModel = document.getElementById('cfg-jev-or-model');
+  const cfgJevOrEnabled = document.getElementById('cfg-jev-or-enabled');
+  const cfgJevOrApiKey = document.getElementById('cfg-jev-or-api-key');
+  const cfgJevOrCookie = document.getElementById('cfg-jev-or-cookie');
+  const cfgJevCooldown = document.getElementById('cfg-jev-cooldown');
+  const hintJevApiKey = document.getElementById('hint-jev-api-key');
+  const hintJevCookie = document.getElementById('hint-jev-cookie');
+  const saveJevBtn = document.getElementById('save-jev-btn');
+  const jevOkMsg = document.getElementById('jev-ok-msg');
+  const jevErrMsg = document.getElementById('jev-err-msg');
+  const jevModeBadge = document.getElementById('jev-mode-badge');
+
   const addForm = document.getElementById('add-form');
+  const providerSelect = document.getElementById('provider-select');
   const labelInput = document.getElementById('label-input');
   const keysInput = document.getElementById('keys-input');
   const submitBtn = document.getElementById('submit-btn');
@@ -338,22 +426,62 @@ button:disabled{opacity:.5;cursor:not-allowed}
         omniDesc.textContent = 'Fallbacks: ' + (p.omniroute.fallbacks && p.omniroute.fallbacks.length ? p.omniroute.fallbacks.join(', ') : 'none');
       }
 
+      if (p.openrouter_jev && openrouterStatus) {
+        const cnt = p.openrouter_jev.total_accounts || 0;
+        const en = p.openrouter_jev.enabled !== false;
+        openrouterStatus.textContent = (en ? 'Enabled' : 'Disabled') + ' (' + cnt + ' ' + (cnt === 1 ? 'Session' : 'Sessions') + ')';
+        openrouterDesc.textContent = (p.openrouter_jev.base_url || 'https://openrouter.ai') + ' • Model: ' + (p.openrouter_jev.model || 'typesafe/jev-1.13');
+
+        if (cfgJevOrBase && !cfgJevOrBase.matches(':focus')) cfgJevOrBase.value = p.openrouter_jev.base_url || 'https://openrouter.ai';
+        if (cfgJevOrModel && !cfgJevOrModel.matches(':focus')) cfgJevOrModel.value = p.openrouter_jev.model || 'typesafe/jev-1.13';
+        if (cfgJevOrEnabled) cfgJevOrEnabled.value = en ? 'true' : 'false';
+        if (cfgJevCooldown && !cfgJevCooldown.matches(':focus')) cfgJevCooldown.value = p.openrouter_jev.credit_cooldown_secs || 300;
+        if (hintJevApiKey) hintJevApiKey.textContent = p.openrouter_jev.masked_api_key ? ('Current: ' + p.openrouter_jev.masked_api_key) : 'Current: not set';
+        if (hintJevCookie) hintJevCookie.textContent = p.openrouter_jev.masked_cookie ? ('Current: ' + p.openrouter_jev.masked_cookie) : 'Current: not set';
+        if (jevModeBadge) {
+          jevModeBadge.textContent = en ? 'Active (Failover On)' : 'Direct Only';
+          jevModeBadge.className = 'tag ' + (en ? 'ok' : 'idle');
+        }
+      }
+
       if (p.jev) {
         const cnt = p.jev.total_accounts || 0;
-        jevStatus.textContent = cnt + (cnt === 1 ? ' Account' : ' Accounts');
+        const exCnt = p.jev.exhausted_accounts || 0;
+        const exHint = exCnt > 0 ? (' (' + exCnt + ' credit-exhausted)') : '';
+        jevStatus.textContent = cnt + (cnt === 1 ? ' Account' : ' Accounts') + exHint;
         jevDesc.textContent = p.jev.base_url || 'https://jev-ai.org';
-        countBadge.textContent = cnt + (cnt === 1 ? ' account' : ' accounts');
+        if (cfgJevBase && !cfgJevBase.matches(':focus')) cfgJevBase.value = p.jev.base_url || 'https://jev-ai.org';
 
-        if (p.jev.accounts && p.jev.accounts.length > 0) {
-          tableBody.innerHTML = p.jev.accounts.map(function(acc) {
-            return '<tr>' +
+        const rows = [];
+        if (p.jev.accounts) {
+          p.jev.accounts.forEach(function(acc) {
+            rows.push('<tr>' +
+              '<td><span class="tag ok">Direct Jev</span></td>' +
               '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
               '<td class="mono">' + escapeHtml(acc.masked_key) + '</td>' +
               '<td><span class="tag ok">Active in Pool</span></td>' +
-              '</tr>';
-          }).join('');
+              '</tr>');
+          });
+        }
+        if (p.openrouter_jev && p.openrouter_jev.accounts) {
+          p.openrouter_jev.accounts.forEach(function(acc) {
+            const isKey = acc.masked_api_key || (acc.label && acc.label.indexOf('key') !== -1);
+            rows.push('<tr>' +
+              '<td><span class="tag" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);">OpenRouter / JEV</span></td>' +
+              '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
+              '<td class="mono">' + escapeHtml(acc.masked_key || acc.masked_api_key || acc.masked_cookie) + '</td>' +
+              '<td><span class="tag ok">' + (isKey ? 'API Key' : 'Browser Session') + '</span></td>' +
+              '</tr>');
+          });
+        }
+
+        const totalCnt = (p.jev.total_accounts || 0) + ((p.openrouter_jev && p.openrouter_jev.total_accounts) || 0);
+        countBadge.textContent = totalCnt + (totalCnt === 1 ? ' account' : ' accounts');
+
+        if (rows.length > 0) {
+          tableBody.innerHTML = rows.join('');
         } else {
-          tableBody.innerHTML = '<tr><td colspan="3" class="empty-hint">No accounts configured yet. Add accounts below.</td></tr>';
+          tableBody.innerHTML = '<tr><td colspan="4" class="empty-hint">No accounts configured yet. Add accounts below.</td></tr>';
         }
       }
 
@@ -538,6 +666,71 @@ button:disabled{opacity:.5;cursor:not-allowed}
     });
   }
 
+  if (jevConfigForm) {
+    jevConfigForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      jevOkMsg.style.display = 'none';
+      jevErrMsg.style.display = 'none';
+      if (saveJevBtn) {
+        saveJevBtn.disabled = true;
+        saveJevBtn.textContent = 'Saving...';
+      }
+
+      const payload = {
+        jev_base_url: cfgJevBase ? cfgJevBase.value.trim() : undefined,
+        jev_openrouter_base_url: cfgJevOrBase ? cfgJevOrBase.value.trim() : undefined,
+        jev_openrouter_model: cfgJevOrModel ? cfgJevOrModel.value.trim() : undefined,
+        jev_openrouter_enabled: cfgJevOrEnabled ? (cfgJevOrEnabled.value === 'true') : true,
+        jev_credit_cooldown_secs: cfgJevCooldown && cfgJevCooldown.value ? parseInt(cfgJevCooldown.value, 10) : undefined,
+      };
+
+      const apiKeyVal = cfgJevOrApiKey ? cfgJevOrApiKey.value.trim() : '';
+      if (apiKeyVal) {
+        payload.jev_openrouter_api_key = apiKeyVal;
+      }
+
+      const cookieVal = cfgJevOrCookie ? cfgJevOrCookie.value.trim() : '';
+      if (cookieVal) {
+        payload.jev_openrouter_cookie = cookieVal;
+      }
+
+      fetch('/api/v1/dashboard/jev-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(function(res) {
+        return res.json().then(function(json) {
+          return { ok: res.ok, status: res.status, data: json };
+        });
+      })
+      .then(function(res) {
+        if (saveJevBtn) {
+          saveJevBtn.disabled = false;
+          saveJevBtn.textContent = 'Save Jev & OpenRouter Settings';
+        }
+        if (!res.ok) {
+          jevErrMsg.textContent = res.data && res.data.message ? res.data.message : 'Error saving settings (HTTP ' + res.status + ')';
+          jevErrMsg.style.display = 'block';
+        } else {
+          jevOkMsg.textContent = 'Success! Jev & OpenRouter configuration persisted.';
+          jevOkMsg.style.display = 'block';
+          if (cfgJevOrCookie) cfgJevOrCookie.value = '';
+          if (cfgJevOrApiKey) cfgJevOrApiKey.value = '';
+          loadOverview();
+        }
+      })
+      .catch(function(err) {
+        if (saveJevBtn) {
+          saveJevBtn.disabled = false;
+          saveJevBtn.textContent = 'Save Jev & OpenRouter Settings';
+        }
+        jevErrMsg.textContent = 'Network or server error: ' + err.message;
+        jevErrMsg.style.display = 'block';
+      });
+    });
+  }
+
   addForm.addEventListener('submit', function(ev) {
     ev.preventDefault();
     okMsg.style.display = 'none';
@@ -545,7 +738,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
     const raw = keysInput.value.trim();
     if (!raw) {
-      errMsg.textContent = 'Please enter at least one API key.';
+      errMsg.textContent = 'Please enter at least one key or session cookie.';
       errMsg.style.display = 'block';
       return;
     }
@@ -560,8 +753,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
     submitBtn.disabled = true;
     submitBtn.textContent = 'Adding...';
 
+    const selectedProvider = (providerSelect && providerSelect.value) ? providerSelect.value : 'jev';
     const payload = {
-      provider: 'jev',
+      provider: selectedProvider,
       api_keys: keys
     };
     const labelVal = labelInput ? labelInput.value.trim() : '';

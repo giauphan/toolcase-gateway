@@ -167,6 +167,14 @@ pub struct Config {
     /// added with auto-generated labels.
     pub jev_labeled_accounts: Vec<crate::providers::jev::accounts::JevAccount>,
     pub jev_base_url: String,
+    pub jev_openrouter_base_url: String,
+    pub jev_openrouter_api_key: String,
+    pub jev_openrouter_cookie: String,
+    pub jev_openrouter_model: String,
+    pub jev_openrouter_fallback_models: Vec<String>,
+    pub jev_openrouter_enabled: bool,
+    pub jev_credit_cooldown_secs: u64,
+    pub jev_openrouter_accounts: Vec<crate::providers::jev::accounts::OpenRouterAccount>,
     pub routing_mode: RoutingMode,
     pub jev_enabled: bool,
     pub jev_shadow_mode: bool,
@@ -196,6 +204,14 @@ impl Default for Config {
             jev_api_keys: vec![],
             jev_labeled_accounts: vec![],
             jev_base_url: "https://jev-ai.org".into(),
+            jev_openrouter_base_url: "https://openrouter.ai".into(),
+            jev_openrouter_api_key: "".into(),
+            jev_openrouter_cookie: "".into(),
+            jev_openrouter_model: "typesafe/jev-1.13".into(),
+            jev_openrouter_fallback_models: vec![],
+            jev_openrouter_enabled: true,
+            jev_credit_cooldown_secs: 300,
+            jev_openrouter_accounts: vec![],
             routing_mode: RoutingMode::Existing,
             jev_enabled: false,
             jev_shadow_mode: true,
@@ -225,6 +241,22 @@ pub struct PersistentConfig {
     pub jev_accounts: Option<Vec<crate::providers::jev::accounts::JevAccount>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jev_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_openrouter_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_openrouter_api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_openrouter_cookie: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_openrouter_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_openrouter_fallback_models: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_openrouter_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_credit_cooldown_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jev_openrouter_accounts: Option<Vec<crate::providers::jev::accounts::OpenRouterAccount>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub museai_base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,6 +298,19 @@ impl PersistentConfig {
             jev_api_keys: Some(config.jev_api_keys.clone()),
             jev_accounts: None,
             jev_base_url: Some(config.jev_base_url.clone()),
+            jev_openrouter_base_url: (!config.jev_openrouter_base_url.is_empty())
+                .then(|| config.jev_openrouter_base_url.clone()),
+            jev_openrouter_api_key: (!config.jev_openrouter_api_key.is_empty())
+                .then(|| config.jev_openrouter_api_key.clone()),
+            jev_openrouter_cookie: (!config.jev_openrouter_cookie.is_empty())
+                .then(|| config.jev_openrouter_cookie.clone()),
+            jev_openrouter_model: (!config.jev_openrouter_model.is_empty())
+                .then(|| config.jev_openrouter_model.clone()),
+            jev_openrouter_fallback_models: (!config.jev_openrouter_fallback_models.is_empty())
+                .then(|| config.jev_openrouter_fallback_models.clone()),
+            jev_openrouter_enabled: Some(config.jev_openrouter_enabled),
+            jev_credit_cooldown_secs: Some(config.jev_credit_cooldown_secs),
+            jev_openrouter_accounts: None,
             museai_base_url: (!config.museai_base_url.is_empty())
                 .then(|| config.museai_base_url.clone()),
             museai_cookie: (!config.museai_cookie.is_empty()).then(|| config.museai_cookie.clone()),
@@ -328,6 +373,32 @@ impl PersistentConfig {
         }
         if let Some(ref url) = self.jev_base_url {
             config.jev_base_url = url.clone();
+        }
+        if let Some(ref url) = self.jev_openrouter_base_url {
+            config.jev_openrouter_base_url = url.clone();
+        }
+        if let Some(ref key) = self.jev_openrouter_api_key {
+            config.jev_openrouter_api_key = key.clone();
+        }
+        if let Some(ref cookie) = self.jev_openrouter_cookie {
+            config.jev_openrouter_cookie = cookie.clone();
+        }
+        if let Some(ref model) = self.jev_openrouter_model {
+            config.jev_openrouter_model = model.clone();
+        }
+        if let Some(ref f) = self.jev_openrouter_fallback_models {
+            config.jev_openrouter_fallback_models = f.clone();
+        }
+        if let Some(enabled) = self.jev_openrouter_enabled {
+            config.jev_openrouter_enabled = enabled;
+        }
+        if let Some(secs) = self.jev_credit_cooldown_secs {
+            config.jev_credit_cooldown_secs = secs;
+        }
+        if let Some(ref or_accounts) = self.jev_openrouter_accounts {
+            if !or_accounts.is_empty() {
+                config.jev_openrouter_accounts = or_accounts.clone();
+            }
         }
         if let Some(ref url) = self.museai_base_url {
             config.museai_base_url = url.clone();
@@ -466,17 +537,22 @@ impl ConfigStore {
             Vec::new()
         };
 
-        let pool = if !base_accounts.is_empty() {
-            let p = Arc::new(
-                crate::providers::jev::accounts::JevAccountPool::new_with_accounts(base_accounts),
-            );
-            p.add_keys(&config.jev_api_keys);
-            p
+        let base_or_accounts = if !config.jev_openrouter_accounts.is_empty() {
+            config.jev_openrouter_accounts.clone()
+        } else if let Some(persistent) = load_persistent_config(&config_file) {
+            persistent.jev_openrouter_accounts.unwrap_or_default()
         } else {
-            Arc::new(crate::providers::jev::accounts::JevAccountPool::new(
-                &config.jev_api_keys,
-            ))
+            Vec::new()
         };
+
+        let pool = Arc::new(
+            crate::providers::jev::accounts::JevAccountPool::new_with_all(
+                base_accounts,
+                base_or_accounts,
+                config.jev_credit_cooldown_secs,
+            ),
+        );
+        pool.add_keys(&config.jev_api_keys);
         Self {
             inner: Arc::new(RwLock::new(config)),
             env_file,
@@ -523,9 +599,19 @@ impl ConfigStore {
         added
     }
 
+    pub fn add_jev_openrouter_accounts(&self, entries: &[(String, Option<String>)]) -> usize {
+        let added = self.jev_pool.add_openrouter_entries(entries);
+        {
+            let mut conf = self.inner.write().unwrap();
+            conf.jev_openrouter_accounts = self.jev_pool.openrouter_accounts();
+        }
+        added
+    }
+
     pub fn save_to_persistent_file(&self) -> std::io::Result<()> {
         let mut persistent = PersistentConfig::from_config(&self.snapshot());
         persistent.jev_accounts = Some(self.jev_pool.accounts());
+        persistent.jev_openrouter_accounts = Some(self.jev_pool.openrouter_accounts());
         save_persistent_config(&self.config_file, &persistent)
     }
 }

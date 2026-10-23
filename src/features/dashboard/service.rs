@@ -42,6 +42,19 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
         })
         .collect();
 
+    let or_accounts: Vec<serde_json::Value> = pool
+        .openrouter_accounts()
+        .iter()
+        .map(|acc| {
+            serde_json::json!({
+                "label": acc.label,
+                "masked_cookie": mask_key(&acc.cookie),
+                "masked_api_key": mask_key(&acc.api_key),
+                "masked_key": mask_key(if !acc.api_key.is_empty() { &acc.api_key } else { &acc.cookie }),
+            })
+        })
+        .collect();
+
     let overview = serde_json::json!({
         "status": "ok",
         "config": {
@@ -57,7 +70,19 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
                 "name": "Jev Decision API",
                 "base_url": config.jev_base_url,
                 "total_accounts": jev_accounts.len(),
+                "exhausted_accounts": pool.exhausted_accounts_count(),
                 "accounts": jev_accounts,
+            },
+            "openrouter_jev": {
+                "name": "OpenRouter JEV (Browser / Cookie / API Key)",
+                "base_url": config.jev_openrouter_base_url,
+                "model": config.jev_openrouter_model,
+                "enabled": config.jev_openrouter_enabled,
+                "credit_cooldown_secs": config.jev_credit_cooldown_secs,
+                "masked_cookie": mask_key(&config.jev_openrouter_cookie),
+                "masked_api_key": mask_key(&config.jev_openrouter_api_key),
+                "total_accounts": or_accounts.len(),
+                "accounts": or_accounts,
             },
             "omniroute": {
                 "name": "OmniRoute Upstream Proxy",
@@ -218,12 +243,19 @@ pub fn handle_add_provider_accounts(
         .trim()
         .to_ascii_lowercase();
 
-    if provider != "jev" && provider != "jev-ai" {
+    let is_direct_jev = provider == "jev" || provider == "jev-ai";
+    let is_openrouter_jev = provider == "openrouter"
+        || provider == "openroute"
+        || provider == "openroute/jev"
+        || provider == "openrouter/jev"
+        || provider == "jev-browser";
+
+    if !is_direct_jev && !is_openrouter_jev {
         return write_error(
             client,
             400,
             "Bad Request",
-            &format!("Unsupported provider '{provider}'. Supported providers: 'jev'"),
+            &format!("Unsupported provider '{provider}'. Supported providers: 'jev', 'openrouter' (or 'openroute/jev')"),
         );
     }
 
@@ -236,6 +268,42 @@ pub fn handle_add_provider_accounts(
             "Bad Request",
             "No valid non-empty API keys provided",
         );
+    }
+
+    if is_openrouter_jev {
+        let added_count = store.add_jev_openrouter_accounts(&entries);
+        let _ = store.save_to_persistent_file();
+
+        let accounts: Vec<serde_json::Value> = store
+            .jev_pool()
+            .openrouter_accounts()
+            .iter()
+            .map(|acc| {
+                serde_json::json!({
+                    "label": acc.label,
+                    "masked_key": mask_key(if !acc.api_key.is_empty() { &acc.api_key } else { &acc.cookie }),
+                    "masked_cookie": mask_key(&acc.cookie),
+                    "masked_api_key": mask_key(&acc.api_key),
+                })
+            })
+            .collect();
+
+        let resp = serde_json::json!({
+            "ok": true,
+            "provider": "openrouter/jev",
+            "added_count": added_count,
+            "total_accounts": accounts.len(),
+            "accounts": accounts,
+        });
+
+        let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            resp_bytes.len()
+        )?;
+        client.write_all(&resp_bytes)?;
+        return client.flush();
     }
 
     let added_count = store.add_jev_accounts(&entries);
@@ -278,6 +346,12 @@ pub struct UpdateConfigPayload {
     pub fallbacks: Option<Vec<String>>,
     pub default_model: Option<String>,
     pub io_timeout_secs: Option<u64>,
+    pub jev_base_url: Option<String>,
+    pub jev_openrouter_base_url: Option<String>,
+    pub jev_openrouter_api_key: Option<String>,
+    pub jev_openrouter_cookie: Option<String>,
+    pub jev_openrouter_model: Option<String>,
+    pub jev_openrouter_enabled: Option<bool>,
 }
 
 pub fn handle_update_gateway_config(
@@ -328,6 +402,39 @@ pub fn handle_update_gateway_config(
         }
         if let Some(timeout) = payload.io_timeout_secs {
             conf.io_timeout = (timeout > 0).then(|| Duration::from_secs(timeout));
+        }
+        if let Some(base) = payload.jev_base_url {
+            let t = base.trim();
+            if !t.is_empty() {
+                conf.jev_base_url = t.to_string();
+            }
+        }
+        if let Some(base) = payload.jev_openrouter_base_url {
+            let t = base.trim();
+            if !t.is_empty() {
+                conf.jev_openrouter_base_url = t.to_string();
+            }
+        }
+        if let Some(key) = payload.jev_openrouter_api_key {
+            let t = key.trim();
+            if !t.is_empty() {
+                conf.jev_openrouter_api_key = t.to_string();
+            }
+        }
+        if let Some(cookie) = payload.jev_openrouter_cookie {
+            let t = cookie.trim();
+            if !t.is_empty() {
+                conf.jev_openrouter_cookie = t.to_string();
+            }
+        }
+        if let Some(model) = payload.jev_openrouter_model {
+            let t = model.trim();
+            if !t.is_empty() {
+                conf.jev_openrouter_model = t.to_string();
+            }
+        }
+        if let Some(enabled) = payload.jev_openrouter_enabled {
+            conf.jev_openrouter_enabled = enabled;
         }
     }
 

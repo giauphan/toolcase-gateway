@@ -1,14 +1,16 @@
 use crate::config::Config;
 use crate::http::{header_value, write_error, Request};
 use crate::http_provider::{
-    execute_http_failover, write_ureq_response, FailoverCandidate, FailoverConfig,
+    execute_http_failover_with_callback, write_ureq_response, CandidateKind, FailoverConfig,
 };
 use crate::providers::jev::accounts::JevAccountPool;
 use crate::providers::jev::business::is_retryable;
+use crate::providers::jev::openrouter::{
+    prepare_openrouter_payload, send_openrouter_decision_request,
+};
+use crate::providers::jev::route::resolve_jev_route;
 use std::io;
 use std::net::TcpStream;
-
-use crate::providers::jev::route::resolve_jev_route;
 
 fn configured_jev_keys(request: &Request, config: &Config) -> Vec<String> {
     if !config.jev_api_keys.is_empty() {
@@ -89,12 +91,49 @@ pub fn handle_jev_ai(
         &fallback_pool
     };
 
-    if pool.is_empty() {
+    let mut candidates = pool.candidate_failover_targets(config);
+
+    if let Some(inbound_or_key) = header_value(&request.headers, "x-openrouter-api-key")
+        .or_else(|| {
+            header_value(&request.headers, "authorization")
+                .and_then(|a| {
+                    a.strip_prefix("Bearer ")
+                        .or_else(|| a.strip_prefix("bearer "))
+                })
+                .filter(|token| token.trim().starts_with("sk-or-"))
+        })
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    {
+        candidates.insert(
+            0,
+            crate::http_provider::FailoverCandidate::openrouter_api_key(
+                inbound_or_key.clone(),
+                "inbound-openrouter-key".into(),
+                None,
+            ),
+        );
+        let alt_model = if !config.jev_openrouter_fallback_models.is_empty() {
+            config.jev_openrouter_fallback_models[0].clone()
+        } else {
+            "anthropic/claude-3-haiku".to_string()
+        };
+        candidates.insert(
+            1,
+            crate::http_provider::FailoverCandidate::openrouter_api_key(
+                inbound_or_key,
+                "inbound-openrouter-key-alt".into(),
+                Some(alt_model),
+            ),
+        );
+    }
+
+    if candidates.is_empty() {
         return write_error(
             client,
             401,
             "Unauthorized",
-            "No Jev AI accounts configured. Set GW_JEV_API_KEYS or pass Authorization: Bearer <key>",
+            "No Jev AI or OpenRouter accounts configured. Set GW_JEV_API_KEYS, GW_JEV_OPENROUTER_API_KEY, GW_JEV_OPENROUTER_COOKIE, or pass Authorization: Bearer <key>",
         );
     }
 
@@ -106,15 +145,17 @@ pub fn handle_jev_ai(
 
     let base_url = config.jev_base_url.trim_end_matches('/');
     let target_url = format!("{base_url}{upstream_path}");
-
-    let candidates: Vec<FailoverCandidate> = pool
-        .candidate_accounts()
-        .into_iter()
-        .map(|acc| FailoverCandidate {
-            api_key: acc.api_key,
-            label: acc.label,
-        })
-        .collect();
+    let or_base_url = if config.jev_openrouter_base_url.trim().is_empty() {
+        "https://openrouter.ai"
+    } else {
+        config.jev_openrouter_base_url.trim()
+    };
+    let or_model = if config.jev_openrouter_model.trim().is_empty() {
+        "typesafe/jev-1.13"
+    } else {
+        config.jev_openrouter_model.trim()
+    };
+    let idempotency = header_value(&request.headers, "idempotency-key");
 
     let failover_config = FailoverConfig {
         timeout: config.io_timeout,
@@ -122,28 +163,52 @@ pub fn handle_jev_ai(
         max_retry_delay_ms: config.max_retry_delay_ms,
     };
 
-    execute_http_failover(
+    execute_http_failover_with_callback(
         client,
         &candidates,
         &failover_config,
         "Jev",
         is_retryable,
-        |candidate, agent| {
-            if request.method.eq_ignore_ascii_case("get") {
-                let mut req = agent.get(&target_url);
-                req = req.header("Authorization", format!("Bearer {}", candidate.api_key));
-                if let Some(idemp) = header_value(&request.headers, "idempotency-key") {
-                    req = req.header("Idempotency-Key", idemp);
+        |candidate, status| {
+            if status == 402 {
+                pool.mark_credit_exhausted(&candidate.api_key);
+            } else if status == 200 {
+                pool.clear_credit_exhausted(&candidate.api_key);
+            }
+        },
+        |candidate, agent| match candidate.kind {
+            CandidateKind::Direct => {
+                if request.method.eq_ignore_ascii_case("get") {
+                    let mut req = agent.get(&target_url);
+                    req = req.header("Authorization", format!("Bearer {}", candidate.api_key));
+                    if let Some(idemp) = idempotency {
+                        req = req.header("Idempotency-Key", idemp);
+                    }
+                    req.call()
+                } else {
+                    let mut req = agent.post(&target_url);
+                    req = req.header("Authorization", format!("Bearer {}", candidate.api_key));
+                    req = req.header("Content-Type", "application/json");
+                    if let Some(idemp) = idempotency {
+                        req = req.header("Idempotency-Key", idemp);
+                    }
+                    req.send(&request.body)
                 }
-                req.call()
-            } else {
-                let mut req = agent.post(&target_url);
-                req = req.header("Authorization", format!("Bearer {}", candidate.api_key));
-                req = req.header("Content-Type", "application/json");
-                if let Some(idemp) = header_value(&request.headers, "idempotency-key") {
-                    req = req.header("Idempotency-Key", idemp);
-                }
-                req.send(&request.body)
+            }
+            CandidateKind::OpenRouterApiKey | CandidateKind::OpenRouterBrowser => {
+                let model_to_use = candidate.model.as_deref().unwrap_or(or_model);
+                let payload = prepare_openrouter_payload(&request.body, model_to_use);
+                send_openrouter_decision_request(
+                    agent,
+                    or_base_url,
+                    &candidate.api_key,
+                    (!config.jev_openrouter_cookie.is_empty())
+                        .then_some(config.jev_openrouter_cookie.as_str()),
+                    &payload,
+                    idempotency,
+                    None,
+                    None,
+                )
             }
         },
     )

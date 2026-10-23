@@ -180,6 +180,18 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
             )
         };
     }
+    if clean_path == "/api/v1/dashboard/jev-config" {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::features::dashboard::handle_update_jev_config(&mut client, &request.body, store)
+        } else {
+            write_error(
+                &mut client,
+                405,
+                "Method Not Allowed",
+                "dashboard jev-config only supports POST",
+            )
+        };
+    }
     if clean_path == "/muse-config" {
         return if request.method.eq_ignore_ascii_case("get") {
             crate::video_template::handle_muse_config_page(&mut client)
@@ -352,7 +364,13 @@ fn route_request_impl(
             )
         };
     }
-    if clean_path == "/jev/v1" || clean_path.starts_with("/jev/v1/") {
+    if clean_path == "/jev/v1"
+        || clean_path.starts_with("/jev/v1/")
+        || clean_path == "/jev/decision"
+        || clean_path == "/jev/decisions"
+        || clean_path.starts_with("/jev/decision/")
+        || clean_path.starts_with("/jev/decisions/")
+    {
         let expected = crate::providers::jev::adapter::expected_jev_method(clean_path);
         if expected.is_some()
             && expected.is_some_and(|method| request.method.eq_ignore_ascii_case(method))

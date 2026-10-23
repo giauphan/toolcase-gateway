@@ -556,3 +556,140 @@ fn dashboard_accounts_persistent_labeled_and_extra_env_keys_merged() {
     let _ = fs::remove_file(tmp_env);
     let _ = fs::remove_file(store.config_file);
 }
+
+#[test]
+fn dashboard_accounts_openrouter_ingest_and_persistence() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let cfg = test_config();
+    let store = ConfigStore::new(cfg, tmp_env.clone());
+
+    let payload = br#"{"provider":"openrouter","api_keys":["or_session_11111111111","worker-2:or_session_22222222222","sk-or-v1-my-secret-key-123"]}"#;
+    let (head, body) = request_gateway("POST", "/api/v1/dashboard/accounts", payload, &store);
+    assert_eq!(head.status, 200);
+
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["provider"], "openrouter/jev");
+    assert_eq!(parsed["added_count"], 3);
+    assert_eq!(parsed["total_accounts"], 3);
+
+    let or_accounts = store.jev_pool().openrouter_accounts();
+    assert_eq!(or_accounts.len(), 3);
+    assert_eq!(or_accounts[0].cookie, "or_session_11111111111");
+    assert_eq!(or_accounts[1].cookie, "or_session_22222222222");
+    assert_eq!(or_accounts[1].label, "worker-2");
+    assert_eq!(or_accounts[2].api_key, "sk-or-v1-my-secret-key-123");
+
+    // Overview reports openrouter_jev with masked cookies and keys
+    let (ov_head, ov_body) = request_gateway("GET", "/api/v1/dashboard/overview", b"", &store);
+    assert_eq!(ov_head.status, 200);
+    let ov_json: serde_json::Value = serde_json::from_slice(&ov_body).unwrap();
+    assert_eq!(ov_json["providers"]["openrouter_jev"]["total_accounts"], 3);
+    assert_eq!(
+        ov_json["providers"]["openrouter_jev"]["accounts"][0]["label"],
+        "openrouter-1 (..1111)"
+    );
+
+    // Persistence reload
+    let reload_cfg = test_config();
+    let reloaded_store = ConfigStore::new_with_limits_and_config_file(
+        reload_cfg,
+        tmp_env.clone(),
+        store.config_file.clone(),
+        256,
+        64 * 1024 * 1024,
+    );
+    let reloaded_or = reloaded_store.jev_pool().openrouter_accounts();
+    assert_eq!(reloaded_or.len(), 3);
+    assert_eq!(reloaded_or[0].cookie, "or_session_11111111111");
+    assert_eq!(reloaded_or[1].label, "worker-2");
+    assert_eq!(reloaded_or[2].api_key, "sk-or-v1-my-secret-key-123");
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}
+
+#[test]
+fn dashboard_update_jev_config_api_and_persistence() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let cfg = test_config();
+    let store = ConfigStore::new(cfg, tmp_env.clone());
+
+    let payload = br#"{
+        "jev_base_url": "https://custom-jev.ai",
+        "jev_openrouter_base_url": "https://custom-or.ai",
+        "jev_openrouter_api_key": "sk-or-v1-testkey123456",
+        "jev_openrouter_cookie": "secret-session-cookie-12345",
+        "jev_openrouter_model": "typesafe/jev-1.13",
+        "jev_openrouter_enabled": true,
+        "jev_credit_cooldown_secs": 600
+    }"#;
+
+    let (head, body) = request_gateway("POST", "/api/v1/dashboard/jev-config", payload, &store);
+    assert_eq!(head.status, 200);
+
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["config"]["jev_base_url"], "https://custom-jev.ai");
+    assert_eq!(
+        parsed["config"]["jev_openrouter_base_url"],
+        "https://custom-or.ai"
+    );
+    assert_eq!(
+        parsed["config"]["jev_openrouter_model"],
+        "typesafe/jev-1.13"
+    );
+    assert_eq!(parsed["config"]["jev_openrouter_enabled"], true);
+    assert_eq!(parsed["config"]["jev_credit_cooldown_secs"], 600);
+    assert_eq!(
+        parsed["config"]["jev_openrouter_cookie"],
+        mask_key("secret-session-cookie-12345")
+    );
+    assert_eq!(
+        parsed["config"]["jev_openrouter_api_key"],
+        mask_key("sk-or-v1-testkey123456")
+    );
+
+    // Verify live store updated
+    let snapshot = store.snapshot();
+    assert_eq!(snapshot.jev_base_url, "https://custom-jev.ai");
+    assert_eq!(snapshot.jev_openrouter_base_url, "https://custom-or.ai");
+    assert_eq!(snapshot.jev_openrouter_api_key, "sk-or-v1-testkey123456");
+    assert_eq!(
+        snapshot.jev_openrouter_cookie,
+        "secret-session-cookie-12345"
+    );
+    assert_eq!(snapshot.jev_openrouter_model, "typesafe/jev-1.13");
+    assert_eq!(snapshot.jev_credit_cooldown_secs, 600);
+
+    // Verify persistent config file has settings
+    let persistent = toolcase_gateway::config::load_persistent_config(&store.config_file).unwrap();
+    assert_eq!(
+        persistent.jev_base_url.as_deref(),
+        Some("https://custom-jev.ai")
+    );
+    assert_eq!(
+        persistent.jev_openrouter_base_url.as_deref(),
+        Some("https://custom-or.ai")
+    );
+    assert_eq!(
+        persistent.jev_openrouter_api_key.as_deref(),
+        Some("sk-or-v1-testkey123456")
+    );
+    assert_eq!(
+        persistent.jev_openrouter_cookie.as_deref(),
+        Some("secret-session-cookie-12345")
+    );
+    assert_eq!(
+        persistent.jev_openrouter_model.as_deref(),
+        Some("typesafe/jev-1.13")
+    );
+    assert_eq!(persistent.jev_credit_cooldown_secs, Some(600));
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}

@@ -78,6 +78,14 @@ fn test_persistent_config_save_load_round_trip() {
         jev_api_keys: Some(vec!["key-a".into(), "key-b".into()]),
         jev_accounts: None,
         jev_base_url: Some("https://custom.jev".into()),
+        jev_openrouter_base_url: Some("https://openrouter.custom".into()),
+        jev_openrouter_api_key: Some("sk-or-v1-storage-key".into()),
+        jev_openrouter_cookie: Some("or-cookie-123".into()),
+        jev_openrouter_model: Some("typesafe/jev-1.13".into()),
+        jev_openrouter_fallback_models: None,
+        jev_openrouter_enabled: Some(true),
+        jev_credit_cooldown_secs: Some(300),
+        jev_openrouter_accounts: None,
         museai_base_url: Some("https://muse.custom".into()),
         museai_cookie: Some("cookie-123".into()),
         museai_ws_url: Some("wss://ws.custom".into()),
@@ -110,6 +118,12 @@ fn test_persistent_config_save_load_round_trip() {
     assert_eq!(cfg.io_timeout, Some(Duration::from_secs(45)));
     assert_eq!(cfg.jev_api_keys, vec!["key-a", "key-b"]);
     assert_eq!(cfg.jev_base_url, "https://custom.jev");
+    assert_eq!(cfg.jev_openrouter_base_url, "https://openrouter.custom");
+    assert_eq!(cfg.jev_openrouter_api_key, "sk-or-v1-storage-key");
+    assert_eq!(cfg.jev_openrouter_cookie, "or-cookie-123");
+    assert_eq!(cfg.jev_openrouter_model, "typesafe/jev-1.13");
+    assert!(cfg.jev_openrouter_enabled);
+    assert_eq!(cfg.jev_credit_cooldown_secs, 300);
     assert_eq!(cfg.museai_base_url, "https://muse.custom");
     assert_eq!(cfg.museai_cookie, "cookie-123");
     assert_eq!(cfg.museai_ws_url, "wss://ws.custom");

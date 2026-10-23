@@ -5,10 +5,57 @@ use std::net::TcpStream;
 use std::thread;
 use std::time::Duration;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CandidateKind {
+    Direct,
+    OpenRouterApiKey,
+    OpenRouterBrowser,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FailoverCandidate {
     pub api_key: String,
     pub label: String,
+    pub kind: CandidateKind,
+    pub model: Option<String>,
+}
+
+impl FailoverCandidate {
+    pub fn direct(api_key: String, label: String) -> Self {
+        Self {
+            api_key,
+            label,
+            kind: CandidateKind::Direct,
+            model: None,
+        }
+    }
+
+    pub fn openrouter(cookie: String, label: String) -> Self {
+        Self {
+            api_key: cookie,
+            label,
+            kind: CandidateKind::OpenRouterBrowser,
+            model: None,
+        }
+    }
+
+    pub fn openrouter_api_key(api_key: String, label: String, model: Option<String>) -> Self {
+        Self {
+            api_key,
+            label,
+            kind: CandidateKind::OpenRouterApiKey,
+            model,
+        }
+    }
+
+    pub fn openrouter_browser(cookie: String, label: String, model: Option<String>) -> Self {
+        Self {
+            api_key: cookie,
+            label,
+            kind: CandidateKind::OpenRouterBrowser,
+            model,
+        }
+    }
 }
 
 pub struct FailoverConfig {
@@ -61,6 +108,34 @@ where
         &ureq::Agent,
     ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
 {
+    execute_http_failover_with_callback(
+        client,
+        candidates,
+        config,
+        provider_name,
+        is_retryable_status,
+        |_, _| {},
+        make_request,
+    )
+}
+
+pub fn execute_http_failover_with_callback<F, C, R>(
+    client: &mut TcpStream,
+    candidates: &[FailoverCandidate],
+    config: &FailoverConfig,
+    provider_name: &str,
+    is_retryable_status: F,
+    mut on_candidate_status: C,
+    make_request: R,
+) -> io::Result<()>
+where
+    F: Fn(u16) -> bool,
+    C: FnMut(&FailoverCandidate, u16),
+    R: Fn(
+        &FailoverCandidate,
+        &ureq::Agent,
+    ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+{
     let agent_config = ureq::Agent::config_builder()
         .timeout_global(config.timeout)
         .max_redirects(0)
@@ -77,6 +152,7 @@ where
             Ok(res) => {
                 let status = res.status().as_u16();
                 last_status = Some(status);
+                on_candidate_status(candidate, status);
                 if is_retryable_status(status) && !last {
                     let delay = calculate_retry_delay(
                         index,

@@ -7,10 +7,13 @@ pub(crate) fn resolve_jev_route(inbound_path: &str) -> Option<JevRoute> {
     let clean = inbound_path.split('?').next()?.trim_end_matches('/');
     let relative = if clean == "/jev/models" {
         "models"
+    } else if clean == "/jev/decision" || clean == "/jev/decisions" {
+        "systemone"
     } else {
         clean
             .strip_prefix("/jev/v1/")
-            .or_else(|| clean.strip_prefix("/jev-ai/v1/"))?
+            .or_else(|| clean.strip_prefix("/jev-ai/v1/"))
+            .or_else(|| clean.strip_prefix("/jev/"))?
     };
 
     match relative {
@@ -18,7 +21,7 @@ pub(crate) fn resolve_jev_route(inbound_path: &str) -> Option<JevRoute> {
             upstream_path: "/api/v1/models/".to_string(),
             expected_method: "GET",
         }),
-        "systemone" => Some(JevRoute {
+        "systemone" | "decision" | "decisions" => Some(JevRoute {
             upstream_path: "/api/v1/systemone/".to_string(),
             expected_method: "POST",
         }),

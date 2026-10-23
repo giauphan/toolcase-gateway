@@ -61,6 +61,21 @@ pub fn run() -> io::Result<()> {
             .unwrap_or(172800),
         jev_api_keys: crate::config::parse_jev_api_keys(&env_or("GW_JEV_API_KEYS", "")),
         jev_base_url: env_or("GW_JEV_BASE_URL", "https://jev-ai.org"),
+        jev_openrouter_base_url: env_or("GW_JEV_OPENROUTER_BASE_URL", "https://openrouter.ai"),
+        jev_openrouter_api_key: env_or("GW_JEV_OPENROUTER_API_KEY", ""),
+        jev_openrouter_cookie: env_or("GW_JEV_OPENROUTER_COOKIE", ""),
+        jev_openrouter_model: env_or("GW_JEV_OPENROUTER_MODEL", "typesafe/jev-1.13"),
+        jev_openrouter_fallback_models: env_or("GW_JEV_OPENROUTER_FALLBACK_MODELS", "")
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        jev_openrouter_enabled: env_or("GW_JEV_OPENROUTER_ENABLED", "true")
+            .eq_ignore_ascii_case("true"),
+        jev_credit_cooldown_secs: env_or("GW_JEV_CREDIT_COOLDOWN_SECS", "300")
+            .parse()
+            .unwrap_or(300),
+        jev_openrouter_accounts: vec![],
         routing_mode: match env_or("GW_ROUTING_MODE", "existing").as_str() {
             "existing" => crate::config::RoutingMode::Existing,
             "round_robin" => crate::config::RoutingMode::RoundRobin,
