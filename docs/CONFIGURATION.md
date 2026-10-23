@@ -79,7 +79,10 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_LOG_FILE` | `gateway.log` | string | Logging | Primary log filename within `GW_LOG_DIR`. |
 | `GW_LOG_ENABLED` | `true` | bool | Logging | Persist log entries to disk in `GW_LOG_DIR`. |
 | `GW_LOG_DAILY` | `true` | bool | Logging | Enable daily rotating log files (`gateway-YYYY-MM-DD.log`, `error-YYYY-MM-DD.log`, `access-YYYY-MM-DD.log`). |
-| `GW_LOG_RETENTION_DAYS` | `2` | u64 | Logging | Days to retain rotated daily log files before automatic daemon cleanup (defaults to 2 days). |
+| `GW_LOG_MAX_SIZE_MB` | `10` | u64 | Logging | Maximum size in megabytes before an active log file is rotated and zipped into a `.zip` archive. Defaults to 10 MB. |
+| `GW_LOG_ZIP_ENABLED` | `true` | bool | Logging | Automatically compress rotated log files exceeding the size threshold into standard PKZIP archives. |
+| `GW_LOG_MAX_SIZE_BYTES` | *(optional)* | u64 | Logging | Exact byte threshold override for log file rotation and zip compression. |
+| `GW_LOG_RETENTION_DAYS` | `2` | u64 | Logging | Days to retain rotated daily log files and archived `.zip` files before automatic daemon cleanup (defaults to 2 days). |
 | `GW_LOG_CONSOLE` | `true` | bool | Logging | Mirror formatted log entries to standard error (`stderr`). |
 
 ---

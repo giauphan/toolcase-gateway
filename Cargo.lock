@@ -1000,6 +1000,7 @@ name = "toolcase-gateway"
 version = "0.1.0"
 dependencies = [
  "dotenvy",
+ "flate2",
  "serde",
  "serde_json",
  "snow",

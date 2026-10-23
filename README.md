@@ -215,6 +215,8 @@ The gateway uses a two-layer configuration model:
 | `GW_MUSE_APPROVAL_MODE` | `off` | Sentinel auto-approval mode (`off`, `observe`, `on`). |
 | `GW_MAX_CONNECTIONS` | `256` | Maximum concurrent connections; excess rejected with `503`. |
 | `GW_IO_TIMEOUT_SECS` | `120` | Read/write timeout per socket in seconds (`0` disables). |
+| `GW_LOG_MAX_SIZE_MB` | `10` | Max active log size in MB before rotating and zipping into a `.zip` archive. |
+| `GW_LOG_ZIP_ENABLED` | `true` | Enables automatic ZIP compression for rotated log files. |
 
 See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for the comprehensive configuration guide.
 

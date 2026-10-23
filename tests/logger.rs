@@ -1,8 +1,10 @@
 use std::fs;
+use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use toolcase_gateway::runtime::logger::{
-    cleanup_expired_logs, format_date, format_timestamp, sanitize_log_message, LogConfig, Logger,
+    cleanup_expired_logs, create_zip_archive, format_date, format_timestamp, sanitize_log_message,
+    LogConfig, Logger, DEFAULT_LOG_MAX_SIZE_BYTES,
 };
 
 #[test]
@@ -48,6 +50,8 @@ fn test_framework_multi_stream_logging() {
         dir: test_dir.clone(),
         file_name: "gateway.log".to_string(),
         retention_days: 14,
+        max_size_bytes: 10 * 1024 * 1024,
+        zip_enabled: true,
     });
 
     let today = format_date(
@@ -165,6 +169,8 @@ fn test_logger_concurrent_writes() {
         dir: test_dir.clone(),
         file_name: "gateway.log".to_string(),
         retention_days: 2,
+        max_size_bytes: 10 * 1024 * 1024,
+        zip_enabled: true,
     }));
 
     let thread_count = 10;
@@ -218,6 +224,145 @@ fn test_logger_concurrent_writes() {
     assert_eq!(gw_lines, thread_count * iterations_per_thread);
     assert_eq!(err_lines, thread_count * (iterations_per_thread / 3));
     assert_eq!(acc_lines, thread_count * (iterations_per_thread / 3));
+
+    let _ = fs::remove_dir_all(test_dir);
+}
+
+#[test]
+fn test_default_10mb_threshold_constants() {
+    assert_eq!(DEFAULT_LOG_MAX_SIZE_BYTES, 10 * 1024 * 1024);
+    let cfg = LogConfig::default();
+    assert_eq!(cfg.max_size_bytes, 10 * 1024 * 1024);
+    assert!(cfg.zip_enabled);
+}
+
+#[test]
+fn test_create_zip_archive_format_integrity() {
+    let tmp_dir = std::env::temp_dir().join(format!("gw_zip_test_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&tmp_dir).unwrap();
+
+    let sample_text =
+        "2026-10-23T11:00:00Z [INFO] [server] Hello test log content line!\n".repeat(500);
+    let raw_bytes = sample_text.as_bytes();
+
+    let zip_bytes = create_zip_archive("test_gateway.log", raw_bytes);
+    assert!(!zip_bytes.is_empty());
+    // Zip file signature PK\x03\x04
+    assert_eq!(&zip_bytes[0..4], &[0x50, 0x4b, 0x03, 0x04]);
+
+    let zip_path = tmp_dir.join("test.zip");
+    fs::write(&zip_path, &zip_bytes).unwrap();
+
+    // Verify integrity using system unzip
+    let test_status = Command::new("unzip").arg("-t").arg(&zip_path).status();
+    if let Ok(st) = test_status {
+        assert!(st.success(), "unzip -t integrity test must pass");
+    }
+
+    // Verify extracted content matches exactly
+    let out = Command::new("unzip").arg("-p").arg(&zip_path).output();
+    if let Ok(extracted) = out {
+        assert_eq!(extracted.stdout, raw_bytes);
+    }
+
+    let _ = fs::remove_dir_all(tmp_dir);
+}
+
+#[test]
+fn test_log_rotation_and_zip_compression_when_exceeding_threshold() {
+    let test_dir =
+        std::env::temp_dir().join(format!("gw_log_rotation_test_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&test_dir).unwrap();
+
+    // Set max_size_bytes to a small threshold for testing: 30 KB
+    let threshold = 30 * 1024;
+    let logger = Logger::new(LogConfig {
+        enabled: true,
+        console: false,
+        daily: false,
+        dir: test_dir.clone(),
+        file_name: "gateway.log".to_string(),
+        retention_days: 2,
+        max_size_bytes: threshold,
+        zip_enabled: true,
+    });
+
+    let line = "A".repeat(400); // ~400 bytes per log line
+
+    // Write ~40 KB of logs (exceeding 30 KB threshold)
+    for i in 0..100 {
+        logger.log("INFO", "worker", &format!("line {i}: {line}"));
+    }
+
+    // Verify at least one .zip archive was created in test_dir
+    let mut zip_count = 0;
+    let mut zip_files = Vec::new();
+    for entry in fs::read_dir(&test_dir).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".zip") {
+            zip_count += 1;
+            zip_files.push(entry.path());
+        }
+    }
+    assert!(
+        zip_count >= 1,
+        "At least one .zip archive must be generated"
+    );
+
+    // Verify the zip archive can be extracted and contains uncompressed logs
+    let out = Command::new("unzip")
+        .arg("-p")
+        .arg(&zip_files[0])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let extracted_str = String::from_utf8_lossy(&out.stdout);
+    assert!(extracted_str.contains("line 0:"));
+
+    // Verify current active gateway.log exists and is smaller than threshold
+    let active_gw = test_dir.join("gateway.log");
+    assert!(active_gw.is_file());
+    let active_size = fs::metadata(&active_gw).unwrap().len();
+    assert!(active_size < threshold);
+
+    let _ = fs::remove_dir_all(test_dir);
+}
+
+#[test]
+fn test_cleanup_expired_zip_archives() {
+    let test_dir =
+        std::env::temp_dir().join(format!("gw_cleanup_zip_test_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let today = format_date(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    );
+
+    // 1. Active files (must NOT be deleted)
+    let active_log = test_dir.join("gateway.log");
+    fs::write(&active_log, b"active").unwrap();
+
+    // 2. Today's zip archive (must NOT be deleted)
+    let today_zip = test_dir.join(format!("gateway-{today}-1.zip"));
+    fs::write(&today_zip, b"PK\x03\x04...").unwrap();
+
+    // 3. Old expired zip archives from 2020 (must be purged)
+    let old_zip_1 = test_dir.join("gateway-2020-01-01-1.zip");
+    let old_zip_2 = test_dir.join("access-2020-01-01-1.zip");
+    fs::write(&old_zip_1, b"PK\x03\x04...").unwrap();
+    fs::write(&old_zip_2, b"PK\x03\x04...").unwrap();
+
+    // Clean up with retention = 2 days
+    let cleaned = cleanup_expired_logs(&test_dir, 2).unwrap();
+    assert_eq!(cleaned, 2);
+
+    assert!(active_log.is_file());
+    assert!(today_zip.is_file());
+    assert!(!old_zip_1.exists());
+    assert!(!old_zip_2.exists());
 
     let _ = fs::remove_dir_all(test_dir);
 }
