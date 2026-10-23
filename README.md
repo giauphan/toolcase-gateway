@@ -7,7 +7,7 @@
 1. **Tool-Name Casing Drift** — Upstreams frequently lowercase function/tool names (`MyTool` → `mytool`), breaking strict clients. The gateway restores original casing from the request on the fly.
 2. **Model Candidate Failover** — When an upstream model returns `429`, `503`, or credit/auth errors, the gateway retries transparently against configured fallback models before returning anything to the client.
 3. **Prism OpenAI Adaptation** — Transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism (including transparent `reasoning_effort` and token injection).
-4. **Jev AI Decision API & Multi-Account Pool** — Routes structured decision evaluations (`/jev/v1/systemone`) and automatically rotates across multiple Jev API keys with failover on credit caps (`401, 402, 403, 429`).
+4. **Jev AI Decision API & OpenRouter Failover Pool** — Routes structured decision evaluations (`/jev/v1/systemone`, `/jev/v1/decisions`) and executes a structured 4-tier failover cascade (`Direct Jev -> Jev OpenRouter API Key -> OpenRouter Different Decision -> OpenRouter Browser Cookie`) with round-robin rotation and automatic cooldown demotion on credit caps (`401, 402, 403, 429`).
 5. **Muse AI CVM & Video Generation** — Connects directly to Muse Confidential VMs via Noise XX encrypted WebSockets, supports text-to-video synthesis (`/muse-ai/v1/create-video`), and provides headless Sentinel auto-approvals.
 6. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/gateway-config/dashboard` that saves settings and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
 
@@ -117,13 +117,24 @@ You can pass multiple Prism accounts per request by providing credentials in `Au
 
 The gateway extracts `OPENAI_SENTINEL_TOKEN` and forwards it as Prism's `openai-sentinel-token` request header.
 
-### Jev AI Decision API
+### Jev AI Decision API & OpenRouter Failover
 
-Dedicated routes (`/jev/v1/systemone`, `/jev/v1/models`, `/jev/v1/requests/{id}`) pool multiple Jev AI account keys and transparently round-robin + fail over between them when accounts hit credit or rate limits (`401, 402, 403, 429`).
+Dedicated routes (`/jev/v1/systemone`, `/jev/v1/decisions`, `/jev/v1/models`, `/jev/v1/requests/{id}`) pool direct Jev accounts, OpenRouter Bearer API keys, and browser session cookies, executing a 4-tier failover cascade:
 
-Configure keys via the dashboard or environment:
+$$\text{Direct Jev} \longrightarrow \text{Jev OpenRouter (API Key)} \longrightarrow \text{OpenRouter Different Decision} \longrightarrow \text{OpenRouter Browser (Cookie)}$$
+
+When an account encounters credit limits (`402 Payment Required`) or rate limits (`429`), it enters a configurable cooldown window (`GW_JEV_CREDIT_COOLDOWN_SECS`, default 300s). Subsequent requests ("after") immediately continue round-robin rotation across remaining healthy accounts.
+
+Configure credentials via the dashboard UI or environment variables:
 ```sh
+# Direct Jev AI account pool
 GW_JEV_API_KEYS="key-1,key-2,key-3"
+
+# OpenRouter Decision API integration
+GW_JEV_OPENROUTER_API_KEY="sk-or-v1-..."
+GW_JEV_OPENROUTER_COOKIE="or_statsig_stable_id=...; __session=..."
+GW_JEV_OPENROUTER_MODEL="typesafe/jev-1.13"
+GW_JEV_OPENROUTER_FALLBACK_MODELS="anthropic/claude-3-haiku"
 ```
 
 Submit decision requests (evaluating multiple concurrent questions via the **Parallel Sampler**):
@@ -194,6 +205,11 @@ The gateway uses a two-layer configuration model:
 | `GW_TARGET_PORT` | `20128` | Default upstream port. |
 | `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated fallback models, rotated across requests. |
 | `GW_JEV_API_KEYS` | empty | Comma-separated Jev AI account keys for credit failover. |
+| `GW_JEV_OPENROUTER_API_KEY` | empty | OpenRouter API key (`sk-or-...`) for Bearer token decision requests. |
+| `GW_JEV_OPENROUTER_COOKIE` | empty | OpenRouter browser session cookie for browser decision failover. |
+| `GW_JEV_OPENROUTER_MODEL` | `typesafe/jev-1.13` | Default decision model identifier routed to OpenRouter. |
+| `GW_JEV_OPENROUTER_FALLBACK_MODELS` | empty | Comma-separated fallback decision models for alternate evaluations. |
+| `GW_JEV_CREDIT_COOLDOWN_SECS` | `300` | Account cooldown window in seconds on HTTP 402. |
 | `GW_MUSE_APPROVAL_MODE` | `off` | Sentinel auto-approval mode (`off`, `observe`, `on`). |
 | `GW_MAX_CONNECTIONS` | `256` | Maximum concurrent connections; excess rejected with `503`. |
 | `GW_IO_TIMEOUT_SECS` | `120` | Read/write timeout per socket in seconds (`0` disables). |

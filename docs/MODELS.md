@@ -16,7 +16,7 @@ Toolcase Gateway exposes multi-provider model routing, translating client reques
 | `muse` | Muse.ai | Noise XX / WebSocket | Conversational chat via CVM | `/v1/models`, `/muse-ai/v1/models` |
 | `muse-video` | Muse.ai Video | Noise / Sentinel | Text-to-video synthesis (Default) | `/video/v1/providers` |
 | `gen-3`, `gen-4`, `kling` | Muse Compatibility | Noise / Sentinel | Video synthesis aliases | `/video/v1/providers` |
-| `jev-1.13` | Jev AI | HTTP REST / Jev Pool | Decision & classification analysis | `/jev/v1/models` |
+| `jev-1.13`, `typesafe/jev-1.13` | Jev AI / OpenRouter | HTTP REST / Failover Pool | Decision & classification analysis | `/jev/v1/models` |
 
 ---
 
@@ -31,7 +31,7 @@ graph TD
     Router -->|"Model: gpt-5.6-sol*<br>Route: /v1/chat/completions"| OmniRoute["OmniRoute Proxy<br>(Prism / OpenAI)"]
     Router -->|"Model: muse<br>Route: /muse-ai/v1/chat/completions or /v1/chat/completions"| MuseChat["Muse CVM Chat<br>(Noise XX WebSocket)"]
     Router -->|"Model: muse-video / gen-*<br>Route: /muse-ai/v1/create-video"| MuseVideo["Muse Video Studio<br>(Durable Job Tracking)"]
-    Router -->|"Model: jev-1.13<br>Route: /jev/v1/systemone"| JevEngine["Jev Decision Engine<br>(Account Pool Rotation)"]
+    Router -->|"Model: jev-1.13 / decisions<br>Route: /jev/v1/systemone"| JevEngine["Jev Decision Engine<br>(Account Pool & OpenRouter Cascade)"]
 ```
 
 ### Routing Rules
@@ -46,9 +46,10 @@ graph TD
    - Take structured parameters (`prompt`, `aspect_ratio`, `duration`).
    - Managed under the Muse Sentinel auto-approval coordinator.
 
-3. **Decision Models (`jev-1.13`)**:
-   - Must be dispatched to `POST /jev/v1/systemone`.
+3. **Decision Models (`jev-1.13`, `typesafe/jev-1.13`, and OpenRouter Fallback Models)**:
+   - Must be dispatched to `POST /jev/v1/systemone` or `POST /jev/v1/decisions`.
    - Require structured decision payloads (`state` context and `questions` map).
+   - Support a 4-tier cascade: Direct Jev -> Jev OpenRouter API Key -> OpenRouter Different Decision -> OpenRouter Browser Cookie.
    - Cannot be sent to `/v1/chat/completions` (will return HTTP 404/405).
 
 ---
@@ -137,9 +138,11 @@ curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
 
 ---
 
-### 3.4 Jev AI Decision Models (`jev-1.13`)
+### 3.4 Jev AI & OpenRouter Decision Models (`jev-1.13`, `typesafe/jev-1.13`)
 
 Jev models perform asynchronous decision classification and concurrent multi-question evaluation via the **Parallel Sampler**. All questions are evaluated across a shared `state` context simultaneously in a single pass.
+
+When requests fail over to OpenRouter or are submitted with OpenRouter credentials, models are evaluated against OpenRouter's Decision API (`/api/alpha/decisions`) using either Bearer API keys (`Authorization: Bearer <key>`) or browser cookies, with automated fallback decision model cascading (`GW_JEV_OPENROUTER_FALLBACK_MODELS`).
 
 #### Example Multi-Question Request
 ```bash
