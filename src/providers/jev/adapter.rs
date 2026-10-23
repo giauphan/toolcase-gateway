@@ -49,8 +49,12 @@ pub fn handle_jev_models_catalog(
         jev_pool
     } else {
         let keys = configured_jev_keys(request, config);
-        fallback_pool = JevAccountPool::new(&keys);
-        &fallback_pool
+        if !keys.is_empty() {
+            fallback_pool = JevAccountPool::new(&keys);
+            &fallback_pool
+        } else {
+            jev_pool
+        }
     };
     let base_url = config.jev_base_url.trim_end_matches('/');
     let target_url = format!("{base_url}/api/v1/models/");
@@ -87,8 +91,12 @@ pub fn handle_jev_ai(
         jev_pool
     } else {
         let keys = configured_jev_keys(request, config);
-        fallback_pool = JevAccountPool::new(&keys);
-        &fallback_pool
+        if !keys.is_empty() {
+            fallback_pool = JevAccountPool::new(&keys);
+            &fallback_pool
+        } else {
+            jev_pool
+        }
     };
 
     let mut candidates = pool.candidate_failover_targets(config);
@@ -113,19 +121,17 @@ pub fn handle_jev_ai(
                 None,
             ),
         );
-        let alt_model = if !config.jev_openrouter_fallback_models.is_empty() {
-            config.jev_openrouter_fallback_models[0].clone()
-        } else {
-            "anthropic/claude-3-haiku".to_string()
-        };
-        candidates.insert(
-            1,
-            crate::http_provider::FailoverCandidate::openrouter_api_key(
-                inbound_or_key,
-                "inbound-openrouter-key-alt".into(),
-                Some(alt_model),
-            ),
-        );
+        let alt_models = pool.rotated_fallback_models(config);
+        for (idx, alt_model) in alt_models.into_iter().enumerate() {
+            candidates.insert(
+                1 + idx,
+                crate::http_provider::FailoverCandidate::openrouter_api_key(
+                    inbound_or_key.clone(),
+                    format!("inbound-openrouter-key-alt-{}", idx + 1),
+                    Some(alt_model),
+                ),
+            );
+        }
     }
 
     if candidates.is_empty() {

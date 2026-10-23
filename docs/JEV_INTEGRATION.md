@@ -242,7 +242,7 @@ In addition to direct Jev API keys, the gateway supports a structured 4-tier fai
 1. **Automatic Switching on Credit Exhaustion & Failures**:
    - **Tier 1 (Direct Jev)**: Forwarded to `https://jev-ai.org/api/v1/systemone/`.
    - **Tier 2 (Jev OpenRouter)**: If direct accounts return HTTP `401`, `402 Payment Required`, `429`, or `5xx`, failover moves immediately to OpenRouter using configured API keys with the primary Jev model (`typesafe/jev-1.13`).
-   - **Tier 3 (OpenRouter Different Decision)**: If the Jev model encounters rate limits or errors, failover automatically attempts alternate decision models (e.g. `anthropic/claude-3-haiku` or `GW_JEV_OPENROUTER_FALLBACK_MODELS`).
+   - **Tier 3 (OpenRouter Different Decision)**: If the Jev model encounters rate limits or errors, failover automatically attempts alternate decision models, round-robining across designated models (`baseten/mammoth-1:free`, `nace-ai/drex-max`, or `GW_JEV_OPENROUTER_FALLBACK_MODELS`).
    - **Tier 4 (OpenRouter Browser)**: If API key credits are exhausted, failover switches to OpenRouter browser session cookies.
 2. **Round-Robin on Subsequent Requests ("After")**:
    - Accounts returning HTTP `402` enter a cooldown window (`GW_JEV_CREDIT_COOLDOWN_SECS`, default 300 seconds).

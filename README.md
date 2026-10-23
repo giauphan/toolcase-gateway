@@ -134,7 +134,7 @@ GW_JEV_API_KEYS="key-1,key-2,key-3"
 GW_JEV_OPENROUTER_API_KEY="sk-or-v1-..."
 GW_JEV_OPENROUTER_COOKIE="or_statsig_stable_id=...; __session=..."
 GW_JEV_OPENROUTER_MODEL="typesafe/jev-1.13"
-GW_JEV_OPENROUTER_FALLBACK_MODELS="anthropic/claude-3-haiku"
+GW_JEV_OPENROUTER_FALLBACK_MODELS="baseten/mammoth-1:free,nace-ai/drex-max"
 ```
 
 Submit decision requests (evaluating multiple concurrent questions via the **Parallel Sampler**):
@@ -210,7 +210,7 @@ The gateway uses a two-layer configuration model:
 | `GW_JEV_OPENROUTER_COOKIE` | empty | OpenRouter browser session cookie for browser decision failover. |
 | `GW_JEV_OPENROUTER_COOKIES` | empty | Line-separated OpenRouter browser session cookies for pool rotation. |
 | `GW_JEV_OPENROUTER_MODEL` | `typesafe/jev-1.13` | Default decision model identifier routed to OpenRouter. |
-| `GW_JEV_OPENROUTER_FALLBACK_MODELS` | empty | Comma-separated fallback decision models for alternate evaluations. |
+| `GW_JEV_OPENROUTER_FALLBACK_MODELS` | `baseten/mammoth-1:free,nace-ai/drex-max` | Comma-separated fallback decision models round-robined in Step 3. |
 | `GW_JEV_CREDIT_COOLDOWN_SECS` | `300` | Account cooldown window in seconds on HTTP 402. |
 | `GW_MUSE_APPROVAL_MODE` | `off` | Sentinel auto-approval mode (`off`, `observe`, `on`). |
 | `GW_MAX_CONNECTIONS` | `256` | Maximum concurrent connections; excess rejected with `503`. |

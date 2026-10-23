@@ -51,7 +51,7 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_JEV_OPENROUTER_COOKIE` | *(empty)* | string | Jev AI | Browser session cookie used for OpenRouter decision endpoint authentication when no API key is set. |
 | `GW_JEV_OPENROUTER_COOKIES` | *(empty)* | string | Jev AI | Line-separated OpenRouter browser session cookies with optional label prefixes for pool rotation. |
 | `GW_JEV_OPENROUTER_MODEL` | `typesafe/jev-1.13` | string | Jev AI | Default decision model identifier routed to OpenRouter. |
-| `GW_JEV_OPENROUTER_FALLBACK_MODELS` | *(empty)* | csv | Jev AI | Comma-separated fallback decision models attempted on OpenRouter if primary decision model fails. |
+| `GW_JEV_OPENROUTER_FALLBACK_MODELS` | `baseten/mammoth-1:free,nace-ai/drex-max` | csv | Jev AI | Comma-separated fallback decision models attempted and round-robined on OpenRouter in Step 3 if primary decision model fails. |
 | `GW_JEV_OPENROUTER_ENABLED` | `true` | bool | Jev AI | Flag indicating whether failover to OpenRouter browser provider is enabled. |
 | `GW_JEV_CREDIT_COOLDOWN_SECS` | `300` | u64 | Jev AI | Duration in seconds a direct account returning HTTP 402 is demoted before retry. |
 | `GW_JEV_ENABLED` | `false` | bool | Jev AI | Flag indicating whether Jev provider routing is active. |

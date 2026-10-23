@@ -38,6 +38,7 @@ pub struct JevAccountPool {
     openrouter_accounts: Arc<RwLock<Vec<OpenRouterAccount>>>,
     openrouter_counter: Arc<AtomicUsize>,
     openrouter_browser_counter: Arc<AtomicUsize>,
+    openrouter_different_counter: Arc<AtomicUsize>,
     exhausted_accounts: Arc<RwLock<HashMap<String, Instant>>>,
     credit_cooldown_secs: u64,
 }
@@ -84,6 +85,7 @@ impl JevAccountPool {
             openrouter_accounts: Arc::new(RwLock::new(filtered_or)),
             openrouter_counter: Arc::new(AtomicUsize::new(0)),
             openrouter_browser_counter: Arc::new(AtomicUsize::new(0)),
+            openrouter_different_counter: Arc::new(AtomicUsize::new(0)),
             exhausted_accounts: Arc::new(RwLock::new(HashMap::new())),
             credit_cooldown_secs: if credit_cooldown_secs == 0 {
                 300
@@ -194,6 +196,28 @@ impl JevAccountPool {
         }
     }
 
+    pub fn rotated_fallback_models(&self, config: &Config) -> Vec<String> {
+        let base_models = if !config.jev_openrouter_fallback_models.is_empty() {
+            config.jev_openrouter_fallback_models.clone()
+        } else {
+            vec![
+                "baseten/mammoth-1:free".to_string(),
+                "nace-ai/drex-max".to_string(),
+            ]
+        };
+        let m_len = base_models.len();
+        if m_len <= 1 {
+            return base_models;
+        }
+        let rot = self
+            .openrouter_different_counter
+            .fetch_add(1, Ordering::Relaxed);
+        let offset = rot % m_len;
+        (0..m_len)
+            .map(|i| base_models[(offset + i) % m_len].clone())
+            .collect()
+    }
+
     pub fn candidate_failover_targets(&self, config: &Config) -> Vec<FailoverCandidate> {
         let now = Instant::now();
         if let Ok(mut ex) = self.exhausted_accounts.write() {
@@ -300,11 +324,7 @@ impl JevAccountPool {
                     ));
                 }
 
-                let alt_models = if !config.jev_openrouter_fallback_models.is_empty() {
-                    config.jev_openrouter_fallback_models.clone()
-                } else {
-                    vec!["anthropic/claude-3-haiku".to_string()]
-                };
+                let alt_models = self.rotated_fallback_models(config);
 
                 for model in alt_models {
                     for step in 0..len {

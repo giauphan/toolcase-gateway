@@ -546,13 +546,37 @@ impl ConfigStore {
             Vec::new()
         };
 
-        let base_or_accounts = if !config.jev_openrouter_accounts.is_empty() {
+        let mut base_or_accounts = if !config.jev_openrouter_accounts.is_empty() {
             config.jev_openrouter_accounts.clone()
         } else if let Some(persistent) = load_persistent_config(&config_file) {
             persistent.jev_openrouter_accounts.unwrap_or_default()
         } else {
             Vec::new()
         };
+        let cfg_api_key = config.jev_openrouter_api_key.trim();
+        if !cfg_api_key.is_empty()
+            && !base_or_accounts
+                .iter()
+                .any(|a| a.credential() == cfg_api_key)
+        {
+            base_or_accounts.push(crate::providers::jev::accounts::OpenRouterAccount {
+                cookie: String::new(),
+                api_key: cfg_api_key.to_string(),
+                label: "openrouter-api-key".to_string(),
+            });
+        }
+        let cfg_cookie = config.jev_openrouter_cookie.trim();
+        if !cfg_cookie.is_empty()
+            && !base_or_accounts
+                .iter()
+                .any(|a| a.credential() == cfg_cookie)
+        {
+            base_or_accounts.push(crate::providers::jev::accounts::OpenRouterAccount {
+                cookie: cfg_cookie.to_string(),
+                api_key: String::new(),
+                label: "openrouter-cookie".to_string(),
+            });
+        }
 
         let pool = Arc::new(
             crate::providers::jev::accounts::JevAccountPool::new_with_all(
