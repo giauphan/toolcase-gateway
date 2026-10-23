@@ -168,20 +168,23 @@ if (answers.category.choice === 'billing' && answers.urgency.score >= 2.0) {
 
 ### Configuration Methods
 
-You can configure Jev API keys statically or dynamically:
+You can configure Jev and OpenRouter credentials statically or dynamically:
 
 1. **Dynamic Dashboard Management (Recommended)**:
    - Open `/gateway-config/dashboard` in your browser.
-   - Paste one or more Jev API keys under the **Add Multi API Keys / Accounts** section, with an optional account label.
-   - Keys and labels are immediately activated in memory and persisted to `gateway_config.json` with POSIX `0600` permissions (never modifying `.env`).
+   - Use the **Add Multi API Keys / Accounts** section to ingest credentials into dedicated rotation pools:
+     - `Direct Jev AI API Keys (sk-glm...)` (`jev`): Ingests direct Jev upstream keys.
+     - `OpenRouter Decision API Keys (Bearer Tokens sk-or-...)` (`openrouter-key`): Ingests OpenRouter Bearer API keys used for Decision API evaluation (`Authorization: Bearer <key>`).
+     - `OpenRouter Browser Session Cookies` (`openrouter-cookie`): Ingests browser session cookie strings (`Cookie: ...`), preserving complete cookie syntax without mangling `name=value` pairs.
+   - Accounts and labels are immediately activated in memory and persisted to `gateway_config.json` with POSIX `0600` permissions (never modifying `.env`).
    - Or use the REST endpoint:
      ```bash
      curl -X POST http://127.0.0.1:20129/api/v1/dashboard/accounts \
        -H "Content-Type: application/json" \
        -d '{
-         "provider": "jev",
-         "label": "primary-cluster",
-         "api_keys": ["sk-jev-account1-...", "sk-jev-account2-..."]
+         "provider": "openrouter-key",
+         "label": "primary-or-cluster",
+         "api_keys": ["primary:sk-or-v1-key1...", "secondary:sk-or-v1-key2..."]
        }'
      ```
      You can also supply structured accounts or inline labels:
@@ -189,24 +192,37 @@ You can configure Jev API keys statically or dynamically:
      curl -X POST http://127.0.0.1:20129/api/v1/dashboard/accounts \
        -H "Content-Type: application/json" \
        -d '{
-         "provider": "jev",
+         "provider": "openrouter-cookie",
          "accounts": [
-           { "key": "sk-jev-account1-...", "label": "prod-worker-1" },
-           { "key": "sk-jev-account2-...", "label": "prod-worker-2" }
+           { "cookie": "or_statsig_stable_id=...; __session=...", "label": "browser-session-1" }
          ]
        }'
      ```
 
 2. **Environment Variables**:
+   Separate environment variables distinguish between API keys and browser cookies for both single accounts and multi-account pools:
    ```bash
+   # Direct Jev AI Accounts
    GW_JEV_API_KEYS="primary:sk-key-1,secondary:sk-key-2,sk-key-3"
    GW_JEV_BASE_URL="https://jev-ai.org"
+
+   # OpenRouter Single Account Defaults
+   GW_JEV_OPENROUTER_API_KEY="sk-or-v1-..."
+   GW_JEV_OPENROUTER_COOKIE="or_statsig_stable_id=...; __session=..."
+   GW_JEV_OPENROUTER_MODEL="typesafe/jev-1.13"
+
+   # OpenRouter Multi-Account Pools
+   GW_JEV_OPENROUTER_API_KEYS="node-1:sk-or-v1-key1...,node-2:sk-or-v1-key2..."
+   GW_JEV_OPENROUTER_COOKIES="sess-1:or_statsig_...; __session=...\nsess-2:or_statsig_...; __session=..."
+
+   # Step 3 Alternate Decision Models (Round-Robin)
+   GW_JEV_OPENROUTER_FALLBACK_MODELS="baseten/mammoth-1:free,nace-ai/drex-max"
    ```
 
 3. **Per-Request Headers (Fallback)**:
-   When no accounts are pre-configured on the gateway, requests can pass an account key directly using:
-   - `Authorization: Bearer <key>`
-   - `x-api-key: <key>`
+   When no accounts are pre-configured on the gateway, requests can pass credentials directly using:
+   - Direct Jev: `Authorization: Bearer <key>` or `x-api-key: <key>`
+   - OpenRouter Bearer: `Authorization: Bearer sk-or-...` or `x-openrouter-api-key: <key>`
 
 ---
 
@@ -223,7 +239,7 @@ flowchart TD
     Eval -->|"200 OK"| Success["Return Response to Client"]
     Eval -->|"401 / 402 / 403 / 429<br>(Account / Credit Exhaustion)"| Failover{"More Accounts in Pool?"}
     Failover -->|"Yes"| NextAcc["Select Next Account Candidate"] --> Send
-    Failover -->|"No"| Err["Return Error to Client"]
+    Failover -->|"No"| Cascade["Cascade to OpenRouter Tiers"]
     
     Eval -->|"499 / 502 / 503 / 504<br>(Transient Upstream Error)"| Retry["Retry with Exponential Backoff"] --> Send
     Eval -->|"400 / 404 / 413 / 422<br>(Malformed Payload)"| ReturnDirect["Return Status to Client (No Account Failover)"]
@@ -239,21 +255,67 @@ flowchart TD
 In addition to direct Jev API keys, the gateway supports a structured 4-tier failover cascade when executing decision requests:
 `Direct Jev -> Jev OpenRouter (API Key) -> OpenRouter Different Decision -> OpenRouter Browser (Cookie)`
 
-1. **Automatic Switching on Credit Exhaustion & Failures**:
-   - **Tier 1 (Direct Jev)**: Forwarded to `https://jev-ai.org/api/v1/systemone/`.
-   - **Tier 2 (Jev OpenRouter)**: If direct accounts return HTTP `401`, `402 Payment Required`, `429`, or `5xx`, failover moves immediately to OpenRouter using configured API keys with the primary Jev model (`typesafe/jev-1.13`).
-   - **Tier 3 (OpenRouter Different Decision)**: If the Jev model encounters rate limits or errors, failover automatically attempts alternate decision models, round-robining across designated models (`baseten/mammoth-1:free`, `nace-ai/drex-max`, or `GW_JEV_OPENROUTER_FALLBACK_MODELS`).
-   - **Tier 4 (OpenRouter Browser)**: If API key credits are exhausted, failover switches to OpenRouter browser session cookies.
+1. **Structured 4-Tier Failover Cascade**:
+   - **Tier 1 (Direct Jev)**: Forwarded to `https://jev-ai.org/api/v1/systemone/` using healthy direct accounts.
+   - **Tier 2 (Jev OpenRouter - API Key)**: If direct accounts return HTTP `401`, `402 Payment Required`, `429`, or `5xx`, failover moves immediately to OpenRouter using configured API keys (`Authorization: Bearer <key>`) with the primary Jev model (`typesafe/jev-1.13`).
+   - **Tier 3 (OpenRouter Different Decision - Round-Robin)**: If the Jev model encounters rate limits, downtime, or upstream errors, failover automatically attempts alternate decision models.
+     - **Dynamic Model Configuration (No Hardcoding)**: Operators can configure any arbitrary list of alternate models at runtime via:
+       - **Dashboard UI**: Input field **Step 3 Alternate Decision Models** (`cfg-jev-or-fallback-models`).
+       - **REST API**: `POST /api/v1/dashboard/jev-config` with `"jev_openrouter_fallback_models": ["baseten/mammoth-1:free", "nace-ai/drex-max"]` (or comma-separated string).
+       - **Gateway Config API**: `POST /api/v1/dashboard/config/gateway`.
+       - **Environment Variable**: `GW_JEV_OPENROUTER_FALLBACK_MODELS="model1,model2"`.
+       - **Persistent JSON Storage**: Automatically saved to `gateway_config.json` and restored across gateway restarts.
+       - **Sensible Defaults**: When unconfigured, defaults to `baseten/mammoth-1:free, nace-ai/drex-max`.
+     - **Atomic Round-Robin Load Balancing**: Across consecutive failover evaluations reaching Step 3, the evaluation order rotates atomically (`Request 1: model-A -> model-B`, `Request 2: model-B -> model-A`), balancing load across models and healthy OpenRouter API keys.
+   - **Tier 4 (OpenRouter Browser - Session Cookie)**: If all API keys are exhausted or unavailable, failover smoothly transitions to OpenRouter browser session cookies (`Cookie: ...`).
+
 2. **Round-Robin on Subsequent Requests ("After")**:
    - Accounts returning HTTP `402` enter a cooldown window (`GW_JEV_CREDIT_COOLDOWN_SECS`, default 300 seconds).
    - On subsequent decision requests after a failure, healthy candidates continue to rotate in round-robin order. If direct accounts remain exhausted, subsequent requests immediately and smoothly rotate across OpenRouter API keys and browser sessions.
-3. **API Key & Session Authentication**:
-   - **Bearer API Key**: Configured via `GW_JEV_OPENROUTER_API_KEY`, dashboard, or inbound client request (`Authorization: Bearer sk-or-...`). Uses standard OpenRouter quickstart headers: `Authorization: Bearer <key>`, `HTTP-Referer: https://github.com/giauphan/toolcase-gateway`, and `X-Title: toolcase-gateway`.
-   - **Browser Session Cookie**: Provided via `GW_JEV_OPENROUTER_COOKIE` or dashboard for browser session replay.
-4. **Different Decision Models**:
-   Callers may specify any model compatible with OpenRouter (e.g. `typesafe/jev-1.13`, `anthropic/claude-3-haiku`, etc.) in the request body. If omitted or given as `jev-1.13`, it defaults cleanly to `typesafe/jev-1.13`.
-5. **Multi-Session & Multi-Key Round-Robin**:
-   Multiple OpenRouter API keys and browser sessions can be configured through the Dashboard or account pool, rotating round-robin independently within their respective tiers.
+
+3. **Separated API Key & Cookie Authentication**:
+   - **Bearer API Key**: Configured via `GW_JEV_OPENROUTER_API_KEY`, `GW_JEV_OPENROUTER_API_KEYS`, dashboard, or inbound client request (`Authorization: Bearer sk-or-...`). Uses standard OpenRouter quickstart headers: `Authorization: Bearer <key>`, `HTTP-Referer: https://github.com/giauphan/toolcase-gateway`, and `X-Title: toolcase-gateway`.
+   - **Browser Session Cookie**: Configured via `GW_JEV_OPENROUTER_COOKIE`, `GW_JEV_OPENROUTER_COOKIES`, or dashboard dropdown (`openrouter-cookie`) for browser session replay.
+
+4. **Runtime Configuration Examples**:
+
+   #### Update Step 3 Models via Dashboard REST API
+   ```bash
+   curl -X POST http://127.0.0.1:20129/api/v1/dashboard/jev-config \
+     -H "Content-Type: application/json" \
+     -d '{
+       "jev_openrouter_fallback_models": [
+         "baseten/mammoth-1:free",
+         "nace-ai/drex-max",
+         "anthropic/claude-3-haiku"
+       ]
+     }'
+   ```
+
+   #### Inspect Active Jev & OpenRouter Configuration
+   ```bash
+   curl -X GET http://127.0.0.1:20129/api/v1/dashboard/overview
+   ```
+   Returns active models, masked credentials, and pool health:
+   ```json
+   {
+     "status": "ok",
+     "providers": {
+       "openrouter_jev": {
+         "name": "OpenRouter JEV (Browser / Cookie / API Key)",
+         "base_url": "https://openrouter.ai",
+         "model": "typesafe/jev-1.13",
+         "fallback_models": [
+           "baseten/mammoth-1:free",
+           "nace-ai/drex-max"
+         ],
+         "enabled": true,
+         "credit_cooldown_secs": 300,
+         "total_accounts": 2
+       }
+     }
+   }
+   ```
 
 ---
 
