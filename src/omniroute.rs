@@ -51,7 +51,7 @@ pub fn handle_omniroute_proxy(
     client: &mut TcpStream,
     request: &Request,
     config: &Config,
-) -> io::Result<()> {
+) -> io::Result<u16> {
     crate::features::proxy::ProxyService::forward(client, request, config)
 }
 

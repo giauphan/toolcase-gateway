@@ -43,7 +43,7 @@ pub fn handle_jev_models_catalog(
     request: &Request,
     config: &Config,
     jev_pool: &JevAccountPool,
-) -> io::Result<()> {
+) -> io::Result<u16> {
     let fallback_pool;
     let pool = if !jev_pool.is_empty() {
         jev_pool
@@ -70,13 +70,19 @@ pub fn handle_jev_models_catalog(
     }
 
     match req.call() {
-        Ok(response) => write_ureq_response(client, response),
-        Err(error) => write_error(
-            client,
-            502,
-            "Bad Gateway",
-            &format!("toolcase-gateway: Jev models upstream transport error: {error}"),
-        ),
+        Ok(response) => {
+            write_ureq_response(client, response)?;
+            Ok(200)
+        }
+        Err(error) => {
+            write_error(
+                client,
+                502,
+                "Bad Gateway",
+                &format!("toolcase-gateway: Jev models upstream transport error: {error}"),
+            )?;
+            Ok(502)
+        }
     }
 }
 
@@ -85,7 +91,7 @@ pub fn handle_jev_ai(
     request: &Request,
     config: &Config,
     jev_pool: &JevAccountPool,
-) -> io::Result<()> {
+) -> io::Result<u16> {
     let fallback_pool;
     let pool = if !jev_pool.is_empty() {
         jev_pool
@@ -135,17 +141,21 @@ pub fn handle_jev_ai(
     }
 
     if candidates.is_empty() {
-        return write_error(
+        write_error(
             client,
             401,
             "Unauthorized",
             "No Jev AI or OpenRouter accounts configured. Set GW_JEV_API_KEYS, GW_JEV_OPENROUTER_API_KEY, GW_JEV_OPENROUTER_COOKIE, or pass Authorization: Bearer <key>",
-        );
+        )?;
+        return Ok(401);
     }
 
     let route = match resolve_jev_route(&request.path) {
         Some(route) => route,
-        None => return write_error(client, 404, "Not Found", "unknown Jev route"),
+        None => {
+            write_error(client, 404, "Not Found", "unknown Jev route")?;
+            return Ok(404);
+        }
     };
     let upstream_path = route.upstream_path;
 

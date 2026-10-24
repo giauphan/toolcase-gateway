@@ -100,7 +100,7 @@ pub fn execute_http_failover<F, R>(
     provider_name: &str,
     is_retryable_status: F,
     make_request: R,
-) -> io::Result<()>
+) -> io::Result<u16>
 where
     F: Fn(u16) -> bool,
     R: Fn(
@@ -127,7 +127,7 @@ pub fn execute_http_failover_with_callback<F, C, R>(
     is_retryable_status: F,
     mut on_candidate_status: C,
     make_request: R,
-) -> io::Result<()>
+) -> io::Result<u16>
 where
     F: Fn(u16) -> bool,
     C: FnMut(&FailoverCandidate, u16),
@@ -171,7 +171,8 @@ where
                     }
                     continue;
                 }
-                return write_ureq_response(client, res);
+                write_ureq_response(client, res)?;
+                return Ok(status);
             }
             Err(e) => {
                 if !last {
@@ -192,23 +193,26 @@ where
                     }
                     continue;
                 }
-                return write_error(
+                write_error(
                     client,
                     502,
                     "Bad Gateway",
                     &format!("toolcase-gateway: {provider_name} upstream transport error: {e}"),
-                );
+                )?;
+                return Ok(502);
             }
         }
     }
 
+    let final_status = last_status.unwrap_or(502);
     write_error(
         client,
-        last_status.unwrap_or(502),
+        final_status,
         "Bad Gateway",
         &format!(
             "toolcase-gateway: all {provider_name} accounts exhausted; last status HTTP {}",
-            last_status.unwrap_or(502)
+            final_status
         ),
-    )
+    )?;
+    Ok(final_status)
 }

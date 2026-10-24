@@ -104,7 +104,20 @@ impl Logger {
 
     pub fn log_access(&self, method: &str, path: &str, client_ip: &str) {
         if let Ok(mut writer) = self.inner.lock() {
-            writer.write_access_entry(method, path, client_ip);
+            writer.write_access_entry(method, path, client_ip, None, None);
+        }
+    }
+
+    pub fn log_access_with_status(
+        &self,
+        method: &str,
+        path: &str,
+        client_ip: &str,
+        status: u16,
+        duration_ms: u64,
+    ) {
+        if let Ok(mut writer) = self.inner.lock() {
+            writer.write_access_entry(method, path, client_ip, Some(status), Some(duration_ms));
         }
     }
 
@@ -365,7 +378,14 @@ impl LogWriter {
         }
     }
 
-    fn write_access_entry(&mut self, method: &str, path: &str, client_ip: &str) {
+    fn write_access_entry(
+        &mut self,
+        method: &str,
+        path: &str,
+        client_ip: &str,
+        status: Option<u16>,
+        duration_ms: Option<u64>,
+    ) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -375,7 +395,15 @@ impl LogWriter {
         self.check_date_roll(&today);
 
         let sanitized_path = sanitize_log_message(path);
-        let line = format!("[{ts}] [ACCESS] {client_ip} \"{method} {sanitized_path}\"\n");
+        let line = match (status, duration_ms) {
+            (Some(s), Some(d)) => {
+                format!("[{ts}] [ACCESS] {client_ip} \"{method} {sanitized_path}\" {s} {d}ms\n")
+            }
+            (Some(s), None) => {
+                format!("[{ts}] [ACCESS] {client_ip} \"{method} {sanitized_path}\" {s}\n")
+            }
+            _ => format!("[{ts}] [ACCESS] {client_ip} \"{method} {sanitized_path}\"\n"),
+        };
 
         if self.config.console {
             eprint!("{line}");
@@ -455,6 +483,17 @@ pub fn log_message(level: &str, target: &str, msg: &str) {
 /// Log an HTTP request access entry to the global logger.
 pub fn log_access(method: &str, path: &str, client_ip: &str) {
     default_logger().log_access(method, path, client_ip);
+}
+
+/// Log an HTTP request access entry with final response status and duration to the global logger.
+pub fn log_access_with_status(
+    method: &str,
+    path: &str,
+    client_ip: &str,
+    status: u16,
+    duration_ms: u64,
+) {
+    default_logger().log_access_with_status(method, path, client_ip, status, duration_ms);
 }
 
 /// Set the log output directory at runtime for the global logger.

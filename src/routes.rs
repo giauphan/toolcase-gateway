@@ -69,30 +69,83 @@ fn write_rejection_and_drain(
 }
 
 pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<()> {
+    let start = std::time::Instant::now();
+    let peer_ip = client
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "-".into());
+
     let (request, _byte_guard) = match read_request_with_admission(&mut client, &store.admission())
     {
         Ok(request) => request,
         Err(error) if error.kind() == io::ErrorKind::Other => {
-            return write_rejection_and_drain(
+            let res = write_rejection_and_drain(
                 &mut client,
                 503,
                 "Service Unavailable",
                 "too many in-flight bytes",
             );
+            crate::runtime::logger::log_access_with_status(
+                "UNKNOWN",
+                "-",
+                &peer_ip,
+                503,
+                start.elapsed().as_millis() as u64,
+            );
+            return res;
         }
         Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-            return write_rejection_and_drain(
+            let res = write_rejection_and_drain(
                 &mut client,
                 413,
                 "Payload Too Large",
                 &error.to_string(),
             );
+            crate::runtime::logger::log_access_with_status(
+                "UNKNOWN",
+                "-",
+                &peer_ip,
+                413,
+                start.elapsed().as_millis() as u64,
+            );
+            return res;
         }
         Err(error) if error.kind() == io::ErrorKind::InvalidData => {
-            return write_rejection_and_drain(&mut client, 400, "Bad Request", &error.to_string());
+            let res =
+                write_rejection_and_drain(&mut client, 400, "Bad Request", &error.to_string());
+            crate::runtime::logger::log_access_with_status(
+                "UNKNOWN",
+                "-",
+                &peer_ip,
+                400,
+                start.elapsed().as_millis() as u64,
+            );
+            return res;
         }
         Err(error) => return Err(error),
     };
+
+    let result = route_request_dispatch(&mut client, &request, store);
+    let duration_ms = start.elapsed().as_millis() as u64;
+    let status = match &result {
+        Ok(s) => *s,
+        Err(_) => 500,
+    };
+    crate::runtime::logger::log_access_with_status(
+        &request.method,
+        &request.path,
+        &peer_ip,
+        status,
+        duration_ms,
+    );
+    result.map(|_| ())
+}
+
+fn route_request_dispatch(
+    client: &mut TcpStream,
+    request: &crate::http::Request,
+    store: &ConfigStore,
+) -> io::Result<u16> {
     let clean_path = request
         .path
         .split('?')
@@ -100,138 +153,143 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
         .unwrap_or("")
         .trim_end_matches('/');
 
-    let peer_ip = client
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| "-".into());
-    crate::runtime::logger::log_access(&request.method, &request.path, &peer_ip);
-
     if request.method.eq_ignore_ascii_case("options") {
-        return handle_cors_preflight(&mut client);
+        handle_cors_preflight(client)?;
+        return Ok(200);
     }
 
     // Runtime-config routes operate on the live store and never fall through to
     // the generic OmniRoute proxy.
     if clean_path == "/gateway-config/dashboard" {
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::features::dashboard::handle_dashboard_page(&mut client)
+            crate::features::dashboard::handle_dashboard_page(client)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "dashboard only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/api/v1/dashboard/overview" {
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::features::dashboard::handle_dashboard_overview(&mut client, store)
+            crate::features::dashboard::handle_dashboard_overview(client, store)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "dashboard overview only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/api/v1/dashboard/accounts" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::features::dashboard::handle_add_provider_accounts(
-                &mut client,
-                &request.body,
-                store,
-            )
+            crate::features::dashboard::handle_add_provider_accounts(client, &request.body, store)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "dashboard accounts only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/api/v1/dashboard/config" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::features::dashboard::handle_update_gateway_config(
-                &mut client,
-                &request.body,
-                store,
-            )
+            crate::features::dashboard::handle_update_gateway_config(client, &request.body, store)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "dashboard config only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/api/v1/dashboard/muse-config" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::features::dashboard::handle_update_muse_config(&mut client, &request.body, store)
+            crate::features::dashboard::handle_update_muse_config(client, &request.body, store)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "dashboard muse-config only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/api/v1/dashboard/jev-config" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::features::dashboard::handle_update_jev_config(&mut client, &request.body, store)
+            crate::features::dashboard::handle_update_jev_config(client, &request.body, store)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "dashboard jev-config only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/muse-config" {
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::video_template::handle_muse_config_page(&mut client)
+            crate::video_template::handle_muse_config_page(client)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "muse-config only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/muse-ai/v1/config" {
         return if request.method.eq_ignore_ascii_case("get") {
             let snapshot = store.snapshot();
-            crate::har_config::write_current_config(&mut client, &snapshot)
+            crate::har_config::write_current_config(client, &snapshot)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "Muse configuration route only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/muse-ai/v1/config/har" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::har_config::apply_har_config(&mut client, &request.body, store)
+            crate::har_config::apply_har_config(client, &request.body, store)?;
+            Ok(200)
         } else {
             write_error(
-                &mut client,
+                client,
                 405,
                 "Method Not Allowed",
                 "Muse HAR configuration only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
 
     let snapshot = store.snapshot();
-    route_request_impl(&mut client, &request, &snapshot, &store.jev_pool())
+    route_request_impl(client, request, &snapshot, &store.jev_pool())
 }
 
 fn route_request_impl(
@@ -239,7 +297,7 @@ fn route_request_impl(
     request: &crate::http::Request,
     config: &Config,
     jev_pool: &crate::providers::jev::accounts::JevAccountPool,
-) -> io::Result<()> {
+) -> io::Result<u16> {
     let clean_path = request
         .path
         .split('?')
@@ -249,53 +307,61 @@ fn route_request_impl(
 
     if let Some(platform) = catalog_route(clean_path) {
         return if request.method.eq_ignore_ascii_case("get") {
-            handle_models_catalog(client, platform)
+            handle_models_catalog(client, platform)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "model catalogs only support GET",
-            )
+            )?;
+            Ok(405)
         };
     }
 
     if clean_path == "/muse-ai/v1/chat/completions" || clean_path == "/muse-ai/chat/completions" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::museai::handle_museai_chat_completions(client, &request.body, config)
+            crate::museai::handle_museai_chat_completions(client, &request.body, config)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "Muse chat completions only support POST",
-            )
+            )?;
+            Ok(405)
         };
     }
 
     if clean_path == "/muse-ai/v1" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::museai::handle_museai_v1(client, &request.body, config)
+            crate::museai::handle_museai_v1(client, &request.body, config)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "Muse endpoint only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
 
     if clean_path == "/muse-ai/v1/create-video" {
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::museai::handle_create_video_request(client, request, config)
+            crate::museai::handle_create_video_request(client, request, config)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "Muse video creation only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
 
@@ -308,45 +374,53 @@ fn route_request_impl(
             let allowed = request.method.eq_ignore_ascii_case("get")
                 || request.method.eq_ignore_ascii_case("head");
             return if allowed {
-                crate::museai::handle_get_video_content(client, job_id, request)
+                crate::museai::handle_get_video_content(client, job_id, request)?;
+                Ok(200)
             } else {
                 write_error(
                     client,
                     405,
                     "Method Not Allowed",
                     "video content only supports GET and HEAD",
-                )
+                )?;
+                Ok(405)
             };
         }
         if request.method.eq_ignore_ascii_case("put") {
-            return crate::museai::handle_update_video_prompt(client, sub, &request.body);
+            crate::museai::handle_update_video_prompt(client, sub, &request.body)?;
+            return Ok(200);
         }
         if request.method.eq_ignore_ascii_case("get") {
-            return crate::museai::handle_get_video_request(client, sub, request);
+            crate::museai::handle_get_video_request(client, sub, request)?;
+            return Ok(200);
         }
-        return write_error(
+        write_error(
             client,
             405,
             "Method Not Allowed",
             "video route only supports GET and PUT",
-        );
+        )?;
+        return Ok(405);
     }
 
     if clean_path.starts_with("/muse-ai/v1/threads/") {
         return if request.method.eq_ignore_ascii_case("delete") {
             let thread_id = clean_path.split('/').next_back().unwrap_or("");
-            crate::museai::handle_museai_thread_cleanup(client, thread_id, config)
+            crate::museai::handle_museai_thread_cleanup(client, thread_id, config)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "Muse thread cleanup only supports DELETE",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/muse-ai" || clean_path.starts_with("/muse-ai/") {
-        return write_error(client, 404, "Not Found", "unknown Muse route");
+        write_error(client, 404, "Not Found", "unknown Muse route")?;
+        return Ok(404);
     }
 
     if clean_path == "/jev/v1/models"
@@ -361,7 +435,8 @@ fn route_request_impl(
                 405,
                 "Method Not Allowed",
                 "Jev models catalog only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/jev/v1"
@@ -377,12 +452,13 @@ fn route_request_impl(
         {
             return crate::jev::handle_jev_ai(client, request, config, jev_pool);
         }
-        return write_error(
+        write_error(
             client,
             405,
             "Method Not Allowed",
             "Jev Decision API routes: GET /requests/{id}, POST /systemone, /cancel",
-        );
+        )?;
+        return Ok(405);
     }
     if clean_path == "/jev-ai/v1" || clean_path.starts_with("/jev-ai/v1/") {
         let expected = crate::providers::jev::adapter::expected_jev_method(clean_path);
@@ -391,24 +467,27 @@ fn route_request_impl(
         {
             return crate::jev::handle_jev_ai(client, request, config, jev_pool);
         }
-        return write_error(
+        write_error(
             client,
             405,
             "Method Not Allowed",
             "Jev Decision API routes: GET /requests/{id}, POST /systemone, /cancel",
-        );
+        )?;
+        return Ok(405);
     }
 
     if clean_path == "/video/v1/providers" {
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::features::video::handle_video_providers_catalog(client)
+            crate::features::video::handle_video_providers_catalog(client)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "video providers catalog only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
 
@@ -421,14 +500,16 @@ fn route_request_impl(
     {
         let provider = parts.get(4).copied().unwrap_or("");
         return if request.method.eq_ignore_ascii_case("post") {
-            crate::features::video::handle_video_task_submit(client, &request.body, provider)
+            crate::features::video::handle_video_task_submit(client, &request.body, provider)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "video task submit only supports POST",
-            )
+            )?;
+            Ok(405)
         };
     }
 
@@ -442,14 +523,16 @@ fn route_request_impl(
         let provider = parts.get(4).copied().unwrap_or("");
         let key = parts.get(7).copied().unwrap_or("");
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::features::video::handle_video_task_reconciliation(client, provider, key)
+            crate::features::video::handle_video_task_reconciliation(client, provider, key)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "reconciliation lookup only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
 
@@ -462,28 +545,32 @@ fn route_request_impl(
         let provider = parts.get(4).copied().unwrap_or("");
         let task_id = parts.get(6).copied().unwrap_or("");
         return if request.method.eq_ignore_ascii_case("get") {
-            crate::features::video::handle_video_task_status(client, provider, task_id)
+            crate::features::video::handle_video_task_status(client, provider, task_id)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "video task status only supports GET",
-            )
+            )?;
+            Ok(405)
         };
     }
     if clean_path == "/video-template" || clean_path.starts_with("/video-template/") {
         return if request.method.eq_ignore_ascii_case("get")
             || request.method.eq_ignore_ascii_case("head")
         {
-            crate::video_template::handle_video_template_page_with_method(client, &request.method)
+            crate::video_template::handle_video_template_page_with_method(client, &request.method)?;
+            Ok(200)
         } else {
             write_error(
                 client,
                 405,
                 "Method Not Allowed",
                 "video templates only support GET and HEAD",
-            )
+            )?;
+            Ok(405)
         };
     }
 

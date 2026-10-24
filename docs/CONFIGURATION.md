@@ -85,6 +85,22 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_LOG_RETENTION_DAYS` | `2` | u64 | Logging | Days to retain rotated daily log files and archived `.zip` files before automatic daemon cleanup (defaults to 2 days). |
 | `GW_LOG_CONSOLE` | `true` | bool | Logging | Mirror formatted log entries to standard error (`stderr`). |
 
+### Logging Streams and Format
+
+The gateway writes structured log streams into `GW_LOG_DIR` (`logs/`):
+- **`access.log`** (`access-YYYY-MM-DD.log`): Records every handled HTTP request including client IP, HTTP method, sanitized path, final HTTP response status code, and elapsed duration in milliseconds:
+  ```text
+  [2026-10-24T04:19:34Z] [ACCESS] 127.0.0.1 "POST /v1/responses" 200 45ms
+  ```
+- **`gateway.log`** (`gateway-YYYY-MM-DD.log`): Comprehensive runtime log combining subsystem events (`gateway_proxy`, `museai_chat`, `museai_video`, `jev_ai`) and mirrored access events:
+  ```text
+  [2026-10-24T04:19:34Z] [INFO] [gateway_proxy] Routing request /v1/responses to model 'gpt-4o' (candidates: gpt-4o)
+  [2026-10-24T04:19:34Z] [INFO] [gateway_proxy] Forwarding request /v1/responses to upstream 127.0.0.1:20128 with model 'gpt-4o' (attempt 1/1)
+  [2026-10-24T04:19:34Z] [INFO] [gateway_proxy] Upstream model 'gpt-4o' responded with HTTP 200 OK for path /v1/responses
+  [2026-10-24T04:19:34Z] [ACCESS] 127.0.0.1 "POST /v1/responses" 200 45ms
+  ```
+- **`error.log`** (`error-YYYY-MM-DD.log`): Error stream isolating warnings, upstream failovers, network failures, and 5xx conditions.
+
 ---
 
 ## 3. Standalone Persistent JSON Storage (`gateway_config.json`)

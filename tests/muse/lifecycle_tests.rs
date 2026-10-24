@@ -135,6 +135,10 @@ fn test_retention_cleanup_rules() {
 #[test]
 fn test_append_job_revision() {
     let job_id = format!("video-edit-test-{}", uuid::Uuid::new_v4());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let record = VideoJobRecord {
         job_id: job_id.clone(),
         owner_id: "user-456".into(),
@@ -144,8 +148,8 @@ fn test_append_job_revision() {
         aspect_ratio: "16:9".into(),
         duration: 5,
         thread_id: Some("thread-xyz".into()),
-        created_at: 2000,
-        last_activity_at: 2000,
+        created_at: now,
+        last_activity_at: now,
         pinned: false,
         status: "artifact_reported".into(),
         media_validated: true,
@@ -154,7 +158,7 @@ fn test_append_job_revision() {
         revisions: vec![VideoRevision {
             revision_id: "rev-1".into(),
             prompt: "initial prompt".into(),
-            created_at: 2000,
+            created_at: now,
             video_url: "https://muse.ai/files/v1.mp4".into(),
             status: "artifact_reported".into(),
         }],
