@@ -26,7 +26,7 @@ pub use session::{bootstrap_museai_config, build_museai_ws_url};
 pub use threads::spawn_muse_thread;
 pub use threads::{
     cleanup_cycle_once, delete_muse_thread, register_thread, start_cleanup_worker,
-    start_cleanup_worker_with_interval,
+    start_cleanup_worker_with_interval, unregister_thread,
 };
 pub use video::build_video_prompt;
 

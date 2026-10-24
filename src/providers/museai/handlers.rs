@@ -332,6 +332,7 @@ pub fn handle_museai_thread_cleanup(
         config.museai_base_url.as_str()
     };
 
+    crate::providers::museai::threads::unregister_thread(thread_id);
     match crate::providers::museai::threads::delete_muse_thread(base_url, thread_id, config) {
         Ok(()) => {
             let body = serde_json::json!({

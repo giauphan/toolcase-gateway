@@ -65,3 +65,45 @@ fn test_thread_cleanup_active_vs_expired() {
     assert!(!threads.iter().any(|t| t.id == expired_id));
     assert!(threads.iter().any(|t| t.id == active_id));
 }
+
+#[test]
+fn test_thread_persistence_and_restart_recovery() {
+    let config = test_config();
+    let thread_id = "test-persist-recover-thread-999".to_string();
+
+    register_thread(thread_id.clone(), "https://muse.ai".to_string(), config);
+
+    let disk_file = toolcase_gateway::museai::threads::thread_state_dir()
+        .join(format!("thread-{thread_id}.json"));
+    assert!(disk_file.exists());
+
+    // Simulate process restart by clearing in-memory registry
+    {
+        let mut threads = tracked_threads().lock().unwrap();
+        threads.retain(|t| t.id != thread_id);
+        assert!(!threads.iter().any(|t| t.id == thread_id));
+    }
+
+    // Running cleanup with TTL 0 should recover from disk and delete the expired thread
+    let deleted = toolcase_gateway::museai::threads::cleanup_tracked_threads_with_ttl(0);
+    assert!(deleted >= 1);
+    assert!(!disk_file.exists());
+}
+
+#[test]
+fn test_unregister_thread_removes_from_disk_and_memory() {
+    let config = test_config();
+    let thread_id = "test-unregister-thread-888".to_string();
+
+    register_thread(thread_id.clone(), "https://muse.ai".to_string(), config);
+
+    let disk_file = toolcase_gateway::museai::threads::thread_state_dir()
+        .join(format!("thread-{thread_id}.json"));
+    assert!(disk_file.exists());
+
+    toolcase_gateway::museai::threads::unregister_thread(&thread_id);
+
+    assert!(!disk_file.exists());
+    let threads = tracked_threads().lock().unwrap();
+    assert!(!threads.iter().any(|t| t.id == thread_id));
+}
