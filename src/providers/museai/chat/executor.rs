@@ -292,7 +292,28 @@ pub fn request_museai_chat_completion(
 
     if config.museai_auto_cleanup_threads && !thread_id.is_empty() {
         if config.museai_thread_retention_secs == 0 {
-            let _ = crate::providers::museai::delete_muse_thread(base_origin, &thread_id, &config);
+            let delete_stream_id = active_stream_id.max(2) + 1;
+            let delete_payload = serde_json::json!({
+                "session_id": thread_id,
+                "id": thread_id,
+            });
+            if let Ok(bytes) = serde_json::to_vec(&delete_payload) {
+                let _ = socket.send_encrypted_service_request(
+                    &mut session,
+                    SERVICE_DAEMON,
+                    delete_stream_id,
+                    "POST",
+                    "/session/delete",
+                    &headers,
+                    &bytes,
+                );
+            }
+            crate::providers::museai::unregister_thread(&thread_id);
+            crate::runtime::logger::log_message(
+                "INFO",
+                "museai_chat",
+                &format!("Purged ephemeral thread {thread_id} directly on CVM connection"),
+            );
         } else {
             crate::runtime::logger::log_message(
                 "INFO",

@@ -114,3 +114,36 @@ fn test_unregister_thread_removes_from_disk_and_memory() {
     let threads = tracked_threads().lock().unwrap();
     assert!(!threads.iter().any(|t| t.id == thread_id));
 }
+
+#[test]
+fn test_delete_cvm_session_over_noise_guards() {
+    let config = test_config();
+    // Empty thread ID succeeds as no-op
+    let res_empty = toolcase_gateway::museai::delete_cvm_session_over_noise("", &config);
+    assert!(res_empty.is_ok());
+
+    // Empty credentials returns NotFound error without hanging or panicking
+    let res_no_creds =
+        toolcase_gateway::museai::delete_cvm_session_over_noise("session-123", &config);
+    assert!(res_no_creds.is_err());
+    assert_eq!(
+        res_no_creds.unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+}
+
+#[test]
+fn test_delete_muse_thread_graceful_handling() {
+    let config = test_config();
+    // Empty thread ID succeeds as no-op
+    let res_empty = toolcase_gateway::museai::delete_muse_thread("https://muse.ai", "", &config);
+    assert!(res_empty.is_ok());
+
+    // Non-existent or offline thread logs warning and returns Ok(())
+    let res_offline = toolcase_gateway::museai::delete_muse_thread(
+        "https://127.0.0.1:9999",
+        "offline-thread-1",
+        &config,
+    );
+    assert!(res_offline.is_ok());
+}
