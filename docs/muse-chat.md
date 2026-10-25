@@ -11,6 +11,7 @@ Key capabilities:
 - **Headless Sentinel Auto-Approval**: Network and browsing actions requested by the remote VM can be auto-approved using the gateway's Sentinel approval coordinator (`GW_MUSE_APPROVAL_MODE=on`).
 - **End-to-End Cryptographic Isolation**: Client prompts are encrypted through a 3-way mutual `Noise_XX_25519_AESGCM_SHA256` handshake directly to the Confidential VM.
 - **Thread Tracking & Lifecycle Retention**: Every conversation is assigned an isolated `thread_id` / `session_id` and automatically purged after a configurable retention period.
+- **Multi-Turn Thread Continuation**: Continue follow-up questions in the exact same CVM thread by passing `reply_thread_id` (or `thread_id` / `session_id`), keeping conversational context and remote memory fully intact.
 
 ---
 
@@ -84,6 +85,43 @@ curl -X POST http://127.0.0.1:20130/v1/chat/completions \
   }'
 ```
 
+### 3.4 Continuing an Existing Conversation (Multi-Turn Chat)
+
+When you receive a response from Muse AI, take the `reply_thread_id` (or `thread_id`) returned in the response JSON and pass it in subsequent turns. The CVM preserves full conversational context across turns:
+
+**Turn 1: Start Conversation**
+```bash
+curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "muse",
+    "messages": [
+      {
+        "role": "user",
+        "content": "My favorite color is emerald green."
+      }
+    ]
+  }'
+```
+*Response returns `"reply_thread_id": "54515aa9-0d4e-44dd-bbb1-3bc61363509a"`.*
+
+**Turn 2: Follow-Up in the Same Thread**
+```bash
+curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "muse",
+    "reply_thread_id": "54515aa9-0d4e-44dd-bbb1-3bc61363509a",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is my favorite color?"
+      }
+    ]
+  }'
+```
+*The assistant answers: "Your favorite color is emerald green!" because the thread was continued.*
+
 ---
 
 ## 4. Request & Response Schemas
@@ -113,6 +151,7 @@ Requests conform to the standard OpenAI chat completions schema.
 | Field | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `model` | `string` | Optional* | Target model. Recommended value is `"muse"`. When calling `/muse-ai/v1/chat/completions`, defaults to `muse`. |
+| `reply_thread_id` | `string` | Optional | ID of an existing thread to continue. When specified, the gateway directs the prompt to that existing thread on the Muse CVM. Aliases `thread_id` and `session_id` are also accepted. |
 | `messages` | `array` | Optional* | Array of message objects containing `role` (`"user"`, `"assistant"`, `"system"`) and `content`. |
 | `prompt` | `string` | Optional* | Alternative top-level string prompt if not using the `messages` array. |
 
@@ -130,6 +169,7 @@ Completions return a standard OpenAI `chat.completion` object containing metadat
   "model": "muse",
   "thread_id": "54515aa9-0d4e-44dd-bbb1-3bc61363509a",
   "session_id": "54515aa9-0d4e-44dd-bbb1-3bc61363509a",
+  "reply_thread_id": "54515aa9-0d4e-44dd-bbb1-3bc61363509a",
   "choices": [
     {
       "index": 0,
@@ -149,12 +189,24 @@ Completions return a standard OpenAI `chat.completion` object containing metadat
 ```
 
 #### Extension Fields
+- `reply_thread_id`: Convenient thread identifier to pass in your next request body to continue this exact conversation.
 - `thread_id`: Unique identifier for the conversation thread assigned by the Muse CVM.
 - `session_id`: Unique session identifier used for stream subscription and approval scoping.
 
 ---
 
-## 5. Live Search & Real-Time Data
+## 5. Continuing Conversations in Existing Threads
+
+### 5.1 How Continuation Works
+1. **Thread ID Extraction**: The gateway inspects the incoming JSON payload for `reply_thread_id` (or fallback keys `thread_id`, `session_id`, `reply_to_thread_id`, or `metadata.reply_thread_id`).
+2. **Sanitization**: Optional prefixes like `thread_` or `session_` are automatically stripped, and the identifier is verified as a valid UUID. If malformed, the request fails closed immediately with `400 Bad Request`.
+3. **Prompt Disambiguation**: When continuing an existing thread, the gateway extracts the latest user prompt from the `messages` array. This prevents duplicating previously stored chat history into the CVM's remote transcript.
+4. **Session Subscription**: The CVM daemon resumes the session stream, produces context-aware continuation deltas, and preserves conversation memory.
+5. **Retention Timer Refresh**: Upon every continued turn, the gateway automatically updates the thread's last-activity timestamp (`created_at = now`) in the thread registry, ensuring that active ongoing discussions are not reclaimed while still in use.
+
+---
+
+## 6. Live Search & Real-Time Data
 
 When asked queries requiring current real-world information (such as commodity prices, foreign exchange rates, or news events), the Muse Confidential VM can initiate search tools:
 
@@ -165,7 +217,7 @@ When asked queries requiring current real-world information (such as commodity p
 
 ---
 
-## 6. Sentinel Auto-Approval Configuration
+## 7. Sentinel Auto-Approval Configuration
 
 When the remote CVM performs actions that require permission, it issues a structured approval snapshot. By default, the gateway operates in `scoped_auto` mode (or `GW_MUSE_APPROVAL_MODE=on`), allowing approved domains to execute without blocking the user:
 
@@ -194,7 +246,7 @@ GW_MUSE_APPROVAL_MAX_DECISIONS=5
 
 ---
 
-## 7. Cryptographic Transport Architecture
+## 8. Cryptographic Transport Architecture
 
 Conversational requests are handled entirely in memory with strict cryptographic guarantees:
 
@@ -224,7 +276,7 @@ sequenceDiagram
 
 ---
 
-## 8. Thread Lifecycle & Cleanup
+## 9. Thread Lifecycle & Cleanup
 
 Every conversation thread generates a remote thread resource inside the CVM. To prevent unmanaged resource accumulation, `toolcase-gateway` provides an automated background thread lifecycle daemon:
 
@@ -232,22 +284,28 @@ Every conversation thread generates a remote thread resource inside the CVM. To 
 # Enable automatic cleanup of chat threads
 GW_MUSEAI_AUTO_CLEANUP_THREADS=true
 
-# Retention period before thread deletion (seconds; default: 172800 = 2 days)
-# Set to 0 for immediate deletion upon completion response
-GW_MUSEAI_THREAD_RETENTION_SECS=172800
+# Retention period before thread deletion (seconds)
+# Common profiles:
+#   7200   = 2 hours (ideal for active session pools)
+#   172800 = 2 days (default)
+#   0      = Immediate ephemeral deletion upon response completion
+GW_MUSEAI_THREAD_RETENTION_SECS=7200
 ```
 
-- When `GW_MUSEAI_THREAD_RETENTION_SECS=0`, threads are deleted immediately after the assistant finishes responding.
-- When retention is greater than 0, threads are tracked in the gateway's thread registry and purged by the background maintenance daemon on 300-second intervals once their TTL expires.
-- Manual cleanup is always available via `DELETE /muse-ai/v1/threads/:id`.
+- **Retention Lifecycle**: When retention is greater than 0, threads are tracked in the gateway's thread registry and persisted to `.gw_state/threads/`.
+- **Activity Refresh**: Whenever a client continues chatting in an existing thread via `reply_thread_id`, the gateway resets that thread's activity timestamp (`created_at = now`), guaranteeing that actively chatted threads will not expire mid-conversation.
+- **Daemon Interval**: The background maintenance daemon executes every 300 seconds, scanning local and remote CVM sessions (`sessions.list`) and issuing `/api/session/delete` for any thread older than the retention threshold.
+- **Ephemeral Mode**: When `GW_MUSEAI_THREAD_RETENTION_SECS=0`, threads are deleted immediately after the assistant finishes responding.
+- **Manual Cleanup**: Manual deletion is available at any time via `DELETE /muse-ai/v1/threads/:id` or triggered via `POST /muse-ai/v1/threads/cleanup`.
 
 ---
 
-## 9. Error Reference & Troubleshooting
+## 10. Error Reference & Troubleshooting
 
 | HTTP Status | Error Type | Cause | Resolution |
 | :--- | :--- | :--- | :--- |
 | `400 Bad Request` | `Invalid JSON` or empty prompt | Request payload was not valid JSON, or both `messages` and `prompt` were missing. | Verify that request body contains valid JSON with a `messages` array or `prompt` string. |
+| `400 Bad Request` | `Invalid thread_id / reply_thread_id` | Value provided for `reply_thread_id` or `thread_id` is not a valid UUID format. | Ensure the thread ID matches the UUID returned in the previous completion response. |
 | `401 Unauthorized` | `PermissionDenied` | Muse authentication cookie or access token is missing, expired, or invalid. | Update `GW_MUSEAI_COOKIE` or upload a fresh HAR capture via `/muse-config`. |
 | `405 Method Not Allowed` | `Method Not Allowed` | Calling `/muse-ai/v1/chat/completions` with `GET`, `PUT`, or `DELETE`. | Use `POST` for chat completions. |
 | `409 Conflict` | `MuseApprovalRequired` | The CVM requested an action (e.g. connector access) that is not in the Sentinel auto-approval allowlist. | Open the Muse web UI in your browser to approve the pending action, or add the destination to `GW_MUSE_APPROVAL_ALLOWED_DESTINATIONS`. |

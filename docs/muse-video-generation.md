@@ -193,6 +193,26 @@ DELETE /muse-ai/v1/threads/thread-123e4567
 
 ---
 
+### 2.6 Run Thread Cleanup Cycle (`POST /muse-ai/v1/threads/cleanup`)
+
+Triggers an on-demand cleanup sweep to purge all threads that have exceeded their retention period (`GW_MUSEAI_THREAD_RETENTION_SECS`).
+
+#### Request
+```http
+POST /muse-ai/v1/threads/cleanup
+```
+
+#### Response (`200 OK`)
+```json
+{
+  "ok": true,
+  "deleted": 5,
+  "retained": 2
+}
+```
+
+---
+
 ## 3. Headless Sentinel Auto-Approval & Idempotency
 
 When enabled, the Rust-native Sentinel coordinator listens to approval events emitted during generation and resolves eligible, pre-authorized scoped approvals (e.g. `network`) automatically:

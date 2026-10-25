@@ -175,7 +175,31 @@ See [`docs/JEV_INTEGRATION.md`](docs/JEV_INTEGRATION.md) for full schemas and se
 
 ### Muse AI Subsystem
 
-Directly communicates with Muse Confidential VMs (CVM) using Noise XX protocol WebSockets. Supports text-to-video synthesis at `/muse-ai/v1/create-video` and headless Sentinel auto-approvals.
+Directly communicates with Muse Confidential VMs (CVM) using Noise XX protocol WebSockets. Supports conversational chat with multi-turn continuity (`/muse-ai/v1/chat/completions`), text-to-video synthesis (`/muse-ai/v1/create-video`), and headless Sentinel auto-approvals.
+
+#### Conversational Chat & Multi-Turn Continuation
+
+Send a chat completion and continue in the same thread using `reply_thread_id`:
+
+```sh
+# Turn 1: Start conversation
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"muse","messages":[{"role":"user","content":"My favorite city is Tokyo."}]}'
+
+# Turn 2: Continue in existing thread
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"muse",
+    "reply_thread_id":"<thread_id_from_turn_1>",
+    "messages":[{"role":"user","content":"What is my favorite city?"}]
+  }'
+```
+
+See [`docs/muse-chat.md`](docs/muse-chat.md) for full conversational chat documentation.
+
+#### Video Synthesis
 
 Submit video generation tasks:
 ```sh
@@ -247,6 +271,7 @@ See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for full threat modeling.
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — Trust boundaries, credential masking, atomic I/O, and auto-approval policies
 - [`docs/JEV_INTEGRATION.md`](docs/JEV_INTEGRATION.md) — Jev Decision API schemas, account pool rotation, and failover mechanics
 - [`docs/MODELS.md`](docs/MODELS.md) — Model catalog, provider routing matrix, and reasoning variants
+- [`docs/muse-chat.md`](docs/muse-chat.md) — Conversational chat completions, multi-turn continuation, and thread lifecycle
 - [`docs/muse-video-generation.md`](docs/muse-video-generation.md) — Video synthesis API, Sentinel coordinator, and lifecycle
 - [`docs/MUSE_VIDEO_CURL_TEST.md`](docs/MUSE_VIDEO_CURL_TEST.md) — Quick smoke test curl commands
 
