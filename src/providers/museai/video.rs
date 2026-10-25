@@ -135,14 +135,25 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         .map(str::to_string)
         .unwrap_or_else(|| format!("video-{}", Uuid::new_v4()));
 
-    let request_json = serde_json::to_vec(&serde_json::json!({
+    let mut request_val = serde_json::json!({
         "model": "muse",
         "job_id": allocated_job_id,
         "messages": [
             {"role": "user", "content": full_prompt}
         ]
-    }))
-    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    });
+    if let Some(ref parent) = existing_job {
+        if let Some(ref tid) = parent.thread_id {
+            if !tid.is_empty() {
+                request_val["thread_id"] = serde_json::Value::String(tid.clone());
+            }
+        }
+    } else if let Ok(Some(tid)) = crate::providers::museai::chat::extract_thread_id(request_body) {
+        request_val["thread_id"] = serde_json::Value::String(tid);
+    }
+
+    let request_json = serde_json::to_vec(&request_val)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

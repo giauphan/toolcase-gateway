@@ -131,6 +131,7 @@ pub fn register_thread(thread_id: String, base_url: String, config: Config) {
     };
     save_thread_to_disk(&thread);
     if let Ok(mut threads) = tracked_threads().lock() {
+        threads.retain(|t| t.id != thread.id);
         threads.push(thread);
     }
 }

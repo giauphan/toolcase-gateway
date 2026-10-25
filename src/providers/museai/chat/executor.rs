@@ -1,5 +1,6 @@
 use super::{
-    build_muse_chat_request, debug_log, explicit_video_refusal, extract_user_prompt,
+    build_muse_chat_request_with_session, debug_log, explicit_video_refusal,
+    extract_continuation_prompt, extract_thread_id, extract_user_prompt,
     extract_video_url_from_stream, MuseChatStream,
 };
 use crate::config::Config;
@@ -18,7 +19,12 @@ pub fn request_museai_chat_completion(
     config: &Config,
     wait_for_video_artifact: bool,
 ) -> io::Result<String> {
-    let prompt = extract_user_prompt(request_body)?;
+    let existing_thread_id = extract_thread_id(request_body)?;
+    let prompt = if existing_thread_id.is_some() {
+        extract_continuation_prompt(request_body)?
+    } else {
+        extract_user_prompt(request_body)?
+    };
     let job_id_hint = serde_json::from_slice::<serde_json::Value>(request_body)
         .ok()
         .and_then(|v| v.get("job_id").and_then(|j| j.as_str()).map(str::to_string));
@@ -76,7 +82,7 @@ pub fn request_museai_chat_completion(
         },
     ];
 
-    let chat_payload = build_muse_chat_request(&prompt);
+    let chat_payload = build_muse_chat_request_with_session(&prompt, existing_thread_id.as_deref());
 
     let payload_bytes = serde_json::to_vec(&chat_payload)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
@@ -97,7 +103,7 @@ pub fn request_museai_chat_completion(
         &payload_bytes,
     )?;
 
-    let mut stream = MuseChatStream::default();
+    let mut stream = MuseChatStream::with_expected_session(existing_thread_id);
     let mut active_stream_id = stream_id;
     for _ in 0..1000 {
         let frame = socket.read_encrypted_service_frame(&mut session)?;
@@ -345,6 +351,7 @@ pub fn request_museai_chat_completion(
         "model": "muse",
         "thread_id": thread_id,
         "session_id": thread_id,
+        "reply_thread_id": thread_id,
         "choices": [
             {
                 "index": 0,

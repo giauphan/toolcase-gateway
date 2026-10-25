@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub struct MuseChatStream {
     pub pending: Vec<u8>,
     pub session_id: Option<String>,
+    pub expected_session_id: Option<String>,
     pub text: String,
     pub completed: bool,
     pub approved_approval_ids: Vec<String>,
@@ -16,6 +17,13 @@ pub struct MuseChatStream {
 }
 
 impl MuseChatStream {
+    pub fn with_expected_session(session_id: Option<String>) -> Self {
+        Self {
+            expected_session_id: session_id,
+            ..Default::default()
+        }
+    }
+
     pub fn push(&mut self, bytes: &[u8], ended: bool) -> io::Result<()> {
         const LIMIT: usize = 1024 * 1024;
         if self.pending.len().saturating_add(bytes.len()) > LIMIT {
@@ -88,8 +96,16 @@ impl MuseChatStream {
                         "Muse did not acknowledge an isolated thread",
                     ));
                 }
+                if let Some(ref expected) = self.expected_session_id {
+                    if expected != id {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Muse chat session mismatch: expected {expected}, got {id}"),
+                        ));
+                    }
+                }
                 self.session_id = Some(id.to_owned());
-                debug_log("Fresh Muse session acknowledged");
+                debug_log("Muse session acknowledged");
                 return Ok(());
             }
         }
