@@ -403,6 +403,25 @@ fn route_request_impl(
         return Ok(405);
     }
 
+    if clean_path == "/muse-ai/v1/threads/cleanup" || clean_path == "/muse-ai/threads/cleanup" {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::museai::handle_museai_threads_cleanup_run(
+                client,
+                config,
+                request.body.as_slice(),
+            )?;
+            Ok(200)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Muse threads cleanup only supports POST",
+            )?;
+            Ok(405)
+        };
+    }
+
     if clean_path.starts_with("/muse-ai/v1/threads/") {
         return if request.method.eq_ignore_ascii_case("delete") {
             let thread_id = clean_path.split('/').next_back().unwrap_or("");

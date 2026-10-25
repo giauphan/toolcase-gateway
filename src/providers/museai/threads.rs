@@ -351,17 +351,224 @@ pub fn cleanup_tracked_threads_with_ttl(global_ttl: u64) -> usize {
     deleted_count
 }
 
+pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io::Result<usize> {
+    if config.museai_cookie.is_empty() && config.museai_notary_token.is_empty() {
+        return Ok(0);
+    }
+
+    let bootstrapped = match crate::providers::museai::session::bootstrap_museai_config(config) {
+        Ok(c) => c,
+        Err(e) => {
+            debug_log(&format!("Remote CVM session sync skipped: {e}"));
+            return Ok(0);
+        }
+    };
+
+    let base_url = if bootstrapped.museai_base_url.is_empty() {
+        "https://muse.ai"
+    } else {
+        bootstrapped.museai_base_url.as_str()
+    };
+    let base_origin = base_url.trim_end_matches('/');
+
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let ws_url =
+        match crate::providers::museai::session::build_museai_ws_url(&bootstrapped, &req_id) {
+            Ok(u) => u,
+            Err(e) => {
+                debug_log(&format!("Failed to build CVM ws url: {e}"));
+                return Ok(0);
+            }
+        };
+
+    let mut socket =
+        match crate::providers::museai::transport::MuseWebSocket::connect(&ws_url, base_origin, "")
+        {
+            Ok(s) => s,
+            Err(e) => {
+                debug_log(&format!("Failed to connect to CVM WebSocket: {e}"));
+                return Ok(0);
+            }
+        };
+
+    let mut session = match crate::providers::museai::noise::MuseNoiseSession::new_initiator(
+        crate::providers::museai::noise::NOISE_PATTERN_XX,
+        None,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            debug_log(&format!("Noise initiator error: {e}"));
+            return Ok(0);
+        }
+    };
+
+    if let Err(e) = session.perform_client_handshake(&mut socket, &bootstrapped.museai_notary_token)
+    {
+        debug_log(&format!("Noise handshake error: {e}"));
+        return Ok(0);
+    }
+
+    let mut stream_id = 1;
+    let headers = vec![
+        crate::providers::museai::protocol::Header {
+            key: "Host".to_string(),
+            value: "hatch.metaaivm.com".to_string(),
+        },
+        crate::providers::museai::protocol::Header {
+            key: "Accept".to_string(),
+            value: "application/json".to_string(),
+        },
+        crate::providers::museai::protocol::Header {
+            key: "x-request-id".to_string(),
+            value: uuid::Uuid::new_v4().to_string(),
+        },
+        crate::providers::museai::protocol::Header {
+            key: "x-app-id".to_string(),
+            value: "hatch-web".to_string(),
+        },
+    ];
+
+    if socket
+        .send_encrypted_service_request(
+            &mut session,
+            crate::providers::museai::protocol::SERVICE_DAEMON,
+            stream_id,
+            "GET",
+            "/api/session/list?include_peer_sidechats=true",
+            &headers,
+            &[],
+        )
+        .is_err()
+    {
+        return Ok(0);
+    }
+
+    let frame = match socket.read_encrypted_service_frame(&mut session) {
+        Ok(f) => f,
+        Err(_) => return Ok(0),
+    };
+
+    let body_bytes = match frame.kind {
+        crate::providers::museai::protocol::ServiceFrameKind::Response { body, .. } => body,
+        crate::providers::museai::protocol::ServiceFrameKind::BodyChunk { data, .. } => data,
+        _ => return Ok(0),
+    };
+
+    let session_list: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(_) => return Ok(0),
+    };
+
+    let sessions_array = session_list
+        .get("sessions")
+        .and_then(|v| v.as_array())
+        .or_else(|| session_list.as_array());
+
+    let Some(sessions) = sessions_array else {
+        return Ok(0);
+    };
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut purged = 0;
+    for s in sessions {
+        let sid = match s.get("session_id").and_then(|v| v.as_str()) {
+            Some(id) if !id.is_empty() => id,
+            _ => continue,
+        };
+
+        if s.get("is_primary").and_then(|v| v.as_bool()) == Some(true) {
+            continue;
+        }
+
+        let created_at = s
+            .get("created_at")
+            .or_else(|| s.get("created_at_ms"))
+            .and_then(|v| v.as_u64())
+            .map(|t| if t > 100_000_000_000 { t / 1000 } else { t })
+            .unwrap_or(0);
+
+        if created_at > 0 && now >= created_at.saturating_add(ttl_secs) {
+            stream_id += 1;
+            let del_headers = vec![
+                crate::providers::museai::protocol::Header {
+                    key: "Host".to_string(),
+                    value: "hatch.metaaivm.com".to_string(),
+                },
+                crate::providers::museai::protocol::Header {
+                    key: "Content-Type".to_string(),
+                    value: "application/json".to_string(),
+                },
+                crate::providers::museai::protocol::Header {
+                    key: "Accept".to_string(),
+                    value: "application/json".to_string(),
+                },
+                crate::providers::museai::protocol::Header {
+                    key: "x-request-id".to_string(),
+                    value: uuid::Uuid::new_v4().to_string(),
+                },
+                crate::providers::museai::protocol::Header {
+                    key: "x-app-id".to_string(),
+                    value: "hatch-web".to_string(),
+                },
+            ];
+            let del_payload = serde_json::json!({
+                "session_id": sid,
+                "id": sid,
+            });
+            if let Ok(bytes) = serde_json::to_vec(&del_payload) {
+                if socket
+                    .send_encrypted_service_request(
+                        &mut session,
+                        crate::providers::museai::protocol::SERVICE_DAEMON,
+                        stream_id,
+                        "POST",
+                        "/session/delete",
+                        &del_headers,
+                        &bytes,
+                    )
+                    .is_ok()
+                {
+                    let _ = socket.read_encrypted_service_frame(&mut session);
+                    unregister_thread(sid);
+                    purged += 1;
+                    crate::runtime::logger::log_message(
+                        "INFO",
+                        "museai_threads",
+                        &format!("Purged remote CVM thread session {sid} older than {ttl_secs}s"),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(purged)
+}
+
 pub fn cleanup_cycle_once() -> (usize, usize) {
     let ttl_secs = std::env::var("GW_MUSEAI_THREAD_RETENTION_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(7200);
 
-    let threads_cleaned = cleanup_tracked_threads_with_ttl(ttl_secs);
+    cleanup_cycle_with_ttl(ttl_secs)
+}
 
+pub fn cleanup_cycle_with_ttl(ttl_secs: u64) -> (usize, usize) {
     let base_url =
         std::env::var("GW_MUSEAI_BASE_URL").unwrap_or_else(|_| "https://muse.ai".to_string());
     let cookie = std::env::var("GW_MUSEAI_COOKIE").unwrap_or_default();
+    let default_cfg = Config {
+        museai_base_url: base_url.clone(),
+        museai_cookie: cookie.clone(),
+        ..Default::default()
+    };
+
+    let remote_purged = purge_remote_cvm_threads_older_than(ttl_secs, &default_cfg).unwrap_or(0);
+    let threads_cleaned = cleanup_tracked_threads_with_ttl(ttl_secs);
 
     let jobs_cleaned =
         super::lifecycle::cleanup_expired_video_jobs_with_callback(ttl_secs, |job| {
@@ -377,17 +584,18 @@ pub fn cleanup_cycle_once() -> (usize, usize) {
         .unwrap_or(0);
 
     let logs_cleaned = crate::runtime::logger::cleanup_expired_logs_default().unwrap_or(0);
-    if threads_cleaned > 0 || jobs_cleaned > 0 || logs_cleaned > 0 {
+    let total_threads_cleaned = threads_cleaned + remote_purged;
+    if total_threads_cleaned > 0 || jobs_cleaned > 0 || logs_cleaned > 0 {
         crate::runtime::logger::log_message(
             "INFO",
             "museai:cleanup",
             &format!(
-                "automatic cycle purged {threads_cleaned} tracked threads, {jobs_cleaned} expired jobs, and {logs_cleaned} expired log files"
+                "cycle purged {total_threads_cleaned} threads ({remote_purged} remote CVM, {threads_cleaned} local tracked), {jobs_cleaned} expired jobs, and {logs_cleaned} expired log files (TTL: {ttl_secs}s)"
             ),
         );
     }
 
-    (threads_cleaned, jobs_cleaned)
+    (total_threads_cleaned, jobs_cleaned)
 }
 
 pub fn start_cleanup_worker() {
@@ -403,9 +611,13 @@ pub fn start_cleanup_worker_with_interval(interval: Duration) {
             interval
         ),
     );
-    thread::spawn(move || loop {
-        thread::sleep(interval);
+    thread::spawn(move || {
+        // Run immediately on start so threads older than 2 hours are cleared right away
         cleanup_cycle_once();
+        loop {
+            thread::sleep(interval);
+            cleanup_cycle_once();
+        }
     });
 }
 

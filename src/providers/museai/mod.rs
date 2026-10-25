@@ -15,7 +15,8 @@ pub use chat::request_museai_chat_completion;
 pub use handlers::{
     handle_create_video, handle_create_video_request, handle_get_video, handle_get_video_content,
     handle_get_video_request, handle_museai_chat_completions, handle_museai_thread_cleanup,
-    handle_museai_v1, handle_update_video_prompt, is_sync_requested, write_chat_completion,
+    handle_museai_threads_cleanup_run, handle_museai_v1, handle_update_video_prompt,
+    is_sync_requested, write_chat_completion,
 };
 pub use lifecycle::{
     append_job_revision, is_submitting_stale, list_video_jobs, load_video_job,
@@ -25,8 +26,9 @@ pub use lifecycle::{
 pub use session::{bootstrap_museai_config, build_museai_ws_url};
 pub use threads::spawn_muse_thread;
 pub use threads::{
-    cleanup_cycle_once, delete_cvm_session_over_noise, delete_muse_thread, register_thread,
-    start_cleanup_worker, start_cleanup_worker_with_interval, unregister_thread,
+    cleanup_cycle_once, cleanup_cycle_with_ttl, delete_cvm_session_over_noise, delete_muse_thread,
+    purge_remote_cvm_threads_older_than, register_thread, start_cleanup_worker,
+    start_cleanup_worker_with_interval, unregister_thread,
 };
 pub use video::build_video_prompt;
 

@@ -147,3 +147,51 @@ fn test_delete_muse_thread_graceful_handling() {
     );
     assert!(res_offline.is_ok());
 }
+
+#[test]
+fn test_purge_remote_cvm_threads_older_than_guards() {
+    let config = test_config();
+    let res = toolcase_gateway::museai::purge_remote_cvm_threads_older_than(7200, &config);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), 0);
+}
+
+#[test]
+fn test_cleanup_cycle_with_ttl_run() {
+    let _lock = TEST_MUTEX.lock().unwrap();
+    let (_threads, _jobs) = toolcase_gateway::museai::cleanup_cycle_with_ttl(7200);
+}
+
+#[test]
+fn test_handle_museai_threads_cleanup_run() {
+    use std::io::Read;
+    use std::net::{TcpListener, TcpStream};
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let client_handle = std::thread::spawn(move || {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).unwrap();
+        String::from_utf8_lossy(&buf).to_string()
+    });
+
+    let (mut server_stream, _) = listener.accept().unwrap();
+    let config = test_config();
+    let body = br#"{"older_than_secs": 7200}"#;
+
+    let res = toolcase_gateway::museai::handle_museai_threads_cleanup_run(
+        &mut server_stream,
+        &config,
+        body,
+    );
+    assert!(res.is_ok());
+    drop(server_stream);
+
+    let client_res = client_handle.join().unwrap();
+    assert!(client_res.starts_with("HTTP/1.1 200 OK"));
+    assert!(client_res.contains(r#""object":"threads.cleanup""#));
+    assert!(client_res.contains(r#""retention_secs":7200"#));
+    assert!(client_res.contains(r#""status":"completed""#));
+}

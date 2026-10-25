@@ -361,6 +361,54 @@ pub fn handle_museai_thread_cleanup(
     }
 }
 
+pub fn handle_museai_threads_cleanup_run(
+    client: &mut TcpStream,
+    _config: &Config,
+    request_body: &[u8],
+) -> io::Result<()> {
+    let requested_ttl = if !request_body.is_empty() {
+        serde_json::from_slice::<serde_json::Value>(request_body)
+            .ok()
+            .and_then(|v| {
+                v.get("older_than_secs")
+                    .or_else(|| v.get("ttl_secs"))
+                    .or_else(|| v.get("retention_secs"))
+                    .and_then(|n| n.as_u64())
+            })
+    } else {
+        None
+    };
+
+    let ttl_secs = requested_ttl.unwrap_or_else(|| {
+        std::env::var("GW_MUSEAI_THREAD_RETENTION_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(7200)
+    });
+
+    let (threads_purged, jobs_purged) =
+        crate::providers::museai::threads::cleanup_cycle_with_ttl(ttl_secs);
+
+    let body = serde_json::json!({
+        "object": "threads.cleanup",
+        "retention_secs": ttl_secs,
+        "threads_purged": threads_purged,
+        "jobs_purged": jobs_purged,
+        "status": "completed"
+    });
+    let response_str =
+        serde_json::to_string(&body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    client.write_all(
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_str.len(),
+            response_str
+        )
+        .as_bytes(),
+    )?;
+    client.flush()
+}
+
 pub fn handle_update_video_prompt(
     client: &mut TcpStream,
     job_id: &str,
