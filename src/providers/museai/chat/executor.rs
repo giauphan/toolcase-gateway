@@ -103,7 +103,7 @@ pub fn request_museai_chat_completion(
         &payload_bytes,
     )?;
 
-    let mut stream = MuseChatStream::with_expected_session(existing_thread_id);
+    let mut stream = MuseChatStream::with_expected_turn(existing_thread_id, Some(prompt.clone()));
     let mut active_stream_id = stream_id;
     for _ in 0..1000 {
         let frame = socket.read_encrypted_service_frame(&mut session)?;

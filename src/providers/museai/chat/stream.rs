@@ -4,11 +4,13 @@ use crate::providers::museai::MuseApprovalRequired;
 use std::io;
 use uuid::Uuid;
 
-#[derive(Default)]
 pub struct MuseChatStream {
     pub pending: Vec<u8>,
     pub session_id: Option<String>,
     pub expected_session_id: Option<String>,
+    pub expected_prompt: Option<String>,
+    pub current_turn_active: bool,
+    pub latest_user_seq: Option<u64>,
     pub text: String,
     pub completed: bool,
     pub approved_approval_ids: Vec<String>,
@@ -16,10 +18,75 @@ pub struct MuseChatStream {
     pub approval_handler: Option<Box<dyn FnMut(&str, &serde_json::Value) -> io::Result<bool>>>,
 }
 
+impl Default for MuseChatStream {
+    fn default() -> Self {
+        Self {
+            pending: Vec::new(),
+            session_id: None,
+            expected_session_id: None,
+            expected_prompt: None,
+            current_turn_active: true,
+            latest_user_seq: None,
+            text: String::new(),
+            completed: false,
+            approved_approval_ids: Vec::new(),
+            approval_handler: None,
+        }
+    }
+}
+
+fn matches_user_prompt(payload: &serde_json::Value, prompt: &str) -> bool {
+    let clean_prompt = prompt.trim();
+    if clean_prompt.is_empty() {
+        return true;
+    }
+    let check_str = |s: &str| {
+        let clean = s.strip_prefix("user:\n").unwrap_or(s).trim();
+        if clean == clean_prompt || clean.contains(clean_prompt) || clean_prompt.contains(clean) {
+            return true;
+        }
+        let clean_lc = clean.to_lowercase();
+        let prompt_lc = clean_prompt.to_lowercase();
+        clean_lc == prompt_lc || clean_lc.contains(&prompt_lc) || prompt_lc.contains(&clean_lc)
+    };
+    if let Some(content) = payload.get("content") {
+        if let Some(s) = content.as_str() {
+            if check_str(s) {
+                return true;
+            }
+        } else if let Some(arr) = content.as_array() {
+            for item in arr {
+                if let Some(s) = item
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| item.as_str())
+                {
+                    if check_str(s) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    if let Some(display) = payload.get("display_text").and_then(|v| v.as_str()) {
+        if check_str(display) {
+            return true;
+        }
+    }
+    false
+}
+
 impl MuseChatStream {
     pub fn with_expected_session(session_id: Option<String>) -> Self {
+        Self::with_expected_turn(session_id, None)
+    }
+
+    pub fn with_expected_turn(session_id: Option<String>, expected_prompt: Option<String>) -> Self {
+        let is_continuation = session_id.is_some() && expected_prompt.is_some();
         Self {
             expected_session_id: session_id,
+            expected_prompt,
+            current_turn_active: !is_continuation,
             ..Default::default()
         }
     }
@@ -105,7 +172,7 @@ impl MuseChatStream {
                     }
                 }
                 self.session_id = Some(id.to_owned());
-                debug_log("Muse session acknowledged");
+                debug_log(&format!("Muse session acknowledged: record={record}"));
                 return Ok(());
             }
         }
@@ -120,10 +187,42 @@ impl MuseChatStream {
             }
             return Ok(());
         }
+
         let event = record
             .get("event")
             .and_then(|value| value.as_str())
             .unwrap_or("");
+
+        if event == "message.user" {
+            let user_seq = payload
+                .get("chat_event_seq")
+                .or_else(|| payload.get("seq"))
+                .or_else(|| record.get("seq"))
+                .and_then(|v| v.as_u64());
+
+            if let Some(seq) = user_seq {
+                if seq >= self.latest_user_seq.unwrap_or(0) {
+                    self.latest_user_seq = Some(seq);
+                }
+            }
+
+            if !self.current_turn_active {
+                if let Some(ref prompt) = self.expected_prompt {
+                    if matches_user_prompt(payload, prompt) {
+                        debug_log(&format!(
+                            "Matched expected prompt for current turn: seq={user_seq:?}"
+                        ));
+                        self.current_turn_active = true;
+                        self.text.clear();
+                    }
+                } else {
+                    self.current_turn_active = true;
+                    self.text.clear();
+                }
+            }
+            return Ok(());
+        }
+
         let category = match event {
             "delta.text_append"
             | "delta.message_done"
@@ -145,7 +244,29 @@ impl MuseChatStream {
             | "delta.placeholder" => event,
             _ => "other",
         };
-        debug_log(&format!("Chat event category={category}"));
+        debug_log(&format!("Chat event category={category} record={record}"));
+
+        if !self.current_turn_active {
+            debug_log(&format!(
+                "Skipping historical event before active turn: category={category}"
+            ));
+            return Ok(());
+        }
+
+        let msg_seq = payload
+            .get("message_seq")
+            .or_else(|| payload.get("seq"))
+            .or_else(|| record.get("seq"))
+            .and_then(|v| v.as_u64());
+
+        if let (Some(user_seq), Some(mseq)) = (self.latest_user_seq, msg_seq) {
+            if mseq <= user_seq {
+                debug_log(&format!(
+                    "Skipping historical message event with seq {mseq} <= latest user seq {user_seq}"
+                ));
+                return Ok(());
+            }
+        }
         if event == "approvals.snapshot" {
             let pending_approvals = payload
                 .get("pending_approvals")
@@ -262,10 +383,15 @@ impl MuseChatStream {
                 )));
             }
         }
-        if matches!(
+        if matches!(event, "delta.message_done") {
+            if self.text.is_empty() {
+                if let Some(text) = parse_assistant_content_from_json(record) {
+                    self.text.push_str(&text);
+                }
+            }
+        } else if matches!(
             event,
             "delta.text_append"
-                | "delta.message_done"
                 | "message.assistant"
                 | "delta.presentation"
                 | "delta.tool_done"
