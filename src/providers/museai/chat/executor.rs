@@ -294,6 +294,7 @@ pub fn request_museai_chat_completion(
         if config.museai_thread_retention_secs == 0 {
             let delete_stream_id = active_stream_id.max(2) + 1;
             let delete_payload = serde_json::json!({
+                "method": "/api/session/delete",
                 "session_id": thread_id,
                 "id": thread_id,
             });
@@ -303,7 +304,7 @@ pub fn request_museai_chat_completion(
                     SERVICE_DAEMON,
                     delete_stream_id,
                     "POST",
-                    "/session/delete",
+                    "/api/session/delete",
                     &headers,
                     &bytes,
                 );

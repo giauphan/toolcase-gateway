@@ -26,7 +26,8 @@ pub use lifecycle::{
 pub use session::{bootstrap_museai_config, build_museai_ws_url};
 pub use threads::spawn_muse_thread;
 pub use threads::{
-    cleanup_cycle_once, cleanup_cycle_with_ttl, delete_cvm_session_over_noise, delete_muse_thread,
+    cleanup_cycle_once, cleanup_cycle_with_config, cleanup_cycle_with_ttl,
+    delete_cvm_session_over_noise, delete_muse_thread, extract_session_timestamp,
     purge_remote_cvm_threads_older_than, register_thread, start_cleanup_worker,
     start_cleanup_worker_with_interval, unregister_thread,
 };

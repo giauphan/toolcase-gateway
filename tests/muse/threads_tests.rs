@@ -163,6 +163,122 @@ fn test_cleanup_cycle_with_ttl_run() {
 }
 
 #[test]
+fn test_cleanup_cycle_with_config_run() {
+    let _lock = TEST_MUTEX.lock().unwrap();
+    let config = test_config();
+    let (_threads, _jobs) = toolcase_gateway::museai::cleanup_cycle_with_config(7200, &config);
+}
+
+#[test]
+fn test_extract_session_timestamp() {
+    // 1. Seconds scale (< 1e11)
+    let s_sec = serde_json::json!({
+        "session_id": "s1",
+        "created_at": 1729828800
+    });
+    assert_eq!(
+        toolcase_gateway::museai::extract_session_timestamp(&s_sec),
+        1729828800
+    );
+
+    // 2. Milliseconds scale (>= 1e11)
+    let s_ms = serde_json::json!({
+        "session_id": "s2",
+        "created_at": 1792908302000u64
+    });
+    assert_eq!(
+        toolcase_gateway::museai::extract_session_timestamp(&s_ms),
+        1792908302
+    );
+
+    // 3. Float timestamp
+    let s_float = serde_json::json!({
+        "session_id": "s3",
+        "created_at": 1729828800.5
+    });
+    assert_eq!(
+        toolcase_gateway::museai::extract_session_timestamp(&s_float),
+        1729828800
+    );
+
+    // 4. String timestamp
+    let s_str = serde_json::json!({
+        "session_id": "s4",
+        "created_at": "1792908302000"
+    });
+    assert_eq!(
+        toolcase_gateway::museai::extract_session_timestamp(&s_str),
+        1792908302
+    );
+
+    // 5. Fallback to updated_at when created_at is missing
+    let s_updated = serde_json::json!({
+        "session_id": "s5",
+        "updated_at": 1729829900
+    });
+    assert_eq!(
+        toolcase_gateway::museai::extract_session_timestamp(&s_updated),
+        1729829900
+    );
+
+    // 6. Missing timestamp returns 0
+    let s_empty = serde_json::json!({
+        "session_id": "s6"
+    });
+    assert_eq!(
+        toolcase_gateway::museai::extract_session_timestamp(&s_empty),
+        0
+    );
+}
+
+#[test]
+fn test_session_list_structure_compatibility() {
+    // Ensure both nested {"ok": true, "result": {"sessions": [...]}} and top-level {"sessions": [...]} work
+    let nested = serde_json::json!({
+        "ok": true,
+        "result": {
+            "sessions": [
+                {
+                    "session_id": "nested-1",
+                    "is_primary": false,
+                    "is_thread": true,
+                    "created_at": 1792908302000u64
+                }
+            ]
+        }
+    });
+
+    let sessions_nested = nested
+        .get("result")
+        .and_then(|r| r.get("sessions"))
+        .and_then(|s| s.as_array())
+        .or_else(|| nested.get("sessions").and_then(|s| s.as_array()));
+
+    assert!(sessions_nested.is_some());
+    assert_eq!(sessions_nested.unwrap().len(), 1);
+
+    let flat = serde_json::json!({
+        "sessions": [
+            {
+                "session_id": "flat-1",
+                "is_primary": false,
+                "is_thread": true,
+                "created_at": 1729828800
+            }
+        ]
+    });
+
+    let sessions_flat = flat
+        .get("result")
+        .and_then(|r| r.get("sessions"))
+        .and_then(|s| s.as_array())
+        .or_else(|| flat.get("sessions").and_then(|s| s.as_array()));
+
+    assert!(sessions_flat.is_some());
+    assert_eq!(sessions_flat.unwrap().len(), 1);
+}
+
+#[test]
 fn test_handle_museai_threads_cleanup_run() {
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};

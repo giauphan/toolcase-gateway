@@ -363,7 +363,7 @@ pub fn handle_museai_thread_cleanup(
 
 pub fn handle_museai_threads_cleanup_run(
     client: &mut TcpStream,
-    _config: &Config,
+    config: &Config,
     request_body: &[u8],
 ) -> io::Result<()> {
     let requested_ttl = if !request_body.is_empty() {
@@ -387,7 +387,7 @@ pub fn handle_museai_threads_cleanup_run(
     });
 
     let (threads_purged, jobs_purged) =
-        crate::providers::museai::threads::cleanup_cycle_with_ttl(ttl_secs);
+        crate::providers::museai::threads::cleanup_cycle_with_config(ttl_secs, config);
 
     let body = serde_json::json!({
         "object": "threads.cleanup",
