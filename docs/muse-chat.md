@@ -12,6 +12,7 @@ Key capabilities:
 - **End-to-End Cryptographic Isolation**: Client prompts are encrypted through a 3-way mutual `Noise_XX_25519_AESGCM_SHA256` handshake directly to the Confidential VM.
 - **Thread Tracking & Lifecycle Retention**: Every conversation is assigned an isolated `thread_id` / `session_id` and automatically purged after a configurable retention period.
 - **Multi-Turn Thread Continuation**: Continue follow-up questions in the exact same CVM thread by passing `reply_thread_id` (or `thread_id` / `session_id`), keeping conversational context and remote memory fully intact.
+- **Mandatory Reply Thread Following for Data Queries**: When querying or getting data (live prices, macro indicators, market catalysts) that belongs to an ongoing or previous context, clients **MUST** follow the previous `reply_thread_id` to maintain continuous context and prevent CVM memory wiping.
 
 ---
 
@@ -66,6 +67,27 @@ curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
     ]
   }'
 ```
+
+### 3.2.1 Getting Subsequent Data (Required: Follow Reply Thread)
+
+When fetching updated data, checking current prices, or querying fresh macro developments for a previously analyzed asset, the request **MUST** follow the previous thread by passing `reply_thread_id`:
+
+```bash
+curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "muse",
+    "reply_thread_id": "54515aa9-0d4e-44dd-bbb1-3bc61363509a",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Get updated spot price of XAU/USD now and compare against the earlier benchmark."
+      }
+    ]
+  }'
+```
+
+Following the reply thread ensures the CVM performs an incremental update rather than a full cold search, reducing latency and preserving conversational context.
 
 ### 3.3 Global OpenAI Proxy Route
 
@@ -151,11 +173,21 @@ Requests conform to the standard OpenAI chat completions schema.
 | Field | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `model` | `string` | Optional* | Target model. Recommended value is `"muse"`. When calling `/muse-ai/v1/chat/completions`, defaults to `muse`. |
-| `reply_thread_id` | `string` | Optional | ID of an existing thread to continue. When specified, the gateway directs the prompt to that existing thread on the Muse CVM. Aliases `thread_id` and `session_id` are also accepted. |
+| `reply_thread_id` | `string` | **Required (for continuation)** | ID of an existing thread to continue. When a query belongs to a prior context, conversational turn, or ongoing monitoring topic, callers **MUST** provide `reply_thread_id` to preserve CVM context, avoid state wiping, and deduplicate transcripts. Aliases `thread_id` and `session_id` are also accepted. |
 | `messages` | `array` | Optional* | Array of message objects containing `role` (`"user"`, `"assistant"`, `"system"`) and `content`. |
 | `prompt` | `string` | Optional* | Alternative top-level string prompt if not using the `messages` array. |
 
 *\*At least one of `messages` or `prompt` must be provided.*
+
+> [!IMPORTANT]
+> **Strict Context Continuation Requirement**:
+> When querying or getting data from Muse chat that belongs to an ongoing task, sequential multi-turn chat, or repetitive market research context (e.g. tracking Gold or NVDA prices across multiple intervals), clients **MUST follow the reply thread** by passing the `reply_thread_id` returned in the preceding response.
+>
+> If a client omits `reply_thread_id` when fetching subsequent data:
+> 1. **CVM Memory Wipe**: The gateway treats the request as a disconnected, isolated session, causing the remote CVM to provision a blank session with zero awareness of previous queries, established constraints, or previously verified benchmarks.
+> 2. **Redundant Live Web Searches**: The CVM is forced to run duplicate web searches from scratch, increasing latency and burning approval tokens.
+> 3. **Transcript Fragment Disconnect**: The gateway cannot link the latest query to prior exchanges, breaking historical context and multi-turn analytical reasoning.
+> 4. **Retention Timer Stall**: The background lifecycle daemon will not know the thread is still active, risking automated cleanup of the earlier session.
 
 ### 4.2 Response Format
 
@@ -204,6 +236,39 @@ Completions return a standard OpenAI `chat.completion` object containing metadat
 4. **Session Subscription**: The CVM daemon resumes the session stream, produces context-aware continuation deltas, and preserves conversation memory.
 5. **Retention Timer Refresh**: Upon every continued turn, the gateway automatically updates the thread's last-activity timestamp (`created_at = now`) in the thread registry, ensuring that active ongoing discussions are not reclaimed while still in use.
 
+### 5.2 Mandatory Thread Following for Client Agents & Ingestion Pipelines
+
+Automated agents, trading bots, and background polling loops that periodically query Muse AI for market intelligence or asset updates **MUST** retain and follow the active `reply_thread_id` per asset/topic:
+
+```typescript
+// Idiomatic Client Implementation (TypeScript)
+class MuseClient {
+  private activeThreads = new Map<string, string>(); // symbol/context -> reply_thread_id
+
+  public async queryMarketIntel(symbol: string): Promise<MuseMarketIntel> {
+    const key = symbol.toUpperCase();
+    const threadToFollow = this.activeThreads.get(key);
+
+    const response = await this.chat(`Provide updated live spot price and macro drivers for ${key}`, {
+      // STRICT REQUIREMENT: Follow existing reply thread if previous context exists
+      threadId: threadToFollow,
+    });
+
+    // Save newly returned or confirmed reply_thread_id for subsequent calls
+    const nextThreadId = response.reply_thread_id || response.thread_id;
+    if (nextThreadId) {
+      this.activeThreads.set(key, nextThreadId);
+    }
+
+    return extractIntel(response);
+  }
+}
+```
+
+By following this pattern:
+- The first call initializes the thread and triggers the initial web search.
+- All subsequent calls for that asset submit only incremental follow-up prompts into the **exact same remote CVM thread**, preserving historical memory, saving latency, and maintaining complete conversational continuity.
+
 ---
 
 ## 6. Live Search & Real-Time Data
@@ -214,6 +279,16 @@ When asked queries requiring current real-world information (such as commodity p
 2. **Sentinel Security Check**: If the external lookup requires egress authorization, the remote daemon emits an `approvals.snapshot` event.
 3. **Auto-Approval**: The gateway's Sentinel coordinator evaluates the domain and action type. If permitted by policy, the action is automatically approved and execution continues seamlessly.
 4. **Data Aggregation**: The CVM ingests the live results and synthesizes a comprehensive response with current numbers and market context.
+
+### 6.1 Data Retrieval Rule: Mandatory Reply Thread Continuation
+
+> [!IMPORTANT]
+> **Data Ingestion Protocol**:
+> When getting updated data, re-checking live prices, or polling sequential market telemetry for an asset, clients **MUST follow the reply thread** by passing `reply_thread_id`.
+>
+> 1. **Turn 1 (Initial Data Ingestion)**: Request searches live spot data for an asset (e.g. Gold XAU/USD). The response returns current metrics along with a `reply_thread_id`.
+> 2. **Turn 2+ (Subsequent Data Updates)**: Client **MUST** pass that `reply_thread_id`. The CVM recognizes the prior context, performs an efficient delta search, and compares the new spot level against the earlier checkpoint without repeating baseline setup steps.
+> 3. **Failure Mode (Omitting Thread)**: Submitting repeated queries without `reply_thread_id` creates isolated orphan threads, wipes memory of previous price levels, triggers duplicate Sentinel auto-approvals, and violates context continuity.
 
 ---
 

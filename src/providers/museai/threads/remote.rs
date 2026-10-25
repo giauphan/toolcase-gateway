@@ -377,8 +377,22 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
         .or_else(|| session_list.as_array());
 
     let Some(sessions) = sessions_array else {
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_threads",
+            "No sessions array found in CVM session list response",
+        );
         return Ok(0);
     };
+
+    crate::runtime::logger::log_message(
+        "INFO",
+        "museai_threads",
+        &format!(
+            "Found {} remote CVM sessions in session list",
+            sessions.len()
+        ),
+    );
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -392,11 +406,25 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
             _ => continue,
         };
 
-        if s.get("is_primary").and_then(|v| v.as_bool()) == Some(true) {
+        let is_primary = s.get("is_primary").and_then(|v| v.as_bool()) == Some(true);
+        let timestamp_sec = extract_session_timestamp(s);
+        let age_secs = if timestamp_sec > 0 && now >= timestamp_sec {
+            now - timestamp_sec
+        } else {
+            0
+        };
+
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_threads",
+            &format!(
+                "Session {sid}: is_primary={is_primary}, ts={timestamp_sec}, age={age_secs}s, ttl={ttl_secs}s"
+            ),
+        );
+
+        if is_primary {
             continue;
         }
-
-        let timestamp_sec = extract_session_timestamp(s);
 
         if timestamp_sec > 0 && now >= timestamp_sec.saturating_add(ttl_secs) {
             stream_id = stream_id.wrapping_add(2);
