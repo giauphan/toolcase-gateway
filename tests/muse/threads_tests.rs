@@ -1,6 +1,9 @@
 //! Muse thread ID extraction, registration, and retention tests.
 
 use super::common::*;
+use std::sync::Mutex;
+
+static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
 #[test]
 fn test_extract_new_thread_id() {
@@ -22,6 +25,7 @@ fn test_extract_new_thread_id() {
 
 #[test]
 fn test_thread_registration_and_retention() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let config = test_config();
 
     let thread_id = "test-thread-id-12345".to_string();
@@ -39,6 +43,7 @@ fn test_thread_registration_and_retention() {
 
 #[test]
 fn test_thread_cleanup_active_vs_expired() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let config_active = test_config();
 
     let mut config_expired = config_active.clone();
@@ -68,6 +73,7 @@ fn test_thread_cleanup_active_vs_expired() {
 
 #[test]
 fn test_thread_persistence_and_restart_recovery() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let config = test_config();
     let thread_id = "test-persist-recover-thread-999".to_string();
 
@@ -92,6 +98,7 @@ fn test_thread_persistence_and_restart_recovery() {
 
 #[test]
 fn test_unregister_thread_removes_from_disk_and_memory() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let config = test_config();
     let thread_id = "test-unregister-thread-888".to_string();
 
