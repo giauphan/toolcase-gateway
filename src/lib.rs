@@ -192,7 +192,7 @@ pub fn run() -> io::Result<()> {
         );
     }
     if config.museai_auto_cleanup_threads && config.museai_thread_retention_secs > 0 {
-        crate::museai::start_cleanup_worker();
+        crate::museai::start_cleanup_worker_with_store(store.clone());
     }
     let admission = store.admission();
     for stream in listener.incoming() {

@@ -126,6 +126,17 @@ pub fn start_cleanup_worker() {
 }
 
 pub fn start_cleanup_worker_with_interval(interval: Duration) {
+    start_cleanup_worker_with_store_and_interval(None, interval);
+}
+
+pub fn start_cleanup_worker_with_store(store: crate::config::ConfigStore) {
+    start_cleanup_worker_with_store_and_interval(Some(store), Duration::from_secs(300));
+}
+
+pub fn start_cleanup_worker_with_store_and_interval(
+    store: Option<crate::config::ConfigStore>,
+    interval: Duration,
+) {
     crate::runtime::logger::log_message(
         "INFO",
         "museai:cleanup",
@@ -135,11 +146,22 @@ pub fn start_cleanup_worker_with_interval(interval: Duration) {
         ),
     );
     thread::spawn(move || {
+        let run_cycle = |store_ref: &Option<crate::config::ConfigStore>| {
+            if let Some(store) = store_ref {
+                let cfg = store.snapshot();
+                if cfg.museai_auto_cleanup_threads && cfg.museai_thread_retention_secs > 0 {
+                    cleanup_cycle_with_config(cfg.museai_thread_retention_secs, &cfg);
+                }
+            } else {
+                cleanup_cycle_once();
+            }
+        };
+
         // Run immediately on start so threads older than 2 hours are cleared right away
-        cleanup_cycle_once();
+        run_cycle(&store);
         loop {
             thread::sleep(interval);
-            cleanup_cycle_once();
+            run_cycle(&store);
         }
     });
 }
