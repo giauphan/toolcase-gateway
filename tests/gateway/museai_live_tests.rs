@@ -184,6 +184,118 @@ fn test_live_muse_thread_spawn_and_cleanup() {
 }
 
 #[test]
+fn test_live_muse_chat_multiturn_continuation() {
+    let _ = dotenvy::dotenv();
+    let cookie = std::env::var("GW_MUSEAI_COOKIE").unwrap_or_default();
+    if cookie.is_empty() {
+        println!("Skipping live test: GW_MUSEAI_COOKIE not set");
+        return;
+    }
+
+    let base_url = std::env::var("GW_MUSEAI_BASE_URL").unwrap_or_else(|_| "https://muse.ai".into());
+    let config = Config {
+        target_host: "127.0.0.1".into(),
+        target_port: 8080,
+        fallbacks: vec![],
+        io_timeout: None,
+        retry_base_delay_ms: 100,
+        max_retry_delay_ms: 1000,
+        default_model: "muse".into(),
+        museai_base_url: base_url.clone(),
+        museai_cookie: cookie,
+        museai_ws_url: "".into(),
+        museai_access_token: "".into(),
+        museai_notary_token: "".into(),
+        museai_vm_id: "".into(),
+        museai_auto_cleanup_threads: true,
+        museai_thread_retention_secs: 7200,
+        jev_api_keys: vec![],
+        jev_base_url: "https://jev-ai.org".into(),
+        ..Config::default()
+    };
+
+    println!("[Live Chat Test] Starting Turn 1...");
+    let turn1_body = serde_json::json!({
+        "model": "muse",
+        "messages": [
+            {
+                "role": "user",
+                "content": "The secret code word is BLUEBERRY. Acknowledge this code word in one brief sentence."
+            }
+        ]
+    });
+
+    let resp1_str = match toolcase_gateway::museai::request_museai_chat_completion(
+        turn1_body.to_string().as_bytes(),
+        &config,
+        false,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("Live test note: upstream rejected Turn 1 or network error: {e}");
+            return;
+        }
+    };
+
+    let resp1: serde_json::Value =
+        serde_json::from_str(&resp1_str).expect("Valid JSON response in Turn 1");
+    let thread_id1 = resp1["reply_thread_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .expect("reply_thread_id in Turn 1")
+        .to_string();
+    let text1 = resp1["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    println!("[Live Chat Test] Turn 1 completed! Thread ID: {thread_id1}, Assistant: {text1}");
+
+    println!("[Live Chat Test] Starting Turn 2 in thread {thread_id1}...");
+    let turn2_body = serde_json::json!({
+        "model": "muse",
+        "reply_thread_id": thread_id1,
+        "messages": [
+            {
+                "role": "user",
+                "content": "What was the secret code word I gave you in my previous message? Answer with just the code word."
+            }
+        ]
+    });
+
+    let resp2_str = match toolcase_gateway::museai::request_museai_chat_completion(
+        turn2_body.to_string().as_bytes(),
+        &config,
+        false,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            panic!("Live test failed in Turn 2 continuation: {e}");
+        }
+    };
+
+    let resp2: serde_json::Value =
+        serde_json::from_str(&resp2_str).expect("Valid JSON response in Turn 2");
+    let thread_id2 = resp2["reply_thread_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .expect("reply_thread_id in Turn 2")
+        .to_string();
+    let text2 = resp2["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    println!("[Live Chat Test] Turn 2 completed! Thread ID: {thread_id2}, Assistant: {text2}");
+
+    assert_eq!(thread_id1, thread_id2, "Turn 2 thread ID must match Turn 1");
+    assert!(
+        text2.to_lowercase().contains("blueberry"),
+        "Turn 2 assistant response must recall the secret code word BLUEBERRY from Turn 1, got: {text2}"
+    );
+    println!("[Live Chat Test] Thread continuation successfully verified live!");
+
+    let _ = toolcase_gateway::museai::threads::delete_muse_thread(&base_url, &thread_id1, &config);
+    println!("[Live Chat Test] Cleaned up test thread {thread_id1}");
+}
+
+#[test]
 fn test_thread_cleanup_route_dispatch() {
     use std::net::TcpListener;
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
