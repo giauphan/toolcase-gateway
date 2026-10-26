@@ -14,6 +14,7 @@ Toolcase Gateway exposes multi-provider model routing, translating client reques
 | `gpt-5.6-sol-high` | OpenAI / Prism | HTTP / OmniRoute | High reasoning effort | `/v1/models` |
 | `gpt-5.6-sol-xhigh` | OpenAI / Prism | HTTP / OmniRoute | Extra-high reasoning effort | `/v1/models` |
 | `muse` | Muse.ai | Noise XX / WebSocket | Conversational chat via CVM | `/v1/models`, `/muse-ai/v1/models` |
+| `muse-image` | Muse.ai Image | Noise / REST | Text-to-image synthesis with aspect ratios | `/muse-ai/v1/create-image`, `/v1/images/generations` |
 | `muse-video` | Muse.ai Video | Noise / Sentinel | Text-to-video synthesis (Default) | `/video/v1/providers` |
 | `gen-3`, `gen-4`, `kling` | Muse Compatibility | Noise / Sentinel | Video synthesis aliases | `/video/v1/providers` |
 | `jev-1.13`, `typesafe/jev-1.13` | Jev AI / OpenRouter | HTTP REST / Failover Pool | Decision & classification analysis | `/jev/v1/models` |
@@ -138,7 +139,32 @@ curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
 
 ---
 
-### 3.4 Jev AI & OpenRouter Decision Models (`jev-1.13`, `typesafe/jev-1.13`)
+### 3.4 Muse.ai Image Generation Models (`muse-image`)
+
+Dedicated image creation models dispatched through `/muse-ai/v1/create-image` (and OpenAI-compatible `/v1/images/generations`). See [`docs/muse-image-generation.md`](muse-image-generation.md) for full documentation.
+
+#### Supported Image Model Names
+- `muse-image` (Canonical default)
+- Compatibility aliases: `muse`, `dall-e-3`, `dall-e-2`, `imagen`, `flux`
+
+#### Supported Aspect Ratios & Sizes
+- **Aspect ratios**: `1:1` *(default)*, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `5:4`, `4:5`
+- **OpenAI sizes**: `1024x1024` (`1:1`), `1792x1024` / `1920x1080` (`16:9`), `1024x1792` / `1080x1920` (`9:16`), `1024x768` (`4:3`), `1200x800` (`3:2`)
+
+#### Example Request
+```bash
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-image?wait=true \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "muse-image",
+    "prompt": "A serene mountain lake at sunrise, misty pine trees, warm golden hour reflections",
+    "aspect_ratio": "16:9"
+  }'
+```
+
+---
+
+### 3.5 Jev AI & OpenRouter Decision Models (`jev-1.13`, `typesafe/jev-1.13`)
 
 Jev models perform asynchronous decision classification and concurrent multi-question evaluation via the **Parallel Sampler**. All questions are evaluated across a shared `state` context simultaneously in a single pass.
 

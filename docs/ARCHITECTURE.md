@@ -56,6 +56,11 @@ Dispatch in `src/routes.rs` is **exclusive and fail-closed**: a request matching
 | `/muse-ai/models`, `/muse-ai/v1/models` | Muse AI | `GET` | Local Muse model catalog (`muse`) |
 | `/muse-ai/v1/chat/completions` | Muse AI | `POST` | Dedicated Muse chat completions (see [docs/muse-chat.md](muse-chat.md)) |
 | `/muse-ai/v1` | Muse AI | `POST` | Raw Muse REST proxy endpoint |
+| `/muse-ai/v1/create-image`, `/muse-ai/create-image`, `/v1/images/generations` | Muse Image | `POST` | Text-to-image creation with aspect ratio choices (`1:1`, `16:9`, etc.) |
+| `/muse-ai/v1/images/{id}` | Muse Image | `GET` | Image job status polling and metadata |
+| `/muse-ai/v1/images/{id}/content` | Muse Image Media | `GET`, `HEAD` | Preview image inline |
+| `/muse-ai/v1/images/{id}/download` | Muse Image Media | `GET`, `HEAD` | Download image file |
+| `/image-template` | Image Studio UI | `GET`, `HEAD` | Interactive image generation studio with aspect ratio pills, live preview, and download |
 | `/muse-ai/v1/create-video` | Muse Video | `POST` | Video creation task submission |
 | `/muse-ai/v1/videos/{id}` | Muse Video | `GET`, `POST` | Video job polling (`GET`) or edit prompt revision (`POST`) |
 | `/muse-ai/v1/threads/{id}/cleanup` | Muse Threads | `POST` | Background worker thread registration and cleanup |

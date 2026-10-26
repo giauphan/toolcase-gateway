@@ -37,3 +37,29 @@ pub fn handle_video_template_page_with_method(
     }
     client.flush()
 }
+
+pub fn handle_image_template_page(client: &mut TcpStream) -> std::io::Result<()> {
+    handle_image_template_page_with_method(client, "GET")
+}
+
+pub fn handle_image_template_page_with_method(
+    client: &mut TcpStream,
+    method: &str,
+) -> std::io::Result<()> {
+    let html = include_str!("../assets/image-template.html");
+    if method.eq_ignore_ascii_case("head") {
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            html.len()
+        )?;
+    } else {
+        write!(
+            client,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            html.len(),
+            html
+        )?;
+    }
+    client.flush()
+}

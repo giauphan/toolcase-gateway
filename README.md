@@ -8,7 +8,7 @@
 2. **Model Candidate Failover** — When an upstream model returns `429`, `503`, or credit/auth errors, the gateway retries transparently against configured fallback models before returning anything to the client.
 3. **Prism OpenAI Adaptation** — Transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism (including transparent `reasoning_effort` and token injection).
 4. **Jev AI Decision API & OpenRouter Failover Pool** — Routes structured decision evaluations (`/jev/v1/systemone`, `/jev/v1/decisions`) and executes a structured 4-tier failover cascade (`Direct Jev -> Jev OpenRouter API Key -> OpenRouter Different Decision -> OpenRouter Browser Cookie`) with round-robin rotation and automatic cooldown demotion on credit caps (`401, 402, 403, 429`).
-5. **Muse AI CVM & Video Generation** — Connects directly to Muse Confidential VMs via Noise XX encrypted WebSockets, supports text-to-video synthesis (`/muse-ai/v1/create-video`), and provides headless Sentinel auto-approvals.
+5. **Muse AI CVM, Image & Video Generation** — Connects directly to Muse Confidential VMs via Noise XX encrypted WebSockets, supports text-to-image synthesis with configurable aspect ratios (`/muse-ai/v1/create-image`), text-to-video synthesis (`/muse-ai/v1/create-video`), interactive web studios (`/image-template`, `/video-template`), and provides headless Sentinel auto-approvals.
 6. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/gateway-config/dashboard` that saves settings and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
 
 Zero heavy async runtimes (`tokio` forbidden; standard library blocking networking only) and `#![forbid(unsafe_code)]`.
@@ -211,6 +211,22 @@ curl --no-buffer --max-time 930 -X POST \
 
 See [`docs/muse-video-generation.md`](docs/muse-video-generation.md) for details.
 
+#### Image Synthesis
+
+Create images with customizable aspect ratios (`1:1`, `16:9`, `9:16`, `4:3`, `3:2`):
+```sh
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-image?wait=true \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A serene mountain lake at sunrise, misty pine trees, warm golden hour reflections",
+    "aspect_ratio": "16:9"
+  }'
+```
+
+Or open the interactive Image Studio UI in a browser at `http://127.0.0.1:20129/image-template`.
+
+See [`docs/muse-image-generation.md`](docs/muse-image-generation.md) for full image generation documentation.
+
 ---
 
 ## Configuration
@@ -272,6 +288,7 @@ See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for full threat modeling.
 - [`docs/JEV_INTEGRATION.md`](docs/JEV_INTEGRATION.md) — Jev Decision API schemas, account pool rotation, and failover mechanics
 - [`docs/MODELS.md`](docs/MODELS.md) — Model catalog, provider routing matrix, and reasoning variants
 - [`docs/muse-chat.md`](docs/muse-chat.md) — Conversational chat completions, multi-turn continuation, and thread lifecycle
+- [`docs/muse-image-generation.md`](docs/muse-image-generation.md) — Image generation API, aspect ratio options, preview, download, and studio UI
 - [`docs/muse-video-generation.md`](docs/muse-video-generation.md) — Video synthesis API, Sentinel coordinator, and lifecycle
 - [`docs/MUSE_VIDEO_CURL_TEST.md`](docs/MUSE_VIDEO_CURL_TEST.md) — Quick smoke test curl commands
 

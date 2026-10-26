@@ -269,6 +269,116 @@ By following this pattern:
 - The first call initializes the thread and triggers the initial web search.
 - All subsequent calls for that asset submit only incremental follow-up prompts into the **exact same remote CVM thread**, preserving historical memory, saving latency, and maintaining complete conversational continuity.
 
+### 5.3 Persistent Thread Context Caching (How to Cache & Continue Old Threads)
+
+A common architectural trap in autonomous daemons or trading bots is keeping active threads only in volatile memory (`Map<string, string>`). When a daemon process reboots, updates, or executes in separate sub-processes, in-memory state is wiped, causing the next query to mistakenly spawn a **new thread** without previous context.
+
+To guarantee that sequential queries always reply to and continue old threads across daemon restarts, clients **MUST persist the thread cache to disk or Redis**:
+
+#### Cache Schema (`muse-thread-cache.json`)
+```json
+{
+  "PTXAUXP": {
+    "threadId": "54515aa9-0d4e-44dd-bbb1-3bc61363509a",
+    "contextKey": "PTXAUXP",
+    "symbol": "PTXAUXP",
+    "turns": 14,
+    "createdAt": 1729850000000,
+    "lastActiveAt": 1729854200000,
+    "lastSummary": "Live Spot Analysis for Gold (XAU/USD): Trading near $4,055-$4,065..."
+  }
+}
+```
+
+#### Client Persistence Lifecycle
+1. **On Initialization**: The client reads `muse-thread-cache.json` (from primary storage or fallback `/tmp/okx-trading-bot/muse-thread-cache.json`). Any tracked symbols automatically populate the active thread map.
+2. **On Outgoing Query**: The client checks `activeThreads.get(symbol)`. If present, it sets `reply_thread_id = cachedThreadId`.
+3. **On Response**: When Muse returns `reply_thread_id` (or `thread_id`), the client:
+   - Increments `turns += 1`.
+   - Updates `lastActiveAt = Date.now()`.
+   - Stores the latest summary snippet.
+   - Flushes the cache to disk (with fallback to `/tmp/okx-trading-bot/muse-thread-cache.json` if container permissions require).
+4. **On Daemon Restart**: The new process boots, loads the persisted thread cache, and immediately queries with `reply_thread_id = <persisted_thread_id>`, ensuring Turn $N+1$ directly resumes Turn $N$ without ever creating an orphan thread.
+
+### 5.4 Asset-Specific Thread Isolation (Strict Context Segregation Rule)
+
+To prevent cross-asset context contamination and ensure high-fidelity analytical memory, queries regarding different instruments **MUST NOT share the same thread ID**.
+
+#### Core Rules
+1. **One Dedicated Thread per Asset/Topic**:
+   - **XAU Thread** (Gold: `ptXAUXP`, `ptXAU-XP-PERP`, `GOLD`, `XAU`): Dedicated continuous conversation for gold spot pricing, central bank reserves, and precious metals macro sentiment.
+   - **SPY Thread** (S&P 500: `ptSPYXP`, `ptSPY-XP-PERP`, `S&P500`, `SPY`): Dedicated thread for broad US equity index liquidity, earnings, and macroeconomic data.
+   - **NVDA Thread** (NVIDIA: `ptNVDAXP`, `ptNVDA-XP-PERP`, `NVDA`): Dedicated thread for semiconductor demand and AI capex catalysts.
+2. **Deterministic Context Routing**:
+   - Questions about **XAU** must **strictly reply to the existing XAU thread**.
+   - Questions about **SPY** must **strictly reply to the existing SPY thread** if one exists.
+   - Questions about **NVDA** must **strictly reply to the existing NVDA thread** if one exists.
+3. **No New Thread If Exists**:
+   - Clients **MUST NEVER** generate a new thread ID if an existing thread ID is already registered for that asset.
+   - Only when an asset is queried for the very first time may a new thread be initialized. All subsequent turns for that asset must supply `reply_thread_id: <existing_asset_thread_id>`.
+4. **Canonical Alias Mapping**:
+   - Aliases such as `ptXAUXP`, `XAU`, `ptXAU-XP-PERP`, and `GOLD` are automatically resolved to the same underlying canonical thread context to prevent thread divergence.
+
+### 5.5 Thread Removal, Expiration, and Automatic Cache Re-Seeding ("Check If Thread Removed, Cache New Thread")
+
+In production operations, a cached thread may occasionally become invalid or removed:
+- **Remote Thread Eviction**: The remote CVM daemon reclaimed the thread due to TTL expiry or server-side memory pruning (resulting in HTTP `404 Not Found` or `thread not found` errors).
+- **Explicit Invalidation**: An operator or autonomous supervisor called `removeThread(asset)` or `muse_manage_thread(action: "remove")` to discard stale historical hypotheses.
+- **Cache File Reset**: The disk cache was wiped or truncated during environment migration.
+
+Clients **MUST** implement the **"Check If Thread Removed, Cache New Thread"** self-healing loop:
+
+```
+                  ┌────────────────────────────────────────┐
+                  │ Query Market Intel / Chat for Asset    │
+                  └──────────────────┬─────────────────────┘
+                                     │
+                                     ▼
+                  ┌────────────────────────────────────────┐
+                  │ Check: Does active cached thread exist?│
+                  └──────────────┬───────────────────┬─────┘
+                                 │ Yes               │ No (Removed / Empty)
+                                 │                   │
+                                 ▼                   ▼
+                  ┌───────────────────────────┐ ┌───────────────────────────┐
+                  │ Send with reply_thread_id │ │ Send without reply_thread │
+                  └──────────────┬────────────┘ └─────────────┬─────────────┘
+                                 │                         │
+                    ┌────────────┴────────────┐            │
+                    │ Success?                │            │
+                    │ (HTTP 200)              │            │
+                    ▼                         │ Error 404  │
+         ┌──────────────────────┐             │ or Thread  │
+         │ Continue Old Thread  │             │ Not Found  │
+         │ Increment turns + 1  │             ▼            │
+         └──────────────────────┘ ┌──────────────────────┐ │
+                                  │ Clear Stale Thread   │ │
+                                  │ Purge from Disk Cache│ │
+                                  │ Retry Fresh Query    │ │
+                                  └──────────┬───────────┘ │
+                                             │             │
+                                             ▼             ▼
+                                  ┌────────────────────────────────────────┐
+                                  │ Receive New Thread ID from Gateway     │
+                                  │ Cache NEW Thread for Asset in Storage  │
+                                  └────────────────────────────────────────┘
+```
+
+#### Implementation Pattern
+1. **Removal Detection**:
+   - If an outgoing request containing `reply_thread_id` fails with an upstream indicator like `404`, `410`, or `thread not found`:
+     1. Catch the error and log: `[MuseClient] Cached thread was removed or invalid upstream. Purging stale cache...`.
+     2. Invoke `clearActiveThread(contextKey)`.
+     3. Re-dispatch the request with `reply_thread_id: undefined` so the gateway provisions a fresh session.
+2. **Auto-Caching the New Thread**:
+   - When the retry response returns with a new `reply_thread_id`, the client immediately invokes `updateThreadContext(contextKey, newThreadId)`.
+   - The fresh thread ID is persisted to storage (`muse-thread-cache.json`), ensuring that all subsequent turns cleanly follow this new thread.
+3. **Explicit Management Functions**:
+   - `removeThread(contextKey)`: Safely removes the thread from both memory and disk cache. Returns `true` if a thread existed.
+   - `hasActiveThread(contextKey)`: Returns boolean indicating whether a tracked thread is currently cached.
+   - `ensureActiveThread(contextKey)`: Checks if a thread exists; if removed or missing, creates and caches a fresh thread ID immediately.
+   - MCP Tool `muse_manage_thread`: Exposes actions `get`, `remove`, `reset` (clear and cache new thread), and `list` across all assets.
+
 ---
 
 ## 6. Live Search & Real-Time Data

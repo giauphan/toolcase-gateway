@@ -365,6 +365,63 @@ fn route_request_impl(
         };
     }
 
+    if clean_path == "/muse-ai/v1/create-image"
+        || clean_path == "/muse-ai/create-image"
+        || clean_path == "/v1/images/generations"
+    {
+        return if request.method.eq_ignore_ascii_case("post") {
+            crate::museai::handle_create_image_request(client, request, config)?;
+            Ok(200)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Muse image creation only supports POST",
+            )?;
+            Ok(405)
+        };
+    }
+
+    if clean_path.starts_with("/muse-ai/v1/images/") {
+        let sub = clean_path.strip_prefix("/muse-ai/v1/images/").unwrap_or("");
+        if let Some(job_id) = sub
+            .strip_suffix("/content")
+            .or_else(|| sub.strip_suffix("/download"))
+        {
+            let allowed = request.method.eq_ignore_ascii_case("get")
+                || request.method.eq_ignore_ascii_case("head");
+            return if allowed {
+                crate::museai::handle_get_image_content(client, job_id, request)?;
+                Ok(200)
+            } else {
+                write_error(
+                    client,
+                    405,
+                    "Method Not Allowed",
+                    "Muse image content only supports GET and HEAD",
+                )?;
+                Ok(405)
+            };
+        }
+
+        let job_id = sub.trim_matches('/');
+        return if request.method.eq_ignore_ascii_case("get")
+            || request.method.eq_ignore_ascii_case("head")
+        {
+            crate::museai::handle_get_image_request(client, job_id, request)?;
+            Ok(200)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "Muse image job status only supports GET and HEAD",
+            )?;
+            Ok(405)
+        };
+    }
+
     if clean_path.starts_with("/muse-ai/v1/videos/") {
         let sub = clean_path.strip_prefix("/muse-ai/v1/videos/").unwrap_or("");
         if let Some(job_id) = sub
@@ -588,6 +645,23 @@ fn route_request_impl(
                 405,
                 "Method Not Allowed",
                 "video templates only support GET and HEAD",
+            )?;
+            Ok(405)
+        };
+    }
+
+    if clean_path == "/image-template" || clean_path.starts_with("/image-template/") {
+        return if request.method.eq_ignore_ascii_case("get")
+            || request.method.eq_ignore_ascii_case("head")
+        {
+            crate::video_template::handle_image_template_page_with_method(client, &request.method)?;
+            Ok(200)
+        } else {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "image templates only support GET and HEAD",
             )?;
             Ok(405)
         };

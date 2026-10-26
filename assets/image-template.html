@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Muse Image Studio</title>
+<style>
+:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#e8eaf0;--muted:#9aa0b0;--accent:#5b8cff;--ok:#3fd08a;--err:#ff6b6b;--border:#2a2f3f;--radius:12px}
+@media (prefers-color-scheme: light){:root{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f6;--text:#1a1c24;--muted:#5a5f6e;--accent:#2f5be0;--ok:#1b9e68;--err:#d63;--border:#d8dbe4}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px 16px 60px}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:24px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:700}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.req{color:var(--err);font-weight:700}
+textarea{width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical;min-height:90px}
+textarea:focus{outline:none;border-color:var(--accent)}
+.row{margin-bottom:16px}.row:last-child{margin-bottom:0}
+.pill{display:flex;gap:10px;flex-wrap:wrap}
+.chip{cursor:pointer;padding:8px 16px;border:1px solid var(--border);border-radius:999px;background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;user-select:none;transition:all .15s ease}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip:hover:not(.on){border-color:var(--accent);color:var(--accent)}
+.btns{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:16px}
+button{font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;padding:12px 24px;background:var(--accent);color:#fff;transition:opacity .15s}
+button:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border);text-decoration:none;display:inline-flex;align-items:center;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
+.status{font-size:14px;font-weight:600;min-height:22px}
+.status.ok{color:var(--ok)}
+.status.err{color:var(--err)}
+.status.busy{color:var(--accent)}
+.err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:12px;font-size:13px;color:var(--err);margin-top:12px;display:none;white-space:pre-wrap}
+.preview-wrap{display:none;margin-top:20px;text-align:center}
+.preview-box{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;display:inline-block;max-width:100%}
+.preview-img{max-width:100%;max-height:540px;border-radius:6px;display:block;margin:0 auto;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+.action-bar{margin-top:12px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Muse AI Image Studio</h1>
+  <p class="sub">Create and preview high-fidelity images with customizable aspect ratios via Muse.ai.</p>
+
+  <div class="card">
+    <h2>Prompt & Settings</h2>
+    <div class="row">
+      <label for="prompt">Prompt Description <span class="req">*</span></label>
+      <textarea id="prompt" placeholder="e.g. A serene mountain lake at sunrise, misty pine trees, warm golden hour reflections, 8k resolution"></textarea>
+    </div>
+
+    <div class="row">
+      <label>Aspect Ratio</label>
+      <div class="pill" id="aspect-pills">
+        <span class="chip on" data-v="1:1">1:1 (Square)</span>
+        <span class="chip" data-v="16:9">16:9 (Landscape)</span>
+        <span class="chip" data-v="9:16">9:16 (Portrait)</span>
+        <span class="chip" data-v="4:3">4:3 (Photo)</span>
+        <span class="chip" data-v="3:2">3:2 (35mm)</span>
+      </div>
+    </div>
+
+    <div class="btns">
+      <button id="btn-create">Generate Image</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="err-box" id="errbox"></div>
+  </div>
+
+  <div class="card preview-wrap" id="result-card">
+    <h2>Preview & Download</h2>
+    <div class="preview-box">
+      <img id="image-viewer" class="preview-img" alt="Generated Artwork" />
+      <div class="action-bar">
+        <a id="btn-download" class="btn-secondary" href="#" download>Download Image</a>
+        <a id="btn-open" class="btn-secondary" href="#" target="_blank">Open Full Image</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var selectedAspect = "1:1";
+  var pills = document.getElementById("aspect-pills").querySelectorAll(".chip");
+  pills.forEach(function(pill){
+    pill.addEventListener("click", function(){
+      pills.forEach(function(p){ p.classList.remove("on"); });
+      pill.classList.add("on");
+      selectedAspect = pill.getAttribute("data-v");
+    });
+  });
+
+  var promptEl = document.getElementById("prompt");
+  var btnCreate = document.getElementById("btn-create");
+  var statusEl = document.getElementById("status");
+  var errBox = document.getElementById("errbox");
+  var resultCard = document.getElementById("result-card");
+  var imageViewer = document.getElementById("image-viewer");
+  var btnDownload = document.getElementById("btn-download");
+  var btnOpen = document.getElementById("btn-open");
+
+  function setStatus(text, cls){
+    statusEl.textContent = text;
+    statusEl.className = "status " + (cls || "");
+  }
+  function setError(msg){
+    errBox.textContent = msg;
+    errBox.style.display = msg ? "block" : "none";
+  }
+
+  var pollTimer = null;
+  function pollImage(id){
+    if(pollTimer){ clearTimeout(pollTimer); }
+    fetch("/muse-ai/v1/images/" + encodeURIComponent(id))
+      .then(function(res){ return res.json(); })
+      .then(function(data){
+        if(data.status === "completed" && (data.image_url || data.preview_url)){
+          setStatus("Image Ready!", "ok");
+          btnCreate.disabled = false;
+          showResult(data);
+          return;
+        }
+        if(data.status === "failed"){
+          setStatus("", "");
+          btnCreate.disabled = false;
+          setError(data.error || "Image generation failed.");
+          return;
+        }
+        setStatus("Generating image…", "busy");
+        pollTimer = setTimeout(function(){ pollImage(id); }, 3000);
+      })
+      .catch(function(err){
+        btnCreate.disabled = false;
+        setStatus("", "");
+        setError(String(err));
+      });
+  }
+
+  function showResult(data){
+    var src = data.full_preview_url || data.preview_url || data.image_url;
+    var dl = data.full_download_url || data.download_url || src;
+    imageViewer.src = src;
+    btnDownload.href = dl;
+    btnOpen.href = src;
+    resultCard.style.display = "block";
+  }
+
+  btnCreate.addEventListener("click", function(){
+    setError("");
+    var prompt = promptEl.value.trim();
+    if(!prompt){
+      setError("Please enter a prompt description.");
+      return;
+    }
+
+    btnCreate.disabled = true;
+    setStatus("Submitting request…", "busy");
+    resultCard.style.display = "none";
+
+    fetch("/muse-ai/v1/create-image?async=true", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: prompt,
+        aspect_ratio: selectedAspect
+      })
+    })
+    .then(function(res){
+      return res.json().then(function(json){
+        if(!res.ok){ throw new Error(json.error && json.error.message ? json.error.message : "Request failed"); }
+        return json;
+      });
+    })
+    .then(function(data){
+      if(data.status === "completed" && data.image_url){
+        setStatus("Image Ready!", "ok");
+        btnCreate.disabled = false;
+        showResult(data);
+      } else {
+        setStatus("Generating image…", "busy");
+        pollImage(data.id);
+      }
+    })
+    .catch(function(err){
+      btnCreate.disabled = false;
+      setStatus("", "");
+      setError(err.message || String(err));
+    });
+  });
+})();
+</script>
+</body>
+</html>

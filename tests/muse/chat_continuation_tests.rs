@@ -1,7 +1,7 @@
 //! Tests for continuing chat conversations in existing Muse AI threads.
 
 use super::common::*;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use toolcase_gateway::museai::chat::{
     build_muse_chat_request, build_muse_chat_request_with_session, extract_continuation_prompt,
@@ -233,7 +233,9 @@ fn test_muse_chat_completions_route_rejects_malformed_reply_thread_id() {
 
     let head = toolcase_gateway::http::read_response_head(&mut client).unwrap();
     assert_eq!(head.status, 400);
-    let body = String::from_utf8_lossy(&head.buffered_body);
+    let mut body_bytes = head.buffered_body;
+    let _ = client.read_to_end(&mut body_bytes);
+    let body = String::from_utf8_lossy(&body_bytes);
     assert!(body.contains("Invalid thread_id / reply_thread_id 'malformed-thread-id'"));
     handle.join().unwrap();
 }

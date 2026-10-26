@@ -27,3 +27,6 @@ mod approval_integration_tests;
 
 #[path = "muse/chat_continuation_tests.rs"]
 mod chat_continuation_tests;
+
+#[path = "muse/image_tests.rs"]
+mod image_tests;

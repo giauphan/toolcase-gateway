@@ -115,6 +115,7 @@ toolcase-gateway-rs/
 │   │       │   ├── policy.rs     # Scope, type, and destination allowlist evaluation
 │   │       │   └── protocol.rs   # Sentinel REST client and wire structures
 │   │       ├── chat/             # Chat completion streaming orchestration
+│   │       ├── image/            # Image creation, aspect ratios, preview, and download
 │   │       └── video/            # Video job execution and durable state tracking
 │   │
 │   ├── museai/                   # Backwards-compatible facade

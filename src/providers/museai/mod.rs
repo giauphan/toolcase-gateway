@@ -2,6 +2,7 @@ pub mod approval;
 pub mod business;
 pub mod chat;
 pub mod handlers;
+pub mod image;
 pub mod lifecycle;
 pub mod noise;
 pub mod protocol;
@@ -17,6 +18,15 @@ pub use handlers::{
     handle_get_video_request, handle_museai_chat_completions, handle_museai_thread_cleanup,
     handle_museai_threads_cleanup_run, handle_museai_v1, handle_update_video_prompt,
     is_sync_requested, write_chat_completion,
+};
+pub use image::{
+    build_image_prompt, create_image, create_image_with_completion, extract_image_url_from_text,
+    find_image_media, handle_create_image, handle_create_image_request, handle_get_image,
+    handle_get_image_content, handle_get_image_request, has_image_media, load_image_job,
+    load_image_media, normalize_image_model, parse_and_validate_image_request, save_image_job,
+    save_image_media, submit_image, submit_image_with_completion, ImageJobRecord,
+    ValidatedImageRequest, DEFAULT_IMAGE_ASPECT_RATIO, SUPPORTED_IMAGE_ASPECT_RATIOS,
+    SUPPORTED_IMAGE_MODELS,
 };
 pub use lifecycle::{
     append_job_revision, is_submitting_stale, list_video_jobs, load_video_job,

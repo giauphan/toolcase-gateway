@@ -10,6 +10,9 @@ mod protocol_omniroute_tests;
 #[path = "gateway/muse_video_route_tests.rs"]
 mod muse_video_route_tests;
 
+#[path = "gateway/muse_image_route_tests.rs"]
+mod muse_image_route_tests;
+
 #[path = "gateway/har_config_tests.rs"]
 mod har_config_tests;
 
