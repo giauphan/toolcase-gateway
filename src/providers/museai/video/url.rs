@@ -115,6 +115,8 @@ pub fn is_vm_media_url(url: &str) -> bool {
         || url.starts_with("/fs/raw/workspace/")
         || url.starts_with("/workspace/")
         || url.starts_with("workspace/")
+        || url.starts_with("sandbox://workspace/")
+        || url.starts_with("sandbox:///workspace/")
 }
 
 pub fn is_gateway_video_content_url(url: &str) -> bool {
@@ -122,29 +124,16 @@ pub fn is_gateway_video_content_url(url: &str) -> bool {
 }
 
 pub fn extract_vm_media_path(url: &str) -> Option<String> {
-    let path_only = if let Some(after_scheme) = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-    {
-        let path_and_query = after_scheme.split_once('/')?.1;
-        path_and_query.split('?').next()?.split('#').next()?
-    } else {
-        url.split('?').next()?.split('#').next()?
-    };
-    let fs_idx = path_only.find("/fs/raw/").map(|i| i + "/fs/raw/".len());
-    let media_idx = path_only
-        .find("/media/raw/")
-        .map(|i| i + "/media/raw/".len());
-    let raw_sub = match (fs_idx, media_idx) {
-        (Some(f), Some(m)) => &path_only[f.min(m)..],
-        (Some(f), None) => &path_only[f..],
-        (None, Some(m)) => &path_only[m..],
-        (None, None) => {
-            let w_idx = path_only.find("workspace/")?;
-            &path_only[w_idx..]
-        }
-    };
-    let clean = raw_sub.trim_start_matches('/');
+    let w_idx = url.find("workspace/")?;
+    let path = &url[w_idx..];
+    let clean = path
+        .split('?')
+        .next()
+        .unwrap_or(path)
+        .split('#')
+        .next()
+        .unwrap_or(path)
+        .trim();
     if clean.starts_with("workspace/") {
         Some(clean.to_string())
     } else {

@@ -303,6 +303,15 @@ where
 
     let raw_image_url = extract_image_url_from_text(&completion);
     if raw_image_url.is_empty() {
+        crate::runtime::logger::log_message(
+            "WARN",
+            "museai_image",
+            &format!(
+                "Image generation returned no URL for job {}. Raw response snippet: {}",
+                req.allocated_job_id,
+                &completion[..completion.len().min(500)]
+            ),
+        );
         let _ = update_image_job(
             &req.allocated_job_id,
             "failed",
@@ -315,12 +324,16 @@ where
         ));
     }
 
-    let _ = update_image_job(
-        &req.allocated_job_id,
-        "completed",
-        Some(&raw_image_url),
-        None,
-    );
+    let is_vm = crate::providers::museai::video::is_vm_media_url(&raw_image_url);
+    let (image_url, media_validated) = if is_vm {
+        let content_url = format!("/muse-ai/v1/images/{}/content", req.allocated_job_id);
+        let validated = super::media::has_image_media(&req.allocated_job_id);
+        (content_url, validated)
+    } else {
+        (raw_image_url.clone(), true)
+    };
+
+    let _ = update_image_job(&req.allocated_job_id, "completed", Some(&image_url), None);
 
     let record = load_image_job(&req.allocated_job_id).unwrap_or_else(|_| ImageJobRecord {
         job_id: req.allocated_job_id.clone(),
@@ -333,9 +346,9 @@ where
         created_at: req.now,
         last_activity_at: req.now,
         status: "completed".to_string(),
-        media_validated: true,
+        media_validated,
         output_verified: true,
-        image_url: raw_image_url.clone(),
+        image_url: image_url.clone(),
         submission_key: req.submission_key.clone(),
         error: None,
     });

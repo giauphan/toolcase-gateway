@@ -194,6 +194,11 @@ pub fn request_museai_chat_completion(
             crate::providers::museai::video::extract_url_from_text(&full_assistant_text);
         (!extracted.is_empty()).then_some(extracted)
     };
+    let image_url: Option<String> = {
+        let extracted =
+            crate::providers::museai::image::extract_image_url_from_text(&full_assistant_text);
+        (!extracted.is_empty()).then_some(extracted)
+    };
     if wait_for_video_artifact
         && video_url.is_none()
         && !explicit_video_refusal(&full_assistant_text)
@@ -291,6 +296,56 @@ pub fn request_museai_chat_completion(
         }
     }
 
+    if let Some(ref raw_url) = image_url {
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai_chat",
+            &format!("Resolved image artifact URL: {raw_url}"),
+        );
+        if crate::providers::museai::video::is_vm_media_url(raw_url) {
+            if let Some(vm_path) = crate::providers::museai::video::extract_vm_media_path(raw_url) {
+                crate::runtime::logger::log_message(
+                    "INFO",
+                    "museai_chat",
+                    &format!("Fetching internal VM image media over Noise: {vm_path}"),
+                );
+                let fetch_stream_id = active_stream_id.max(2) + 1;
+                match crate::providers::museai::video::fetch_vm_media_over_noise(
+                    &mut socket,
+                    &mut session,
+                    fetch_stream_id,
+                    &vm_path,
+                ) {
+                    Ok(media_bytes) => {
+                        crate::runtime::logger::log_message(
+                            "INFO",
+                            "museai_chat",
+                            &format!(
+                                "Fetched and cached {} bytes of VM image media",
+                                media_bytes.len()
+                            ),
+                        );
+                        if let Some(ref jid) = job_id_hint {
+                            let ext = crate::providers::museai::image::guess_extension(&vm_path);
+                            let _ = crate::providers::museai::image::save_image_media(
+                                jid,
+                                &media_bytes,
+                                ext,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        crate::runtime::logger::log_message(
+                            "ERROR",
+                            "museai_chat",
+                            &format!("Failed to fetch VM image media over Noise: {e}"),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     let created = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -342,6 +397,11 @@ pub fn request_museai_chat_completion(
     if let Some(url) = &video_url {
         if !full_assistant_text.contains(url.as_str()) {
             full_assistant_text.push_str(&format!("\nVideo URL: {url}\n"));
+        }
+    }
+    if let Some(url) = &image_url {
+        if !full_assistant_text.contains(url.as_str()) {
+            full_assistant_text.push_str(&format!("\nImage URL: {url}\n"));
         }
     }
     let completion_response = serde_json::json!({

@@ -44,7 +44,25 @@ pub fn fetch_vm_media_over_noise(
     workspace_path: &str,
 ) -> io::Result<Vec<u8>> {
     let clean_path = workspace_path.trim_start_matches('/');
-    let raw_request_path = format!("/fs/raw/{clean_path}");
+    let encoded_path = clean_path
+        .split('/')
+        .map(|segment| {
+            let mut s = String::new();
+            for b in segment.bytes() {
+                if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
+                    s.push(b as char);
+                } else if b == b' ' {
+                    s.push_str("%20");
+                } else {
+                    use std::fmt::Write;
+                    let _ = write!(s, "%{:02X}", b);
+                }
+            }
+            s
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    let raw_request_path = format!("/fs/raw/{encoded_path}");
     let headers = vec![
         Header {
             key: "x-app-id".into(),

@@ -134,6 +134,7 @@ pub fn is_raw_image_artifact_url(url: &str) -> bool {
     is_supported_image_url(url)
         || ((url.starts_with("https://")
             || url.starts_with("http://")
+            || url.starts_with("sandbox://")
             || url.starts_with('/')
             || url.starts_with("workspace/"))
             && (is_vm_media_url(url) || is_trusted_image_cdn_host(url_authority(url)))
@@ -170,6 +171,13 @@ pub fn extract_image_url_from_text(text: &str) -> String {
 
     for url in &urls {
         let cleaned = trim_trailing_punct(url);
+        if is_vm_media_url(cleaned) && has_supported_image_extension(cleaned) {
+            return cleaned.to_string();
+        }
+    }
+
+    for url in &urls {
+        let cleaned = trim_trailing_punct(url);
         if (cleaned.starts_with("https://") || cleaned.starts_with("http://"))
             && has_supported_image_extension(cleaned)
         {
@@ -189,11 +197,17 @@ fn extract_markdown_image_url(text: &str) -> Option<String> {
             if after_bracket.starts_with('(') {
                 if let Some(close_paren) = after_bracket.find(')') {
                     let target = after_bracket[1..close_paren].trim();
-                    let url = target.split_whitespace().next().unwrap_or("");
+                    let url = if let Some((u, _)) = target.split_once(" \"") {
+                        u.trim()
+                    } else if let Some((u, _)) = target.split_once(" '") {
+                        u.trim()
+                    } else {
+                        target
+                    };
                     let cleaned = trim_trailing_punct(url);
-                    if (cleaned.starts_with("https://") || cleaned.starts_with("http://"))
-                        && (has_supported_image_extension(cleaned)
-                            || is_raw_image_artifact_url(cleaned))
+                    if has_supported_image_extension(cleaned)
+                        || is_raw_image_artifact_url(cleaned)
+                        || is_vm_media_url(cleaned)
                     {
                         return Some(cleaned.to_string());
                     }
