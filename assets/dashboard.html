@@ -434,27 +434,45 @@ button:disabled{opacity:.5;cursor:not-allowed}
     omniDesc.textContent = 'Fallbacks: ' + (omni.fallbacks && omni.fallbacks.length ? omni.fallbacks.join(', ') : 'none');
   }
 
-  function renderOpenrouterSection(orJev) {
-    if (!openrouterStatus) return;
-    const cnt = orJev.total_accounts || 0;
-    const en = orJev.enabled !== false;
-    openrouterStatus.textContent = (en ? 'Enabled' : 'Disabled') + ' (' + cnt + ' ' + (cnt === 1 ? 'Session' : 'Sessions') + ')';
-    openrouterDesc.textContent = (orJev.base_url || 'https://openrouter.ai') + ' • Model: ' + (orJev.model || 'typesafe/jev-1.13');
+  function formatCurrentHint(val) {
+    return val ? ('Current: ' + val) : 'Current: not set';
+  }
 
+  function updateOpenrouterStatus(orJev, en) {
+    const cnt = orJev.total_accounts || 0;
+    const sessionLabel = cnt === 1 ? 'Session' : 'Sessions';
+    const stateLabel = en ? 'Enabled' : 'Disabled';
+    openrouterStatus.textContent = stateLabel + ' (' + cnt + ' ' + sessionLabel + ')';
+    const base = orJev.base_url || 'https://openrouter.ai';
+    const model = orJev.model || 'typesafe/jev-1.13';
+    openrouterDesc.textContent = base + ' • Model: ' + model;
+
+    if (jevModeBadge) {
+      jevModeBadge.textContent = en ? 'Active (Failover On)' : 'Direct Only';
+      jevModeBadge.className = 'tag ' + (en ? 'ok' : 'idle');
+    }
+  }
+
+  function updateOpenrouterFields(orJev, en) {
     setFieldIfNotFocused(cfgJevOrBase, orJev.base_url || 'https://openrouter.ai');
     setFieldIfNotFocused(cfgJevOrModel, orJev.model || 'typesafe/jev-1.13');
     if (cfgJevOrFallbackModels && !cfgJevOrFallbackModels.matches(':focus')) {
       const fms = orJev.fallback_models;
       cfgJevOrFallbackModels.value = Array.isArray(fms) ? fms.join(', ') : (fms || '');
     }
-    if (cfgJevOrEnabled) cfgJevOrEnabled.value = en ? 'true' : 'false';
-    setFieldIfNotFocused(cfgJevCooldown, orJev.credit_cooldown_secs || 300);
-    if (hintJevApiKey) hintJevApiKey.textContent = orJev.masked_api_key ? ('Current: ' + orJev.masked_api_key) : 'Current: not set';
-    if (hintJevCookie) hintJevCookie.textContent = orJev.masked_cookie ? ('Current: ' + orJev.masked_cookie) : 'Current: not set';
-    if (jevModeBadge) {
-      jevModeBadge.textContent = en ? 'Active (Failover On)' : 'Direct Only';
-      jevModeBadge.className = 'tag ' + (en ? 'ok' : 'idle');
+    if (cfgJevOrEnabled) {
+      cfgJevOrEnabled.value = en ? 'true' : 'false';
     }
+    setFieldIfNotFocused(cfgJevCooldown, orJev.credit_cooldown_secs || 300);
+    if (hintJevApiKey) hintJevApiKey.textContent = formatCurrentHint(orJev.masked_api_key);
+    if (hintJevCookie) hintJevCookie.textContent = formatCurrentHint(orJev.masked_cookie);
+  }
+
+  function renderOpenrouterSection(orJev) {
+    if (!openrouterStatus) return;
+    const en = orJev.enabled !== false;
+    updateOpenrouterStatus(orJev, en);
+    updateOpenrouterFields(orJev, en);
   }
 
   function renderJevSection(jev, orJev) {

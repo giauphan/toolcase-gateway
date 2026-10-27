@@ -212,7 +212,11 @@ fn handle_video_request_error(e: &io::Error, req: &ValidatedVideoRequest) -> io:
     if req.existing_job.is_none() {
         let (status, approval_status) = if e
             .get_ref()
-            .and_then(|err| err.downcast_ref::<crate::providers::museai::MuseApprovalRequired>())
+            .and_then(
+                <dyn std::error::Error + Send + Sync>::downcast_ref::<
+                    crate::providers::museai::MuseApprovalRequired,
+                >,
+            )
             .is_some()
         {
             ("approval_required", Some("manual_required"))
