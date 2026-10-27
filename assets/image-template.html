@@ -91,7 +91,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     pill.addEventListener("click", function(){
       pills.forEach(function(p){ p.classList.remove("on"); });
       pill.classList.add("on");
-      selectedAspect = pill.dataset.v || pill.getAttribute("data-v");
+      selectedAspect = pill.dataset.v || "1:1";
     });
   });
 
