@@ -285,21 +285,19 @@ impl JevAccountPool {
             .openrouter_accounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut all_or = or_guard.clone();
 
         let cfg_api_key = config.jev_openrouter_api_key.trim();
-        if !cfg_api_key.is_empty() && !all_or.iter().any(|a| a.credential() == cfg_api_key) {
-            all_or.insert(
-                0,
-                OpenRouterAccount {
-                    cookie: String::new(),
-                    api_key: cfg_api_key.to_string(),
-                    label: "openrouter-api-key".to_string(),
-                },
-            );
-        }
-
         let cfg_cookie = config.jev_openrouter_cookie.trim();
+
+        let mut all_or = Vec::with_capacity(or_guard.len() + 2);
+        if !cfg_api_key.is_empty() && !or_guard.iter().any(|a| a.credential() == cfg_api_key) {
+            all_or.push(OpenRouterAccount {
+                cookie: String::new(),
+                api_key: cfg_api_key.to_string(),
+                label: "openrouter-api-key".to_string(),
+            });
+        }
+        all_or.extend(or_guard.iter().cloned());
         if !cfg_cookie.is_empty() && !all_or.iter().any(|a| a.credential() == cfg_cookie) {
             all_or.push(OpenRouterAccount {
                 cookie: cfg_cookie.to_string(),

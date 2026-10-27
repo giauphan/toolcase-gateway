@@ -77,35 +77,17 @@ fn drive_chat_stream(
         };
         stream.push(&bytes, ended)?;
         if ended && active_stream_id == stream_id && !stream.completed {
-            let session_id = stream.session_id.as_deref().ok_or_else(|| {
+            let session_id = stream.session_id.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Muse chat acknowledgement missing",
                 )
             })?;
             if std::env::var("MUSE_LIVE_TEST").ok().as_deref() == Some("1") {
-                crate::test_helpers::save_live_owned_session(session_id)?;
+                crate::test_helpers::save_live_owned_session(&session_id)?;
             }
 
-            if config.muse_approval.mode == crate::config::MuseApprovalMode::ScopedAuto {
-                let mut coordinator = crate::providers::museai::approval::ApprovalCoordinator::new(
-                    config, session_id,
-                );
-                stream.approval_handler = Some(Box::new(move |_sid, record| {
-                    match coordinator.handle_approval_snapshot(record) {
-                        Ok(crate::providers::museai::approval::CoordinateResult::Approved {
-                            ..
-                        }) => Ok(true),
-                        Ok(
-                            crate::providers::museai::approval::CoordinateResult::ManualRequired {
-                                reason,
-                                ..
-                            },
-                        ) => Err(io::Error::other(reason)),
-                        Err(e) => Err(e),
-                    }
-                }));
-            }
+            attach_scoped_approval_handler(&mut stream, config, &session_id);
 
             let subscription = serde_json::json!({
                 "session_id": session_id,
@@ -133,6 +115,25 @@ fn drive_chat_stream(
     Ok((thread_id, full_assistant_text, active_stream_id))
 }
 
+fn attach_scoped_approval_handler(stream: &mut MuseChatStream, config: &Config, session_id: &str) {
+    if config.muse_approval.mode == crate::config::MuseApprovalMode::ScopedAuto {
+        let mut coordinator =
+            crate::providers::museai::approval::ApprovalCoordinator::new(config, session_id);
+        stream.approval_handler = Some(Box::new(move |_sid, record| {
+            match coordinator.handle_approval_snapshot(record) {
+                Ok(crate::providers::museai::approval::CoordinateResult::Approved { .. }) => {
+                    Ok(true)
+                }
+                Ok(crate::providers::museai::approval::CoordinateResult::ManualRequired {
+                    reason,
+                    ..
+                }) => Err(io::Error::other(reason)),
+                Err(e) => Err(e),
+            }
+        }));
+    }
+}
+
 fn await_video_artifact(
     socket: &mut MuseWebSocket,
     session: &mut MuseNoiseSession,
@@ -144,23 +145,7 @@ fn await_video_artifact(
         session_id: Some(thread_id.to_string()),
         ..Default::default()
     };
-    if config.muse_approval.mode == crate::config::MuseApprovalMode::ScopedAuto {
-        let mut coordinator =
-            crate::providers::museai::approval::ApprovalCoordinator::new(config, thread_id);
-        presentation_stream.approval_handler =
-            Some(Box::new(move |_sid, record| {
-                match coordinator.handle_approval_snapshot(record) {
-                    Ok(crate::providers::museai::approval::CoordinateResult::Approved {
-                        ..
-                    }) => Ok(true),
-                    Ok(crate::providers::museai::approval::CoordinateResult::ManualRequired {
-                        reason,
-                        ..
-                    }) => Err(io::Error::other(reason)),
-                    Err(e) => Err(e),
-                }
-            }));
-    }
+    attach_scoped_approval_handler(&mut presentation_stream, config, thread_id);
     while std::time::Instant::now() < deadline {
         match socket.read_encrypted_service_frame(session) {
             Ok(frame) => {

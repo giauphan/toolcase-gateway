@@ -248,7 +248,7 @@ fn extract_account_entries(
     entries
 }
 
-pub fn handle_add_provider_accounts(
+pub fn handle_save_provider_settings(
     client: &mut TcpStream,
     body: &[u8],
     store: &ConfigStore,
@@ -568,3 +568,5 @@ pub fn persist_jev_keys(path: &Path, keys: &[String]) -> io::Result<()> {
     fs::rename(&tmp, path)?;
     Ok(())
 }
+
+pub use handle_save_provider_settings as handle_add_provider_accounts;

@@ -88,28 +88,7 @@ pub fn delete_cvm_session_over_noise(thread_id: &str, config: &Config) -> io::Re
         .map_err(|e| io::Error::other(format!("Noise handshake error: {e}")))?;
 
     let stream_id = 1;
-    let headers = vec![
-        Header {
-            key: "Host".to_string(),
-            value: "hatch.metaaivm.com".to_string(),
-        },
-        Header {
-            key: "Content-Type".to_string(),
-            value: "application/json".to_string(),
-        },
-        Header {
-            key: "Accept".to_string(),
-            value: "application/json".to_string(),
-        },
-        Header {
-            key: "x-request-id".to_string(),
-            value: uuid::Uuid::new_v4().to_string(),
-        },
-        Header {
-            key: "x-app-id".to_string(),
-            value: "hatch-web".to_string(),
-        },
-    ];
+    let headers = cvm_json_headers();
 
     let payload = serde_json::json!({
         "method": "/api/session/delete",
@@ -381,14 +360,8 @@ fn fetch_remote_session_list(
         .cloned()
 }
 
-fn delete_cvm_session_remote(
-    socket: &mut crate::providers::museai::transport::MuseWebSocket,
-    session: &mut crate::providers::museai::noise::MuseNoiseSession,
-    sid: &str,
-    stream_id: &mut u64,
-) -> bool {
-    *stream_id = stream_id.wrapping_add(2);
-    let del_headers = vec![
+fn cvm_json_headers() -> Vec<Header> {
+    vec![
         Header {
             key: "Host".to_string(),
             value: "hatch.metaaivm.com".to_string(),
@@ -409,13 +382,25 @@ fn delete_cvm_session_remote(
             key: "x-app-id".to_string(),
             value: "hatch-web".to_string(),
         },
-    ];
-    let del_payload = serde_json::json!({
-        "method": "/api/session/delete",
+    ]
+}
+
+fn mutate_cvm_session_remote(
+    socket: &mut crate::providers::museai::transport::MuseWebSocket,
+    session: &mut crate::providers::museai::noise::MuseNoiseSession,
+    action: &str,
+    sid: &str,
+    stream_id: &mut u64,
+) -> bool {
+    *stream_id = stream_id.wrapping_add(2);
+    let headers = cvm_json_headers();
+    let method = format!("/api/session/{action}");
+    let payload = serde_json::json!({
+        "method": method,
         "session_id": sid,
         "id": sid,
     });
-    let Ok(bytes) = serde_json::to_vec(&del_payload) else {
+    let Ok(bytes) = serde_json::to_vec(&payload) else {
         return false;
     };
     if socket
@@ -424,8 +409,8 @@ fn delete_cvm_session_remote(
             SERVICE_DAEMON,
             *stream_id,
             "POST",
-            "/api/session/delete",
-            &del_headers,
+            &method,
+            &headers,
             &bytes,
         )
         .is_err()
@@ -433,7 +418,7 @@ fn delete_cvm_session_remote(
         return false;
     }
 
-    let mut del_success = false;
+    let mut success = false;
     while let Ok(frame) = socket.read_encrypted_service_frame(session) {
         if frame.stream_id != *stream_id {
             continue;
@@ -443,7 +428,7 @@ fn delete_cvm_session_remote(
                 status, end_body, ..
             } => {
                 if (200..300).contains(&status) {
-                    del_success = true;
+                    success = true;
                 }
                 if end_body {
                     break;
@@ -459,7 +444,16 @@ fn delete_cvm_session_remote(
             }
         }
     }
-    del_success
+    success
+}
+
+fn delete_cvm_session_remote(
+    socket: &mut crate::providers::museai::transport::MuseWebSocket,
+    session: &mut crate::providers::museai::noise::MuseNoiseSession,
+    sid: &str,
+    stream_id: &mut u64,
+) -> bool {
+    mutate_cvm_session_remote(socket, session, "delete", sid, stream_id)
 }
 
 fn archive_cvm_session_remote(
@@ -468,79 +462,7 @@ fn archive_cvm_session_remote(
     sid: &str,
     stream_id: &mut u64,
 ) -> bool {
-    *stream_id = stream_id.wrapping_add(2);
-    let arc_headers = vec![
-        Header {
-            key: "Host".to_string(),
-            value: "hatch.metaaivm.com".to_string(),
-        },
-        Header {
-            key: "Content-Type".to_string(),
-            value: "application/json".to_string(),
-        },
-        Header {
-            key: "Accept".to_string(),
-            value: "application/json".to_string(),
-        },
-        Header {
-            key: "x-request-id".to_string(),
-            value: uuid::Uuid::new_v4().to_string(),
-        },
-        Header {
-            key: "x-app-id".to_string(),
-            value: "hatch-web".to_string(),
-        },
-    ];
-    let arc_payload = serde_json::json!({
-        "method": "/api/session/archive",
-        "session_id": sid,
-        "id": sid,
-    });
-    let Ok(arc_bytes) = serde_json::to_vec(&arc_payload) else {
-        return false;
-    };
-    if socket
-        .send_encrypted_service_request(
-            session,
-            SERVICE_DAEMON,
-            *stream_id,
-            "POST",
-            "/api/session/archive",
-            &arc_headers,
-            &arc_bytes,
-        )
-        .is_err()
-    {
-        return false;
-    }
-
-    let mut arc_success = false;
-    while let Ok(frame) = socket.read_encrypted_service_frame(session) {
-        if frame.stream_id != *stream_id {
-            continue;
-        }
-        match frame.kind {
-            ServiceFrameKind::Response {
-                status, end_body, ..
-            } => {
-                if (200..300).contains(&status) {
-                    arc_success = true;
-                }
-                if end_body {
-                    break;
-                }
-            }
-            ServiceFrameKind::BodyChunk { end_body, .. } => {
-                if end_body {
-                    break;
-                }
-            }
-            ServiceFrameKind::Reset { .. } => {
-                break;
-            }
-        }
-    }
-    arc_success
+    mutate_cvm_session_remote(socket, session, "archive", sid, stream_id)
 }
 
 pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io::Result<usize> {
