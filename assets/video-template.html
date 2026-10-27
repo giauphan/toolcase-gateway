@@ -265,42 +265,62 @@ pre{margin:0}
     return false;
   }
 
+  function extractVideoErrorMessage(d){
+    if(d && d.error){
+      if(typeof d.error.message === "string") return d.error.message;
+      if(typeof d.error === "string") return d.error;
+    }
+    if(d && typeof d.error_message === "string") return d.error_message;
+    return "";
+  }
+
+  function resolvePollFailureMessage(d){
+    var msg = extractVideoErrorMessage(d);
+    if(msg) return msg;
+    if(d && d.status === "approval_required"){
+      return "Video generation requires approval.";
+    }
+    return "Video generation did not finish.";
+  }
+
+  function handlePollError(res, go, check){
+    if(res.status === 404){
+      polling = setTimeout(check, 1000);
+      return;
+    }
+    go.disabled = false;
+    setStatus("", "");
+    var msg = extractVideoErrorMessage(res.data) || "Unable to check video status.";
+    setError(msg);
+  }
+
+  function handlePollSuccess(d, go, check){
+    if(showResult(d)){
+      go.disabled = false;
+      stopPolling();
+      return;
+    }
+    if(d.status==="failed" || d.status==="approval_required" || d.status==="submission_unknown"){
+      go.disabled = false;
+      setStatus("", "");
+      setError(resolvePollFailureMessage(d));
+      return;
+    }
+    setStatus("Generating…", "busy");
+    polling = setTimeout(check, 5000);
+  }
+
   function pollVideo(id, go){
     stopPolling();
     function check(){
       fetch("/muse-ai/v1/videos/"+encodeURIComponent(id)).then(function(r){
         return r.json().then(function(d){return {ok:r.ok,status:r.status,data:d};});
       }).then(function(res){
-        var d=res.data;
         if(!res.ok){
-          if(res.status===404){
-            polling=setTimeout(check,1000);
-            return;
-          }
-          go.disabled=false;
-          setStatus("","");
-          setError(d && d.error && d.error.message ? d.error.message : "Unable to check video status.");
+          handlePollError(res, go, check);
           return;
         }
-        if(showResult(d)){
-          go.disabled=false;
-          stopPolling();
-          return;
-        }
-        if(d.status==="failed" || d.status==="approval_required" || d.status==="submission_unknown"){
-          go.disabled=false;
-          setStatus("","");
-          var msg=d && d.error && d.error.message ? d.error.message : (d && d.error && typeof d.error === "string" ? d.error : (d && d.error_message ? d.error_message : ""));
-          if(!msg && d.status==="approval_required"){
-            msg="Video generation requires approval.";
-          } else if(!msg){
-            msg="Video generation did not finish.";
-          }
-          setError(msg);
-          return;
-        }
-        setStatus("Generating…", "busy");
-        polling=setTimeout(check,5000);
+        handlePollSuccess(res.data, go, check);
       }).catch(function(e){
         go.disabled=false;
         setStatus("","");

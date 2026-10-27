@@ -16,13 +16,13 @@ h1{font-size:24px;margin:0 0 4px}
 .sub{color:var(--muted);margin:0 0 20px;font-size:14px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
 .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:700}
-label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+label, .label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
 .req{color:var(--err);font-weight:700}
 textarea{width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical;min-height:90px}
 textarea:focus{outline:none;border-color:var(--accent)}
 .row{margin-bottom:16px}.row:last-child{margin-bottom:0}
 .pill{display:flex;gap:10px;flex-wrap:wrap}
-.chip{cursor:pointer;padding:8px 16px;border:1px solid var(--border);border-radius:999px;background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;user-select:none;transition:all .15s ease}
+.chip{cursor:pointer;padding:8px 16px;border:1px solid var(--border);border-radius:999px;background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;user-select:none;transition:background .15s ease, border-color .15s ease, color .15s ease}
 .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .chip:hover:not(.on){border-color:var(--accent);color:var(--accent)}
 .btns{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:16px}
@@ -54,7 +54,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     </div>
 
     <div class="row">
-      <label>Aspect Ratio</label>
+      <div class="label" id="aspect-label">Aspect Ratio</div>
       <div class="pill" id="aspect-pills">
         <span class="chip on" data-v="1:1">1:1 (Square)</span>
         <span class="chip" data-v="16:9">16:9 (Landscape)</span>
@@ -91,7 +91,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     pill.addEventListener("click", function(){
       pills.forEach(function(p){ p.classList.remove("on"); });
       pill.classList.add("on");
-      selectedAspect = pill.getAttribute("data-v");
+      selectedAspect = pill.dataset.v || pill.getAttribute("data-v");
     });
   });
 

@@ -131,36 +131,33 @@ impl ApprovalRecord {
     }
 }
 
-pub fn parse_approval_record_json(val: &serde_json::Value) -> io::Result<ApprovalRecord> {
-    let mut obj = val;
-    if let Some(res) = obj.get("result") {
-        obj = res;
-    }
-    if let Some(app) = obj.get("approval") {
-        obj = app;
-    }
-
-    let approval_id = obj
-        .get("approval_id")
+fn extract_approval_id(obj: &serde_json::Value) -> io::Result<String> {
+    obj.get("approval_id")
         .or_else(|| obj.get("id"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing approval_id"))?
-        .to_string();
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing approval_id"))
+        .map(str::to_string)
+}
 
+fn parse_approval_status(obj: &serde_json::Value) -> ApprovalStatus {
     let status_str = obj
         .get("status")
         .and_then(|v| v.as_str())
         .unwrap_or("pending");
-    let status = match status_str.to_ascii_lowercase().as_str() {
+    match status_str.to_ascii_lowercase().as_str() {
         "pending" => ApprovalStatus::Pending,
         "approved" => ApprovalStatus::Approved,
         "denied" | "rejected" => ApprovalStatus::Denied,
         "expired" => ApprovalStatus::Expired,
         other => ApprovalStatus::Other(other.to_string()),
-    };
+    }
+}
 
-    let payload_val = obj.get("payload");
+fn parse_payload_details(
+    obj: &serde_json::Value,
+    payload_val: Option<&serde_json::Value>,
+) -> (String, ApprovalPayloadDetails) {
     let payload_type = payload_val
         .and_then(|p| p.get("type"))
         .and_then(|v| v.as_str())
@@ -210,7 +207,10 @@ pub fn parse_approval_record_json(val: &serde_json::Value) -> io::Result<Approva
             payload_details.destination = Some(dest.to_string());
         }
     }
+    (payload_type, payload_details)
+}
 
+fn parse_approval_scope(obj: &serde_json::Value) -> ApprovalScope {
     let mut scope = ApprovalScope::default();
     if let Some(thread_id) = obj.get("thread_id").and_then(|v| v.as_str()) {
         scope.thread_id = Some(thread_id.to_string());
@@ -238,12 +238,10 @@ pub fn parse_approval_record_json(val: &serde_json::Value) -> io::Result<Approva
             scope.owner_id = Some(owner_id.to_string());
         }
     }
+    scope
+}
 
-    let resource = obj
-        .get("resource")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-
+fn parse_decision_options(obj: &serde_json::Value) -> Vec<DecisionOption> {
     let mut decision_options = Vec::new();
     if let Some(opts) = obj.get("decision_options").and_then(|v| v.as_array()) {
         for opt in opts {
@@ -294,7 +292,28 @@ pub fn parse_approval_record_json(val: &serde_json::Value) -> io::Result<Approva
             }
         }
     }
+    decision_options
+}
 
+pub fn parse_approval_record_json(val: &serde_json::Value) -> io::Result<ApprovalRecord> {
+    let mut obj = val;
+    if let Some(res) = obj.get("result") {
+        obj = res;
+    }
+    if let Some(app) = obj.get("approval") {
+        obj = app;
+    }
+
+    let approval_id = extract_approval_id(obj)?;
+    let status = parse_approval_status(obj);
+    let payload_val = obj.get("payload");
+    let (payload_type, payload_details) = parse_payload_details(obj, payload_val);
+    let scope = parse_approval_scope(obj);
+    let resource = obj
+        .get("resource")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let decision_options = parse_decision_options(obj);
     let request_expires_at_ms = obj
         .get("request_expires_at_ms")
         .or_else(|| obj.get("expires_at_ms"))

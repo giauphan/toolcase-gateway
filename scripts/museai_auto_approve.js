@@ -56,40 +56,73 @@
     return true;
   }
 
-  function runWorkflow() {
-    ticks++;
+  function isButtonInteractive(b) {
+    return Boolean(b && !b.disabled && b.getAttribute("aria-disabled") !== "true");
+  }
 
+  function findPrimaryAction() {
     const primary = document.querySelector('button[data-hatch-approval-primary-action="true"]');
-    if (primary && !primary.disabled && primary.getAttribute("aria-disabled") !== "true") {
-      if (triggerClick(primary, 'Primary "Allow" button')) return;
+    if (isButtonInteractive(primary)) {
+      return { el: primary, label: 'Primary "Allow" button' };
     }
+    return null;
+  }
 
+  function findTextAllowAction() {
     const textAllow = Array.from(document.querySelectorAll("button")).find((b) => {
-      if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+      if (!isButtonInteractive(b)) return false;
       const t = (b.innerText || b.textContent || "").trim().toLowerCase();
       return t === "allow" || t === "approve" || t.includes("allow once");
     });
     if (textAllow) {
-      if (triggerClick(textAllow, 'Text "Allow" button')) return;
+      return { el: textAllow, label: 'Text "Allow" button' };
     }
+    return null;
+  }
 
+  function findCardAction() {
     const closedCard = document.querySelector(
       '[data-slot="collapsible"][data-state="closed"] button[data-slot="collapsible-trigger"], button[data-slot="collapsible-trigger"][aria-expanded="false"]'
     );
     if (closedCard) {
-      if (triggerClick(closedCard, "Expanded collapsed review card")) return;
+      return { el: closedCard, label: "Expanded collapsed review card" };
     }
+    return null;
+  }
 
+  function findApprovalsAction() {
     const approvalsTab = document.querySelector('button[aria-label="Approvals"]');
     if (approvalsTab && approvalsTab.getAttribute("aria-pressed") !== "true") {
-      if (triggerClick(approvalsTab, "Switched to Approvals tab")) return;
+      return { el: approvalsTab, label: "Switched to Approvals tab" };
     }
+    return null;
+  }
 
+  function findAvatarAction() {
     const avatar = document.querySelector(
       '[data-hatch-avatar-interaction="true"], div[role="button"][aria-label="Muse"], button[aria-label="Muse"]'
     );
     if (avatar && !document.body.textContent.includes("Approvals")) {
-      if (triggerClick(avatar, "Opened Muse avatar panel")) return;
+      return { el: avatar, label: "Opened Muse avatar panel" };
+    }
+    return null;
+  }
+
+  const ACTION_FINDERS = [
+    findPrimaryAction,
+    findTextAllowAction,
+    findCardAction,
+    findApprovalsAction,
+    findAvatarAction,
+  ];
+
+  function runWorkflow() {
+    ticks++;
+    for (const find of ACTION_FINDERS) {
+      const action = find();
+      if (action && triggerClick(action.el, action.label)) {
+        return;
+      }
     }
   }
 

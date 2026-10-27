@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::net::TcpStream;
 
-use crate::config::{is_valid_muse_approval_mode, parse_muse_approval_mode, ConfigStore};
+use crate::config::{is_valid_muse_approval_mode, parse_muse_approval_mode, Config, ConfigStore};
 use crate::http::write_error;
 
 use super::service::mask_key;
@@ -24,6 +24,105 @@ pub struct UpdateMuseConfigPayload {
     pub timeout_secs: Option<u64>,
 }
 
+fn validate_muse_config_payload(payload: &UpdateMuseConfigPayload) -> Result<(), &'static str> {
+    if let Some(ref base) = payload.base_url {
+        let trimmed = base.trim();
+        if !trimmed.is_empty()
+            && !trimmed.starts_with("http://")
+            && !trimmed.starts_with("https://")
+        {
+            return Err("base_url must start with http:// or https://");
+        }
+    }
+    if let Some(ref ws) = payload.ws_url {
+        let trimmed = ws.trim();
+        if !trimmed.is_empty() && !trimmed.starts_with("ws://") && !trimmed.starts_with("wss://") {
+            return Err("ws_url must start with ws:// or wss://");
+        }
+    }
+    if let Some(ref mode) = payload.approval_mode {
+        let trimmed = mode.trim();
+        if !trimmed.is_empty() && !is_valid_muse_approval_mode(trimmed) {
+            return Err("approval_mode must be one of: 'off', 'observe', 'on'");
+        }
+    }
+    Ok(())
+}
+
+fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
+    if let Some(base) = payload.base_url {
+        let trimmed = base.trim();
+        if !trimmed.is_empty() {
+            conf.museai_base_url = trimmed.to_string();
+        }
+    }
+    if let Some(ws) = payload.ws_url {
+        let trimmed = ws.trim();
+        if !trimmed.is_empty() {
+            conf.museai_ws_url = trimmed.to_string();
+        }
+    }
+    if let Some(vm) = payload.vm_id {
+        conf.museai_vm_id = vm.trim().to_string();
+    }
+    if let Some(token) = payload.access_token {
+        let trimmed = token.trim();
+        if !trimmed.is_empty() {
+            conf.museai_access_token = trimmed.to_string();
+        }
+    }
+    if let Some(token) = payload.notary_token {
+        let trimmed = token.trim();
+        if !trimmed.is_empty() {
+            conf.museai_notary_token = trimmed.to_string();
+        }
+    }
+    if let Some(cookie) = payload.cookie {
+        let trimmed = cookie.trim();
+        if !trimmed.is_empty() {
+            conf.museai_cookie = trimmed.to_string();
+        }
+    }
+    if let Some(prompt) = payload.default_video_prompt {
+        let trimmed = prompt.trim();
+        if !trimmed.is_empty() {
+            conf.default_video_prompt = trimmed.to_string();
+        }
+    }
+    if let Some(mode) = payload.approval_mode {
+        let trimmed = mode.trim();
+        if !trimmed.is_empty() {
+            conf.muse_approval.mode = parse_muse_approval_mode(trimmed);
+        }
+    }
+    if let Some(dests) = payload.allowed_destinations {
+        conf.muse_approval.allowed_destinations = dests
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    if let Some(types) = payload.allowed_types {
+        conf.muse_approval.allowed_types = types
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    if let Some(pref) = payload.prefer_allow_once {
+        conf.muse_approval.prefer_allow_once = pref;
+    }
+    if let Some(always) = payload.allow_always {
+        conf.muse_approval.allow_always = always;
+    }
+    if let Some(max) = payload.max_decisions {
+        conf.muse_approval.max_decisions_per_job = max;
+    }
+    if let Some(timeout) = payload.timeout_secs {
+        conf.muse_approval.approval_timeout_secs = timeout;
+    }
+}
+
 pub fn handle_update_muse_config(
     client: &mut TcpStream,
     body: &[u8],
@@ -36,118 +135,13 @@ pub fn handle_update_muse_config(
         }
     };
 
-    if let Some(ref base) = payload.base_url {
-        let trimmed = base.trim();
-        if !trimmed.is_empty()
-            && !trimmed.starts_with("http://")
-            && !trimmed.starts_with("https://")
-        {
-            return write_error(
-                client,
-                400,
-                "Bad Request",
-                "base_url must start with http:// or https://",
-            );
-        }
-    }
-
-    if let Some(ref ws) = payload.ws_url {
-        let trimmed = ws.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with("ws://") && !trimmed.starts_with("wss://") {
-            return write_error(
-                client,
-                400,
-                "Bad Request",
-                "ws_url must start with ws:// or wss://",
-            );
-        }
-    }
-
-    if let Some(ref mode) = payload.approval_mode {
-        let trimmed = mode.trim();
-        if !trimmed.is_empty() && !is_valid_muse_approval_mode(trimmed) {
-            return write_error(
-                client,
-                400,
-                "Bad Request",
-                "approval_mode must be one of: 'off', 'observe', 'on'",
-            );
-        }
+    if let Err(msg) = validate_muse_config_payload(&payload) {
+        return write_error(client, 400, "Bad Request", msg);
     }
 
     {
         let mut conf = store.write_guard();
-        if let Some(base) = payload.base_url {
-            let trimmed = base.trim();
-            if !trimmed.is_empty() {
-                conf.museai_base_url = trimmed.to_string();
-            }
-        }
-        if let Some(ws) = payload.ws_url {
-            let trimmed = ws.trim();
-            if !trimmed.is_empty() {
-                conf.museai_ws_url = trimmed.to_string();
-            }
-        }
-        if let Some(vm) = payload.vm_id {
-            conf.museai_vm_id = vm.trim().to_string();
-        }
-        if let Some(token) = payload.access_token {
-            let trimmed = token.trim();
-            if !trimmed.is_empty() {
-                conf.museai_access_token = trimmed.to_string();
-            }
-        }
-        if let Some(token) = payload.notary_token {
-            let trimmed = token.trim();
-            if !trimmed.is_empty() {
-                conf.museai_notary_token = trimmed.to_string();
-            }
-        }
-        if let Some(cookie) = payload.cookie {
-            let trimmed = cookie.trim();
-            if !trimmed.is_empty() {
-                conf.museai_cookie = trimmed.to_string();
-            }
-        }
-        if let Some(prompt) = payload.default_video_prompt {
-            let trimmed = prompt.trim();
-            if !trimmed.is_empty() {
-                conf.default_video_prompt = trimmed.to_string();
-            }
-        }
-        if let Some(mode) = payload.approval_mode {
-            let trimmed = mode.trim();
-            if !trimmed.is_empty() {
-                conf.muse_approval.mode = parse_muse_approval_mode(trimmed);
-            }
-        }
-        if let Some(dests) = payload.allowed_destinations {
-            conf.muse_approval.allowed_destinations = dests
-                .into_iter()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        if let Some(types) = payload.allowed_types {
-            conf.muse_approval.allowed_types = types
-                .into_iter()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-        }
-        if let Some(pref) = payload.prefer_allow_once {
-            conf.muse_approval.prefer_allow_once = pref;
-        }
-        if let Some(always) = payload.allow_always {
-            conf.muse_approval.allow_always = always;
-        }
-        if let Some(max) = payload.max_decisions {
-            conf.muse_approval.max_decisions_per_job = max;
-        }
-        if let Some(timeout) = payload.timeout_secs {
-            conf.muse_approval.approval_timeout_secs = timeout;
-        }
+        apply_muse_payload(&mut conf, payload);
     }
 
     let _ = store.save_to_persistent_file();

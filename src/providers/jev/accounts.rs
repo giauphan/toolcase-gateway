@@ -52,7 +52,7 @@ pub fn effective_fallback_models(config: &Config) -> Vec<String> {
     } else {
         DEFAULT_FALLBACK_DECISION_MODELS
             .iter()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .collect()
     }
 }
@@ -225,15 +225,10 @@ impl JevAccountPool {
             .collect()
     }
 
-    pub fn candidate_failover_targets(&self, config: &Config) -> Vec<FailoverCandidate> {
-        let now = Instant::now();
-        if let Ok(mut ex) = self.exhausted_accounts.write() {
-            ex.retain(|_, expiry| *expiry > now);
-        }
-
+    fn direct_candidates(&self) -> (Vec<FailoverCandidate>, Vec<FailoverCandidate>) {
         let direct_guard = match self.accounts.read() {
             Ok(g) => g,
-            Err(_) => return Vec::new(),
+            Err(_) => return (Vec::new(), Vec::new()),
         };
 
         let mut healthy_direct = Vec::new();
@@ -251,7 +246,7 @@ impl JevAccountPool {
             healthy_direct = direct_guard.clone();
         }
 
-        let rotated_healthy_direct: Vec<FailoverCandidate> = if healthy_direct.is_empty() {
+        let rotated_healthy: Vec<FailoverCandidate> = if healthy_direct.is_empty() {
             Vec::new()
         } else {
             let rotation = self.counter.fetch_add(1, Ordering::Relaxed);
@@ -265,107 +260,117 @@ impl JevAccountPool {
                 .collect()
         };
 
-        let mut or_key_candidates = Vec::new();
-        let mut or_alt_candidates = Vec::new();
-        let mut or_browser_candidates = Vec::new();
+        let rotated_exhausted: Vec<FailoverCandidate> = exhausted_direct
+            .into_iter()
+            .map(|acc| FailoverCandidate::direct(acc.api_key, acc.label))
+            .collect();
+
+        (rotated_healthy, rotated_exhausted)
+    }
+
+    fn openrouter_candidates(
+        &self,
+        config: &Config,
+    ) -> (
+        Vec<FailoverCandidate>,
+        Vec<FailoverCandidate>,
+        Vec<FailoverCandidate>,
+        Vec<FailoverCandidate>,
+    ) {
+        if !config.jev_openrouter_enabled {
+            return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        }
+
+        let or_guard = self
+            .openrouter_accounts
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let cfg_api_key = config.jev_openrouter_api_key.trim();
+        let cfg_cookie = config.jev_openrouter_cookie.trim();
+
+        let mut all_or = Vec::with_capacity(or_guard.len() + 2);
+        if !cfg_api_key.is_empty() && !or_guard.iter().any(|a| a.credential() == cfg_api_key) {
+            all_or.push(OpenRouterAccount {
+                cookie: String::new(),
+                api_key: cfg_api_key.to_string(),
+                label: "openrouter-api-key".to_string(),
+            });
+        }
+        all_or.extend(or_guard.iter().cloned());
+        if !cfg_cookie.is_empty() && !all_or.iter().any(|a| a.credential() == cfg_cookie) {
+            all_or.push(OpenRouterAccount {
+                cookie: cfg_cookie.to_string(),
+                api_key: String::new(),
+                label: "openrouter-cookie".to_string(),
+            });
+        }
+
+        let mut healthy_keys = Vec::new();
+        let mut healthy_cookies = Vec::new();
         let mut exhausted_or = Vec::new();
 
-        if config.jev_openrouter_enabled {
-            let or_guard = self
-                .openrouter_accounts
-                .read()
-                .unwrap_or_else(|e| e.into_inner());
-            let mut all_or = or_guard.clone();
+        for acc in all_or {
+            let cred = acc.credential();
+            let is_exhausted = if let Ok(ref ex) = self.exhausted_accounts.read() {
+                ex.contains_key(cred)
+            } else {
+                false
+            };
 
-            let cfg_api_key = config.jev_openrouter_api_key.trim();
-            if !cfg_api_key.is_empty() && !all_or.iter().any(|a| a.credential() == cfg_api_key) {
-                all_or.insert(
-                    0,
-                    OpenRouterAccount {
-                        cookie: String::new(),
-                        api_key: cfg_api_key.to_string(),
-                        label: "openrouter-api-key".to_string(),
-                    },
-                );
+            if is_exhausted {
+                exhausted_or.push(acc);
+            } else if !acc.api_key.is_empty() {
+                healthy_keys.push(acc);
+            } else if !acc.cookie.is_empty() {
+                healthy_cookies.push(acc);
+            }
+        }
+
+        let mut or_key_candidates = Vec::new();
+        let mut or_alt_candidates = Vec::new();
+        if !healthy_keys.is_empty() {
+            let rotation = self.openrouter_counter.fetch_add(1, Ordering::Relaxed);
+            let len = healthy_keys.len();
+            let offset = rotation % len;
+            for step in 0..len {
+                let acc = &healthy_keys[(offset + step) % len];
+                or_key_candidates.push(FailoverCandidate::openrouter_api_key(
+                    acc.api_key.clone(),
+                    acc.label.clone(),
+                    None,
+                ));
             }
 
-            let cfg_cookie = config.jev_openrouter_cookie.trim();
-            if !cfg_cookie.is_empty() && !all_or.iter().any(|a| a.credential() == cfg_cookie) {
-                all_or.push(OpenRouterAccount {
-                    cookie: cfg_cookie.to_string(),
-                    api_key: String::new(),
-                    label: "openrouter-cookie".to_string(),
-                });
-            }
-
-            let mut healthy_keys = Vec::new();
-            let mut healthy_cookies = Vec::new();
-
-            for acc in all_or {
-                let cred = acc.credential();
-                let is_exhausted = if let Ok(ref ex) = self.exhausted_accounts.read() {
-                    ex.contains_key(cred)
-                } else {
-                    false
-                };
-
-                if is_exhausted {
-                    exhausted_or.push(acc);
-                } else if !acc.api_key.is_empty() {
-                    healthy_keys.push(acc);
-                } else if !acc.cookie.is_empty() {
-                    healthy_cookies.push(acc);
-                }
-            }
-
-            if !healthy_keys.is_empty() {
-                let rotation = self.openrouter_counter.fetch_add(1, Ordering::Relaxed);
-                let len = healthy_keys.len();
-                let offset = rotation % len;
+            let alt_models = self.rotated_fallback_models(config);
+            for model in alt_models {
                 for step in 0..len {
                     let acc = &healthy_keys[(offset + step) % len];
-                    or_key_candidates.push(FailoverCandidate::openrouter_api_key(
+                    or_alt_candidates.push(FailoverCandidate::openrouter_api_key(
                         acc.api_key.clone(),
-                        acc.label.clone(),
-                        None,
-                    ));
-                }
-
-                let alt_models = self.rotated_fallback_models(config);
-
-                for model in alt_models {
-                    for step in 0..len {
-                        let acc = &healthy_keys[(offset + step) % len];
-                        or_alt_candidates.push(FailoverCandidate::openrouter_api_key(
-                            acc.api_key.clone(),
-                            format!("{}-different", acc.label),
-                            Some(model.clone()),
-                        ));
-                    }
-                }
-            }
-
-            if !healthy_cookies.is_empty() {
-                let rotation = self
-                    .openrouter_browser_counter
-                    .fetch_add(1, Ordering::Relaxed);
-                let len = healthy_cookies.len();
-                let offset = rotation % len;
-                for step in 0..len {
-                    let acc = &healthy_cookies[(offset + step) % len];
-                    or_browser_candidates.push(FailoverCandidate::openrouter_browser(
-                        acc.cookie.clone(),
-                        acc.label.clone(),
-                        None,
+                        format!("{}-different", acc.label),
+                        Some(model.clone()),
                     ));
                 }
             }
         }
 
-        let rotated_exhausted_direct: Vec<FailoverCandidate> = exhausted_direct
-            .into_iter()
-            .map(|acc| FailoverCandidate::direct(acc.api_key, acc.label))
-            .collect();
+        let mut or_browser_candidates = Vec::new();
+        if !healthy_cookies.is_empty() {
+            let rotation = self
+                .openrouter_browser_counter
+                .fetch_add(1, Ordering::Relaxed);
+            let len = healthy_cookies.len();
+            let offset = rotation % len;
+            for step in 0..len {
+                let acc = &healthy_cookies[(offset + step) % len];
+                or_browser_candidates.push(FailoverCandidate::openrouter_browser(
+                    acc.cookie.clone(),
+                    acc.label.clone(),
+                    None,
+                ));
+            }
+        }
 
         let rotated_exhausted_or: Vec<FailoverCandidate> = exhausted_or
             .into_iter()
@@ -378,13 +383,30 @@ impl JevAccountPool {
             })
             .collect();
 
+        (
+            or_key_candidates,
+            or_alt_candidates,
+            or_browser_candidates,
+            rotated_exhausted_or,
+        )
+    }
+
+    pub fn candidate_failover_targets(&self, config: &Config) -> Vec<FailoverCandidate> {
+        let now = Instant::now();
+        if let Ok(mut ex) = self.exhausted_accounts.write() {
+            ex.retain(|_, expiry| *expiry > now);
+        }
+
+        let (healthy_direct, exhausted_direct) = self.direct_candidates();
+        let (or_keys, or_alts, or_browsers, exhausted_or) = self.openrouter_candidates(config);
+
         let mut targets = Vec::new();
-        targets.extend(rotated_healthy_direct);
-        targets.extend(or_key_candidates);
-        targets.extend(or_alt_candidates);
-        targets.extend(or_browser_candidates);
-        targets.extend(rotated_exhausted_direct);
-        targets.extend(rotated_exhausted_or);
+        targets.extend(healthy_direct);
+        targets.extend(or_keys);
+        targets.extend(or_alts);
+        targets.extend(or_browsers);
+        targets.extend(exhausted_direct);
+        targets.extend(exhausted_or);
         targets
     }
 

@@ -414,125 +414,152 @@ button:disabled{opacity:.5;cursor:not-allowed}
   const okMsg = document.getElementById('ok-msg');
   const errMsg = document.getElementById('err-msg');
 
+  function setFieldIfNotFocused(el, val) {
+    if (el && !el.matches(':focus')) {
+      el.value = val;
+    }
+  }
+
+  function renderConfigSection(c) {
+    if (cfgHost) cfgHost.value = c.target_host || '127.0.0.1';
+    if (cfgPort) cfgPort.value = c.target_port || 20128;
+    if (cfgDefaultModel) cfgDefaultModel.value = c.default_model || '';
+    if (cfgTimeout) cfgTimeout.value = c.io_timeout_secs != null ? c.io_timeout_secs : 120;
+    if (cfgFallbacks) cfgFallbacks.value = c.fallbacks ? c.fallbacks.join(', ') : '';
+    if (storageBadge && c.config_storage) storageBadge.textContent = c.config_storage;
+  }
+
+  function renderOmnirouteSection(omni) {
+    omniTarget.textContent = (omni.target_host || '127.0.0.1') + ':' + (omni.target_port || 20128);
+    omniDesc.textContent = 'Fallbacks: ' + (omni.fallbacks && omni.fallbacks.length ? omni.fallbacks.join(', ') : 'none');
+  }
+
+  function formatCurrentHint(val) {
+    return val ? ('Current: ' + val) : 'Current: not set';
+  }
+
+  function updateOpenrouterStatus(orJev, en) {
+    const cnt = orJev.total_accounts || 0;
+    const sessionLabel = cnt === 1 ? 'Session' : 'Sessions';
+    const stateLabel = en ? 'Enabled' : 'Disabled';
+    openrouterStatus.textContent = stateLabel + ' (' + cnt + ' ' + sessionLabel + ')';
+    const base = orJev.base_url || 'https://openrouter.ai';
+    const model = orJev.model || 'typesafe/jev-1.13';
+    openrouterDesc.textContent = base + ' • Model: ' + model;
+
+    if (jevModeBadge) {
+      jevModeBadge.textContent = en ? 'Active (Failover On)' : 'Direct Only';
+      jevModeBadge.className = 'tag ' + (en ? 'ok' : 'idle');
+    }
+  }
+
+  function updateOpenrouterFields(orJev, en) {
+    setFieldIfNotFocused(cfgJevOrBase, orJev.base_url || 'https://openrouter.ai');
+    setFieldIfNotFocused(cfgJevOrModel, orJev.model || 'typesafe/jev-1.13');
+    if (cfgJevOrFallbackModels && !cfgJevOrFallbackModels.matches(':focus')) {
+      const fms = orJev.fallback_models;
+      cfgJevOrFallbackModels.value = Array.isArray(fms) ? fms.join(', ') : (fms || '');
+    }
+    if (cfgJevOrEnabled) {
+      cfgJevOrEnabled.value = en ? 'true' : 'false';
+    }
+    setFieldIfNotFocused(cfgJevCooldown, orJev.credit_cooldown_secs || 300);
+    if (hintJevApiKey) hintJevApiKey.textContent = formatCurrentHint(orJev.masked_api_key);
+    if (hintJevCookie) hintJevCookie.textContent = formatCurrentHint(orJev.masked_cookie);
+  }
+
+  function renderOpenrouterSection(orJev) {
+    if (!openrouterStatus) return;
+    const en = orJev.enabled !== false;
+    updateOpenrouterStatus(orJev, en);
+    updateOpenrouterFields(orJev, en);
+  }
+
+  function renderJevSection(jev, orJev) {
+    const cnt = jev.total_accounts || 0;
+    const exCnt = jev.exhausted_accounts || 0;
+    const exHint = exCnt > 0 ? (' (' + exCnt + ' credit-exhausted)') : '';
+    jevStatus.textContent = cnt + (cnt === 1 ? ' Account' : ' Accounts') + exHint;
+    jevDesc.textContent = jev.base_url || 'https://jev-ai.org';
+    setFieldIfNotFocused(cfgJevBase, jev.base_url || 'https://jev-ai.org');
+
+    const rows = [];
+    if (jev.accounts) {
+      jev.accounts.forEach(function(acc) {
+        rows.push('<tr>' +
+          '<td><span class="tag ok">Direct Jev</span></td>' +
+          '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
+          '<td class="mono">' + escapeHtml(acc.masked_key) + '</td>' +
+          '<td><span class="tag ok">Active in Pool</span></td>' +
+          '</tr>');
+      });
+    }
+    if (orJev && orJev.accounts) {
+      orJev.accounts.forEach(function(acc) {
+        const isKey = acc.masked_api_key || (acc.label && acc.label.includes('key'));
+        rows.push('<tr>' +
+          '<td><span class="tag" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);">OpenRouter / JEV</span></td>' +
+          '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
+          '<td class="mono">' + escapeHtml(acc.masked_key || acc.masked_api_key || acc.masked_cookie) + '</td>' +
+          '<td><span class="tag ok">' + (isKey ? 'API Key' : 'Browser Session') + '</span></td>' +
+          '</tr>');
+      });
+    }
+
+    const totalCnt = cnt + ((orJev && orJev.total_accounts) || 0);
+    countBadge.textContent = totalCnt + (totalCnt === 1 ? ' account' : ' accounts');
+
+    if (rows.length > 0) {
+      tableBody.innerHTML = rows.join('');
+    } else {
+      tableBody.innerHTML = '<tr><td colspan="4" class="empty-hint">No accounts configured yet. Add accounts below.</td></tr>';
+    }
+  }
+
+  function renderMuseaiApproval(app) {
+    if (!app) return;
+    if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = app.mode || 'off';
+    if (cfgMuseApprovalDestinations && !cfgMuseApprovalDestinations.matches(':focus')) {
+      cfgMuseApprovalDestinations.value = app.allowed_destinations ? app.allowed_destinations.join(', ') : '';
+    }
+    if (cfgMuseApprovalTypes && !cfgMuseApprovalTypes.matches(':focus')) {
+      cfgMuseApprovalTypes.value = app.allowed_types ? app.allowed_types.join(', ') : '';
+    }
+    setFieldIfNotFocused(cfgMuseApprovalTimeout, app.timeout_secs != null ? app.timeout_secs : 30);
+  }
+
+  function renderMuseaiSection(muse) {
+    museStatus.textContent = muse.configured ? 'Configured' : 'Defaults';
+    museDesc.textContent = muse.base_url || 'https://muse.ai';
+    if (museBadge) {
+      museBadge.textContent = muse.configured ? 'Configured' : 'Defaults';
+      museBadge.className = 'tag ' + (muse.configured ? 'ok' : 'idle');
+    }
+    setFieldIfNotFocused(cfgMuseBase, muse.base_url || 'https://muse.ai');
+    setFieldIfNotFocused(cfgMuseWs, muse.ws_url || '');
+    setFieldIfNotFocused(cfgMuseVmid, muse.vm_id || '');
+    if (hintToken) hintToken.textContent = muse.has_access_token ? ('Current: ' + (muse.masked_access_token || 'configured')) : 'Current: not set';
+    if (hintNotary) hintNotary.textContent = muse.has_notary_token ? ('Current: ' + (muse.masked_notary_token || 'configured')) : 'Current: not set';
+    if (hintCookie) hintCookie.textContent = muse.has_cookie ? ('Current: ' + (muse.masked_cookie || 'configured')) : 'Current: not set';
+    setFieldIfNotFocused(cfgMuseVideoPrompt, muse.default_video_prompt || '');
+    renderMuseaiApproval(muse.approval);
+  }
+
   function renderOverview(data) {
     if (!data) return;
-
-    if (data.config) {
-      const c = data.config;
-      if (cfgHost) cfgHost.value = c.target_host || '127.0.0.1';
-      if (cfgPort) cfgPort.value = c.target_port || 20128;
-      if (cfgDefaultModel) cfgDefaultModel.value = c.default_model || '';
-      if (cfgTimeout) cfgTimeout.value = c.io_timeout_secs != null ? c.io_timeout_secs : 120;
-      if (cfgFallbacks) cfgFallbacks.value = c.fallbacks ? c.fallbacks.join(', ') : '';
-      if (storageBadge && c.config_storage) storageBadge.textContent = c.config_storage;
-    }
+    if (data.config) renderConfigSection(data.config);
 
     const p = data.providers;
-    if (p) {
-      if (p.omniroute) {
-        omniTarget.textContent = (p.omniroute.target_host || '127.0.0.1') + ':' + (p.omniroute.target_port || 20128);
-        omniDesc.textContent = 'Fallbacks: ' + (p.omniroute.fallbacks && p.omniroute.fallbacks.length ? p.omniroute.fallbacks.join(', ') : 'none');
-      }
-
-      if (p.openrouter_jev && openrouterStatus) {
-        const cnt = p.openrouter_jev.total_accounts || 0;
-        const en = p.openrouter_jev.enabled !== false;
-        openrouterStatus.textContent = (en ? 'Enabled' : 'Disabled') + ' (' + cnt + ' ' + (cnt === 1 ? 'Session' : 'Sessions') + ')';
-        openrouterDesc.textContent = (p.openrouter_jev.base_url || 'https://openrouter.ai') + ' • Model: ' + (p.openrouter_jev.model || 'typesafe/jev-1.13');
-
-        if (cfgJevOrBase && !cfgJevOrBase.matches(':focus')) cfgJevOrBase.value = p.openrouter_jev.base_url || 'https://openrouter.ai';
-        if (cfgJevOrModel && !cfgJevOrModel.matches(':focus')) cfgJevOrModel.value = p.openrouter_jev.model || 'typesafe/jev-1.13';
-        if (cfgJevOrFallbackModels && !cfgJevOrFallbackModels.matches(':focus')) {
-          const fms = p.openrouter_jev.fallback_models;
-          cfgJevOrFallbackModels.value = Array.isArray(fms) ? fms.join(', ') : (fms || '');
-        }
-        if (cfgJevOrEnabled) cfgJevOrEnabled.value = en ? 'true' : 'false';
-        if (cfgJevCooldown && !cfgJevCooldown.matches(':focus')) cfgJevCooldown.value = p.openrouter_jev.credit_cooldown_secs || 300;
-        if (hintJevApiKey) hintJevApiKey.textContent = p.openrouter_jev.masked_api_key ? ('Current: ' + p.openrouter_jev.masked_api_key) : 'Current: not set';
-        if (hintJevCookie) hintJevCookie.textContent = p.openrouter_jev.masked_cookie ? ('Current: ' + p.openrouter_jev.masked_cookie) : 'Current: not set';
-        if (jevModeBadge) {
-          jevModeBadge.textContent = en ? 'Active (Failover On)' : 'Direct Only';
-          jevModeBadge.className = 'tag ' + (en ? 'ok' : 'idle');
-        }
-      }
-
-      if (p.jev) {
-        const cnt = p.jev.total_accounts || 0;
-        const exCnt = p.jev.exhausted_accounts || 0;
-        const exHint = exCnt > 0 ? (' (' + exCnt + ' credit-exhausted)') : '';
-        jevStatus.textContent = cnt + (cnt === 1 ? ' Account' : ' Accounts') + exHint;
-        jevDesc.textContent = p.jev.base_url || 'https://jev-ai.org';
-        if (cfgJevBase && !cfgJevBase.matches(':focus')) cfgJevBase.value = p.jev.base_url || 'https://jev-ai.org';
-
-        const rows = [];
-        if (p.jev.accounts) {
-          p.jev.accounts.forEach(function(acc) {
-            rows.push('<tr>' +
-              '<td><span class="tag ok">Direct Jev</span></td>' +
-              '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
-              '<td class="mono">' + escapeHtml(acc.masked_key) + '</td>' +
-              '<td><span class="tag ok">Active in Pool</span></td>' +
-              '</tr>');
-          });
-        }
-        if (p.openrouter_jev && p.openrouter_jev.accounts) {
-          p.openrouter_jev.accounts.forEach(function(acc) {
-            const isKey = acc.masked_api_key || (acc.label && acc.label.indexOf('key') !== -1);
-            rows.push('<tr>' +
-              '<td><span class="tag" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);">OpenRouter / JEV</span></td>' +
-              '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
-              '<td class="mono">' + escapeHtml(acc.masked_key || acc.masked_api_key || acc.masked_cookie) + '</td>' +
-              '<td><span class="tag ok">' + (isKey ? 'API Key' : 'Browser Session') + '</span></td>' +
-              '</tr>');
-          });
-        }
-
-        const totalCnt = (p.jev.total_accounts || 0) + ((p.openrouter_jev && p.openrouter_jev.total_accounts) || 0);
-        countBadge.textContent = totalCnt + (totalCnt === 1 ? ' account' : ' accounts');
-
-        if (rows.length > 0) {
-          tableBody.innerHTML = rows.join('');
-        } else {
-          tableBody.innerHTML = '<tr><td colspan="4" class="empty-hint">No accounts configured yet. Add accounts below.</td></tr>';
-        }
-      }
-
-      if (p.museai) {
-        museStatus.textContent = p.museai.configured ? 'Configured' : 'Defaults';
-        museDesc.textContent = p.museai.base_url || 'https://muse.ai';
-        if (museBadge) {
-          museBadge.textContent = p.museai.configured ? 'Configured' : 'Defaults';
-          museBadge.className = 'tag ' + (p.museai.configured ? 'ok' : 'idle');
-        }
-        if (cfgMuseBase && !cfgMuseBase.matches(':focus')) cfgMuseBase.value = p.museai.base_url || 'https://muse.ai';
-        if (cfgMuseWs && !cfgMuseWs.matches(':focus')) cfgMuseWs.value = p.museai.ws_url || '';
-        if (cfgMuseVmid && !cfgMuseVmid.matches(':focus')) cfgMuseVmid.value = p.museai.vm_id || '';
-        if (hintToken) hintToken.textContent = p.museai.has_access_token ? ('Current: ' + (p.museai.masked_access_token || 'configured')) : 'Current: not set';
-        if (hintNotary) hintNotary.textContent = p.museai.has_notary_token ? ('Current: ' + (p.museai.masked_notary_token || 'configured')) : 'Current: not set';
-        if (hintCookie) hintCookie.textContent = p.museai.has_cookie ? ('Current: ' + (p.museai.masked_cookie || 'configured')) : 'Current: not set';
-        if (cfgMuseVideoPrompt && !cfgMuseVideoPrompt.matches(':focus')) {
-          cfgMuseVideoPrompt.value = p.museai.default_video_prompt || '';
-        }
-        if (p.museai.approval) {
-          const app = p.museai.approval;
-          if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = app.mode || 'off';
-          if (cfgMuseApprovalDestinations && !cfgMuseApprovalDestinations.matches(':focus')) {
-            cfgMuseApprovalDestinations.value = app.allowed_destinations ? app.allowed_destinations.join(', ') : '';
-          }
-          if (cfgMuseApprovalTypes && !cfgMuseApprovalTypes.matches(':focus')) {
-            cfgMuseApprovalTypes.value = app.allowed_types ? app.allowed_types.join(', ') : '';
-          }
-          if (cfgMuseApprovalTimeout && !cfgMuseApprovalTimeout.matches(':focus')) {
-            cfgMuseApprovalTimeout.value = app.timeout_secs != null ? app.timeout_secs : 30;
-          }
-        }
-      }
-    }
+    if (!p) return;
+    if (p.omniroute) renderOmnirouteSection(p.omniroute);
+    if (p.openrouter_jev) renderOpenrouterSection(p.openrouter_jev);
+    if (p.jev) renderJevSection(p.jev, p.openrouter_jev);
+    if (p.museai) renderMuseaiSection(p.museai);
   }
 
   function escapeHtml(str) {
     if (!str) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(str).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
   }
 
   function loadOverview() {
@@ -694,7 +721,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
         jev_openrouter_model: cfgJevOrModel ? cfgJevOrModel.value.trim() : undefined,
         jev_openrouter_fallback_models: cfgJevOrFallbackModels ? cfgJevOrFallbackModels.value.trim() : undefined,
         jev_openrouter_enabled: cfgJevOrEnabled ? (cfgJevOrEnabled.value === 'true') : true,
-        jev_credit_cooldown_secs: cfgJevCooldown && cfgJevCooldown.value ? parseInt(cfgJevCooldown.value, 10) : undefined,
+        jev_credit_cooldown_secs: cfgJevCooldown && cfgJevCooldown.value ? Number.parseInt(cfgJevCooldown.value, 10) : undefined,
       };
 
       const apiKeyVal = cfgJevOrApiKey ? cfgJevOrApiKey.value.trim() : '';

@@ -127,18 +127,18 @@ impl MuseChatStream {
         Ok(())
     }
 
-    pub fn record(&mut self, record: &serde_json::Value) -> io::Result<()> {
-        if std::env::var("MUSE_LIVE_RESUME_OWNED").ok().as_deref() == Some("1") {
-            crate::test_helpers::log_owned_record_schema(record);
-        }
-        let payload = record.get("payload").unwrap_or(record);
+    fn check_record_status(
+        &self,
+        record: &serde_json::Value,
+        payload: &serde_json::Value,
+    ) -> io::Result<bool> {
         let status = payload.get("status").and_then(|value| value.as_str());
         if let (Some(expected), Some(actual)) = (
             self.session_id.as_deref(),
             payload.get("session_id").and_then(|value| value.as_str()),
         ) {
             if actual != expected && record["type"] != "response" {
-                return Ok(());
+                return Ok(false);
             }
         }
 
@@ -150,107 +150,92 @@ impl MuseChatStream {
                 "Muse chat rejected or failed (private details suppressed)",
             ));
         }
-        if self.session_id.is_none() {
-            let result = record.get("result").unwrap_or(record);
-            let id = result
-                .get("session_id")
-                .and_then(|value| value.as_str())
-                .filter(|id| !id.is_empty());
-            if let Some(id) = id {
-                if Uuid::parse_str(id).is_err() || result["is_thread"].as_bool() != Some(true) {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Muse did not acknowledge an isolated thread",
-                    ));
-                }
-                if let Some(ref expected) = self.expected_session_id {
-                    if expected != id {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("Muse chat session mismatch: expected {expected}, got {id}"),
-                        ));
-                    }
-                }
-                self.session_id = Some(id.to_owned());
-                debug_log(&format!("Muse session acknowledged: record={record}"));
-                return Ok(());
-            }
+        Ok(true)
+    }
+
+    fn try_init_session(&mut self, record: &serde_json::Value) -> io::Result<bool> {
+        if self.session_id.is_some() {
+            return Ok(false);
         }
-        if record["type"] == "response" {
-            if payload["subscribed"].as_bool() != Some(true)
-                || payload["session_id"].as_str() != self.session_id.as_deref()
-            {
+        let result = record.get("result").unwrap_or(record);
+        let id = result
+            .get("session_id")
+            .and_then(|value| value.as_str())
+            .filter(|id| !id.is_empty());
+        if let Some(id) = id {
+            if Uuid::parse_str(id).is_err() || result["is_thread"].as_bool() != Some(true) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "Muse subscription was not acknowledged for the requested session",
+                    "Muse did not acknowledge an isolated thread",
                 ));
             }
-            return Ok(());
-        }
-
-        let event = record
-            .get("event")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-
-        if event == "message.user" {
-            let user_seq = payload
-                .get("chat_event_seq")
-                .or_else(|| payload.get("seq"))
-                .or_else(|| record.get("seq"))
-                .and_then(|v| v.as_u64());
-
-            if let Some(seq) = user_seq {
-                if seq >= self.latest_user_seq.unwrap_or(0) {
-                    self.latest_user_seq = Some(seq);
+            if let Some(ref expected) = self.expected_session_id {
+                if expected != id {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Muse chat session mismatch: expected {expected}, got {id}"),
+                    ));
                 }
             }
+            self.session_id = Some(id.to_owned());
+            debug_log(&format!("Muse session acknowledged: record={record}"));
+            return Ok(true);
+        }
+        Ok(false)
+    }
 
-            if !self.current_turn_active {
-                if let Some(ref prompt) = self.expected_prompt {
-                    if matches_user_prompt(payload, prompt) {
-                        debug_log(&format!(
-                            "Matched expected prompt for current turn: seq={user_seq:?}"
-                        ));
-                        self.current_turn_active = true;
-                        self.text.clear();
-                    }
-                } else {
+    fn check_subscription_response(&self, payload: &serde_json::Value) -> io::Result<()> {
+        if payload["subscribed"].as_bool() != Some(true)
+            || payload["session_id"].as_str() != self.session_id.as_deref()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Muse subscription was not acknowledged for the requested session",
+            ));
+        }
+        Ok(())
+    }
+
+    fn handle_user_message(&mut self, record: &serde_json::Value, payload: &serde_json::Value) {
+        let user_seq = payload
+            .get("chat_event_seq")
+            .or_else(|| payload.get("seq"))
+            .or_else(|| record.get("seq"))
+            .and_then(|v| v.as_u64());
+
+        if let Some(seq) = user_seq {
+            if seq >= self.latest_user_seq.unwrap_or(0) {
+                self.latest_user_seq = Some(seq);
+            }
+        }
+
+        if !self.current_turn_active {
+            if let Some(ref prompt) = self.expected_prompt {
+                if matches_user_prompt(payload, prompt) {
+                    debug_log(&format!(
+                        "Matched expected prompt for current turn: seq={user_seq:?}"
+                    ));
                     self.current_turn_active = true;
                     self.text.clear();
                 }
+            } else {
+                self.current_turn_active = true;
+                self.text.clear();
             }
-            return Ok(());
         }
+    }
 
-        let category = match event {
-            "delta.text_append"
-            | "delta.message_done"
-            | "task.status"
-            | "task.complete"
-            | "agent.status"
-            | "message.assistant"
-            | "message.user"
-            | "delta.presentation"
-            | "delta.message_start"
-            | "delta.tool_start"
-            | "delta.tool_done"
-            | "delta.card"
-            | "delta.attachment"
-            | "delta.media"
-            | "message.attachment"
-            | "approvals.snapshot"
-            | "delta.marker"
-            | "delta.placeholder" => event,
-            _ => "other",
-        };
-        debug_log(&format!("Chat event category={category} record={record}"));
-
+    fn is_event_applicable(
+        &self,
+        record: &serde_json::Value,
+        payload: &serde_json::Value,
+        event: &str,
+    ) -> bool {
         if !self.current_turn_active {
             debug_log(&format!(
-                "Skipping historical event before active turn: category={category}"
+                "Skipping historical event before active turn: category={event}"
             ));
-            return Ok(());
+            return false;
         }
 
         let msg_seq = payload
@@ -264,125 +249,132 @@ impl MuseChatStream {
                 debug_log(&format!(
                     "Skipping historical message event with seq {mseq} <= latest user seq {user_seq}"
                 ));
-                return Ok(());
+                return false;
             }
         }
-        if event == "approvals.snapshot" {
-            let pending_approvals = payload
-                .get("pending_approvals")
-                .and_then(|value| value.as_array());
+        true
+    }
 
-            let has_unapproved = pending_approvals.is_some_and(|approvals| {
-                approvals.iter().any(|approval| {
-                    let matches_scope = ["thread_id", "session_scope_id"].iter().any(|key| {
-                        approval["scope"][key]
-                            .as_str()
-                            .is_some_and(|id| self.session_id.as_deref() == Some(id))
-                    });
-                    if !matches_scope {
-                        return false;
-                    }
-                    match approval.get("approval_id").and_then(|id| id.as_str()) {
-                        Some(id) => !self
-                            .approved_approval_ids
-                            .iter()
-                            .any(|approved| approved == id),
-                        None => true,
-                    }
-                })
-            });
+    fn handle_approvals_snapshot(
+        &mut self,
+        record: &serde_json::Value,
+        payload: &serde_json::Value,
+    ) -> io::Result<()> {
+        let pending_approvals = payload
+            .get("pending_approvals")
+            .and_then(|value| value.as_array());
 
-            if !has_unapproved {
-                debug_log(
-                    "Approval snapshot contains no unapproved requests for this session; continuing stream",
-                );
-                return Ok(());
-            }
-
-            let has_missing_approval_id = pending_approvals.is_some_and(|approvals| {
-                approvals.iter().any(|approval| {
-                    let matches_scope = ["thread_id", "session_scope_id"].iter().any(|key| {
-                        approval["scope"][key]
-                            .as_str()
-                            .is_some_and(|id| self.session_id.as_deref() == Some(id))
-                    });
-                    matches_scope
-                        && approval
-                            .get("approval_id")
-                            .and_then(|id| id.as_str())
-                            .is_none()
-                })
-            });
-
-            if has_missing_approval_id {
-                debug_log(
-                    "Approval snapshot contains pending scoped approval without approval_id; failing closed"
-                );
-                return Err(io::Error::other(MuseApprovalRequired(
-                    "Scoped Muse permission approval requires manual intervention (missing approval_id)"
-                        .to_string(),
-                )));
-            }
-
-            let new_scoped_approval_ids: Vec<String> = pending_approvals
-                .map(|approvals| {
-                    approvals
-                        .iter()
-                        .filter_map(|approval| {
-                            let matches_scope =
-                                ["thread_id", "session_scope_id"].iter().any(|key| {
-                                    approval["scope"][key]
-                                        .as_str()
-                                        .is_some_and(|id| self.session_id.as_deref() == Some(id))
-                                });
-                            if !matches_scope {
-                                return None;
-                            }
-                            let id = approval.get("approval_id").and_then(|id| id.as_str())?;
-                            if self.approved_approval_ids.iter().any(|app| app == id) {
-                                None
-                            } else {
-                                Some(id.to_string())
-                            }
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            debug_log("Approval snapshot requires_approval=true");
-            if let Some(ref mut handler) = self.approval_handler {
-                let sid = self.session_id.as_deref().unwrap_or("");
-                match handler(sid, record) {
-                    Ok(true) => {
-                        for approval_id in new_scoped_approval_ids {
-                            if !self.approved_approval_ids.contains(&approval_id) {
-                                self.approved_approval_ids.push(approval_id);
-                            }
-                        }
-                        debug_log(
-                            "Scoped Muse permission approval auto-approved and confirmed; continuing stream",
-                        );
-                        return Ok(());
-                    }
-                    Ok(false) => {
-                        debug_log("Scoped Muse permission approval requires manual intervention");
-                        return Err(io::Error::other(MuseApprovalRequired(
-                            "Scoped Muse permission approval requires manual intervention"
-                                .to_string(),
-                        )));
-                    }
-                    Err(e) => {
-                        debug_log(&format!("Scoped Muse approval handling error: {e}"));
-                        return Err(io::Error::other(MuseApprovalRequired(e.to_string())));
-                    }
+        let has_unapproved = pending_approvals.is_some_and(|approvals| {
+            approvals.iter().any(|approval| {
+                let matches_scope = ["thread_id", "session_scope_id"].iter().any(|key| {
+                    approval["scope"][key]
+                        .as_str()
+                        .is_some_and(|id| self.session_id.as_deref() == Some(id))
+                });
+                if !matches_scope {
+                    return false;
                 }
-            } else {
-                debug_log("Scoped Muse permission approval is pending");
-                return Err(io::Error::other(MuseApprovalRequired(
-                    "Scoped Muse permission approval is pending".to_string(),
-                )));
+                match approval.get("approval_id").and_then(|id| id.as_str()) {
+                    Some(id) => !self
+                        .approved_approval_ids
+                        .iter()
+                        .any(|approved| approved == id),
+                    None => true,
+                }
+            })
+        });
+
+        if !has_unapproved {
+            debug_log(
+                "Approval snapshot contains no unapproved requests for this session; continuing stream",
+            );
+            return Ok(());
+        }
+
+        let has_missing_approval_id = pending_approvals.is_some_and(|approvals| {
+            approvals.iter().any(|approval| {
+                let matches_scope = ["thread_id", "session_scope_id"].iter().any(|key| {
+                    approval["scope"][key]
+                        .as_str()
+                        .is_some_and(|id| self.session_id.as_deref() == Some(id))
+                });
+                matches_scope
+                    && approval
+                        .get("approval_id")
+                        .and_then(|id| id.as_str())
+                        .is_none()
+            })
+        });
+
+        if has_missing_approval_id {
+            debug_log(
+                "Approval snapshot contains pending scoped approval without approval_id; failing closed"
+            );
+            return Err(io::Error::other(MuseApprovalRequired(
+                "Scoped Muse permission approval requires manual intervention (missing approval_id)"
+                    .to_string(),
+            )));
+        }
+
+        let new_scoped_approval_ids: Vec<String> = pending_approvals
+            .map(|approvals| {
+                approvals
+                    .iter()
+                    .filter_map(|approval| {
+                        let matches_scope = ["thread_id", "session_scope_id"].iter().any(|key| {
+                            approval["scope"][key]
+                                .as_str()
+                                .is_some_and(|id| self.session_id.as_deref() == Some(id))
+                        });
+                        if !matches_scope {
+                            return None;
+                        }
+                        let id = approval.get("approval_id").and_then(|id| id.as_str())?;
+                        if self.approved_approval_ids.iter().any(|app| app == id) {
+                            None
+                        } else {
+                            Some(id.to_string())
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        debug_log("Approval snapshot requires_approval=true");
+        if let Some(ref mut handler) = self.approval_handler {
+            let sid = self.session_id.as_deref().unwrap_or("");
+            match handler(sid, record) {
+                Ok(true) => {
+                    for approval_id in new_scoped_approval_ids {
+                        if !self.approved_approval_ids.contains(&approval_id) {
+                            self.approved_approval_ids.push(approval_id);
+                        }
+                    }
+                    debug_log(
+                        "Scoped Muse permission approval auto-approved and confirmed; continuing stream",
+                    );
+                    return Ok(());
+                }
+                Ok(false) => {
+                    debug_log("Scoped Muse permission approval requires manual intervention");
+                    return Err(io::Error::other(MuseApprovalRequired(
+                        "Scoped Muse permission approval requires manual intervention".to_string(),
+                    )));
+                }
+                Err(e) => {
+                    debug_log(&format!("Scoped Muse approval handling error: {e}"));
+                    return Err(io::Error::other(MuseApprovalRequired(e.to_string())));
+                }
             }
         }
+
+        debug_log("Scoped Muse permission approval is pending");
+        Err(io::Error::other(MuseApprovalRequired(
+            "Scoped Muse permission approval is pending".to_string(),
+        )))
+    }
+
+    fn handle_content_event(&mut self, record: &serde_json::Value, event: &str) {
         if matches!(event, "delta.message_done") {
             if self.text.is_empty() {
                 if let Some(text) = parse_assistant_content_from_json(record) {
@@ -414,6 +406,44 @@ impl MuseChatStream {
         if matches!(event, "delta.message_done" | "task.complete") {
             self.completed = true;
         }
+    }
+
+    pub fn record(&mut self, record: &serde_json::Value) -> io::Result<()> {
+        if std::env::var("MUSE_LIVE_RESUME_OWNED").ok().as_deref() == Some("1") {
+            crate::test_helpers::log_owned_record_schema(record);
+        }
+        let payload = record.get("payload").unwrap_or(record);
+        if !self.check_record_status(record, payload)? {
+            return Ok(());
+        }
+
+        if self.try_init_session(record)? {
+            return Ok(());
+        }
+
+        if record["type"] == "response" {
+            return self.check_subscription_response(payload);
+        }
+
+        let event = record
+            .get("event")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+
+        if event == "message.user" {
+            self.handle_user_message(record, payload);
+            return Ok(());
+        }
+
+        if !self.is_event_applicable(record, payload, event) {
+            return Ok(());
+        }
+
+        if event == "approvals.snapshot" {
+            return self.handle_approvals_snapshot(record, payload);
+        }
+
+        self.handle_content_event(record, event);
         Ok(())
     }
 

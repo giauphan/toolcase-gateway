@@ -200,6 +200,56 @@ fn create_init_job_record(req: &ValidatedVideoRequest) -> super::lifecycle::Vide
     }
 }
 
+fn handle_video_request_error(e: &io::Error, req: &ValidatedVideoRequest) -> io::Result<()> {
+    crate::runtime::logger::log_message(
+        "ERROR",
+        "museai_video",
+        &format!(
+            "Video generation request failed for job {}: {e}",
+            req.allocated_job_id
+        ),
+    );
+    if req.existing_job.is_none() {
+        let (status, approval_status) = if e
+            .get_ref()
+            .and_then(
+                <dyn std::error::Error + Send + Sync>::downcast_ref::<
+                    crate::providers::museai::MuseApprovalRequired,
+                >,
+            )
+            .is_some()
+        {
+            ("approval_required", Some("manual_required"))
+        } else if matches!(
+            e.kind(),
+            io::ErrorKind::TimedOut | io::ErrorKind::UnexpectedEof
+        ) {
+            ("submission_unknown", None)
+        } else {
+            ("failed", None)
+        };
+        let err_msg = e.to_string();
+        if let Err(update_err) = super::lifecycle::update_video_job_with_error(
+            &req.allocated_job_id,
+            status,
+            approval_status,
+            None,
+            Some(&err_msg),
+        ) {
+            super::lifecycle::debug_log_lifecycle(&format!(
+                "Failed to update job status after completion error: {update_err}"
+            ));
+            return Err(io::Error::new(
+                update_err.kind(),
+                format!(
+                    "failed to update video job status to '{status}': {update_err} (completion error: {e})"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn finish_video_request<F>(
     req: ValidatedVideoRequest,
     config: &Config,
@@ -211,50 +261,7 @@ where
     let completion = match request_completion(&req.request_json, config, true) {
         Ok(c) => c,
         Err(e) => {
-            crate::runtime::logger::log_message(
-                "ERROR",
-                "museai_video",
-                &format!(
-                    "Video generation request failed for job {}: {e}",
-                    req.allocated_job_id
-                ),
-            );
-            if req.existing_job.is_none() {
-                let (status, approval_status) = if e
-                    .get_ref()
-                    .and_then(|err| {
-                        err.downcast_ref::<crate::providers::museai::MuseApprovalRequired>()
-                    })
-                    .is_some()
-                {
-                    ("approval_required", Some("manual_required"))
-                } else if matches!(
-                    e.kind(),
-                    io::ErrorKind::TimedOut | io::ErrorKind::UnexpectedEof
-                ) {
-                    ("submission_unknown", None)
-                } else {
-                    ("failed", None)
-                };
-                let err_msg = e.to_string();
-                if let Err(update_err) = super::lifecycle::update_video_job_with_error(
-                    &req.allocated_job_id,
-                    status,
-                    approval_status,
-                    None,
-                    Some(&err_msg),
-                ) {
-                    super::lifecycle::debug_log_lifecycle(&format!(
-                        "Failed to update job status after completion error: {update_err}"
-                    ));
-                    return Err(io::Error::new(
-                        update_err.kind(),
-                        format!(
-                            "failed to update video job status to '{status}': {update_err} (completion error: {e})"
-                        ),
-                    ));
-                }
-            }
+            handle_video_request_error(&e, &req)?;
             return Err(e);
         }
     };

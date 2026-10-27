@@ -172,7 +172,7 @@ fn scan_video_jobs() -> io::Result<Vec<VideoJobRecord>> {
     let mut jobs = Vec::new();
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+        if path.extension().and_then(std::ffi::OsStr::to_str) == Some("json") {
             match fs::read_to_string(&path).and_then(|data| {
                 serde_json::from_str::<VideoJobRecord>(&data).map_err(|_| {
                     io::Error::new(io::ErrorKind::InvalidData, "Invalid video job record")

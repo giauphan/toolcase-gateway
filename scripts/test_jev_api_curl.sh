@@ -11,7 +11,8 @@ fi
 : "${GW_JEV_API_KEYS:?GW_JEV_API_KEYS must be set in environment or .env}"
 GW_LISTEN_HOST="${GW_LISTEN_HOST:-127.0.0.1}"
 GW_LISTEN_PORT="${GW_LISTEN_PORT:-20130}"
-GATEWAY_URL="http://${GW_LISTEN_HOST}:${GW_LISTEN_PORT}/jev/v1/systemone"
+GW_SCHEME="${GW_SCHEME:-http}"
+GATEWAY_URL="${GW_SCHEME}://${GW_LISTEN_HOST}:${GW_LISTEN_PORT}/jev/v1/systemone"
 IDEMPOTENCY_KEY="live-jev-gateway-curl-smoke-$(date +%s%N)"
 
 body='{
@@ -33,7 +34,7 @@ http_code=$(
 )
 
 if [[ "${http_code}" != 2* ]]; then
-  printf 'Jev gateway smoke failed with HTTP %s\n' "${http_code}" >&2
+  printf 'Jev gateway smoke failed with status code %s\n' "${http_code}" >&2
   exit 1
 fi
 

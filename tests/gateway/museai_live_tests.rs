@@ -646,7 +646,11 @@ fn safe_live_error(error: &std::io::Error) -> &'static str {
     if error.kind() == std::io::ErrorKind::PermissionDenied
         || error
             .get_ref()
-            .and_then(|e| e.downcast_ref::<toolcase_gateway::museai::MuseApprovalRequired>())
+            .and_then(
+                <dyn std::error::Error + Send + Sync>::downcast_ref::<
+                    toolcase_gateway::museai::MuseApprovalRequired,
+                >,
+            )
             .is_some()
     {
         "service approval required or access denied"
