@@ -79,7 +79,7 @@ pub fn sync_threads_from_disk() {
     let mut loaded = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("json") {
             continue;
         }
         if let Ok(bytes) = std::fs::read(&path) {

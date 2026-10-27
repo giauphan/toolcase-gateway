@@ -86,6 +86,47 @@ pub fn handle_jev_models_catalog(
     }
 }
 
+fn extract_inbound_openrouter_key(headers: &[(String, String)]) -> Option<String> {
+    header_value(headers, "x-openrouter-api-key")
+        .or_else(|| {
+            header_value(headers, "authorization")
+                .and_then(|a| {
+                    a.strip_prefix("Bearer ")
+                        .or_else(|| a.strip_prefix("bearer "))
+                })
+                .filter(|token| token.trim().starts_with("sk-or-"))
+        })
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+}
+
+fn inject_inbound_or_candidates(
+    candidates: &mut Vec<crate::http_provider::FailoverCandidate>,
+    inbound_or_key: String,
+    pool: &JevAccountPool,
+    config: &Config,
+) {
+    candidates.insert(
+        0,
+        crate::http_provider::FailoverCandidate::openrouter_api_key(
+            inbound_or_key.clone(),
+            "inbound-openrouter-key".into(),
+            None,
+        ),
+    );
+    let alt_models = pool.rotated_fallback_models(config);
+    for (idx, alt_model) in alt_models.into_iter().enumerate() {
+        candidates.insert(
+            1 + idx,
+            crate::http_provider::FailoverCandidate::openrouter_api_key(
+                inbound_or_key.clone(),
+                format!("inbound-openrouter-key-alt-{}", idx + 1),
+                Some(alt_model),
+            ),
+        );
+    }
+}
+
 pub fn handle_jev_ai(
     client: &mut TcpStream,
     request: &Request,
@@ -107,37 +148,8 @@ pub fn handle_jev_ai(
 
     let mut candidates = pool.candidate_failover_targets(config);
 
-    if let Some(inbound_or_key) = header_value(&request.headers, "x-openrouter-api-key")
-        .or_else(|| {
-            header_value(&request.headers, "authorization")
-                .and_then(|a| {
-                    a.strip_prefix("Bearer ")
-                        .or_else(|| a.strip_prefix("bearer "))
-                })
-                .filter(|token| token.trim().starts_with("sk-or-"))
-        })
-        .map(|k| k.trim().to_string())
-        .filter(|k| !k.is_empty())
-    {
-        candidates.insert(
-            0,
-            crate::http_provider::FailoverCandidate::openrouter_api_key(
-                inbound_or_key.clone(),
-                "inbound-openrouter-key".into(),
-                None,
-            ),
-        );
-        let alt_models = pool.rotated_fallback_models(config);
-        for (idx, alt_model) in alt_models.into_iter().enumerate() {
-            candidates.insert(
-                1 + idx,
-                crate::http_provider::FailoverCandidate::openrouter_api_key(
-                    inbound_or_key.clone(),
-                    format!("inbound-openrouter-key-alt-{}", idx + 1),
-                    Some(alt_model),
-                ),
-            );
-        }
+    if let Some(inbound_or_key) = extract_inbound_openrouter_key(&request.headers) {
+        inject_inbound_or_candidates(&mut candidates, inbound_or_key, pool, config);
     }
 
     if candidates.is_empty() {

@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -93,6 +93,23 @@ pub fn load_image_job(job_id: &str) -> io::Result<ImageJobRecord> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+fn find_image_job_by_submission_key(dir: &Path, sub_key: &str) -> Option<ImageJobRecord> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(std::ffi::OsStr::to_str) == Some("json") {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(existing) = serde_json::from_str::<ImageJobRecord>(&content) {
+                    if existing.submission_key.as_deref() == Some(sub_key) {
+                        return Some(existing);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn reserve_image_job(record: &ImageJobRecord) -> io::Result<Option<ImageJobRecord>> {
     let _guard = image_job_lock()
         .lock()
@@ -101,19 +118,8 @@ pub fn reserve_image_job(record: &ImageJobRecord) -> io::Result<Option<ImageJobR
     if let Some(ref sub_key) = record.submission_key {
         if !sub_key.is_empty() {
             let dir = ensure_image_state_dir()?;
-            if let Ok(entries) = fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            if let Ok(existing) = serde_json::from_str::<ImageJobRecord>(&content) {
-                                if existing.submission_key.as_deref() == Some(sub_key.as_str()) {
-                                    return Ok(Some(existing));
-                                }
-                            }
-                        }
-                    }
-                }
+            if let Some(existing) = find_image_job_by_submission_key(&dir, sub_key) {
+                return Ok(Some(existing));
             }
         }
     }

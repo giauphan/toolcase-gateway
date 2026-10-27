@@ -116,72 +116,76 @@ pub fn handle_museai_v1(
     }
 }
 
-pub fn is_sync_requested(path: &str, headers: &[(String, String)], body: &[u8]) -> bool {
-    // 1. Check explicit async flags (takes precedence)
-    if let Some(query) = path.split('?').nth(1) {
-        for param in query.split('&') {
-            let mut parts = param.split('=');
-            let key = parts.next().unwrap_or("").trim();
-            let val = parts.next().unwrap_or("").trim();
-            if key.eq_ignore_ascii_case("async")
-                && (val.is_empty()
-                    || val.eq_ignore_ascii_case("true")
-                    || val == "1"
-                    || val.eq_ignore_ascii_case("yes"))
-            {
-                return false;
-            }
-            if (key.eq_ignore_ascii_case("wait") || key.eq_ignore_ascii_case("sync"))
-                && (val.eq_ignore_ascii_case("false")
-                    || val == "0"
-                    || val.eq_ignore_ascii_case("no"))
-            {
-                return false;
-            }
+fn is_truthy_flag(val: &str) -> bool {
+    val.is_empty()
+        || val.eq_ignore_ascii_case("true")
+        || val == "1"
+        || val.eq_ignore_ascii_case("yes")
+}
+
+fn is_falsy_flag(val: &str) -> bool {
+    val.eq_ignore_ascii_case("false") || val == "0" || val.eq_ignore_ascii_case("no")
+}
+
+fn query_signals_explicit_async(query: &str) -> bool {
+    for param in query.split('&') {
+        let mut parts = param.split('=');
+        let key = parts.next().unwrap_or("").trim();
+        let val = parts.next().unwrap_or("").trim();
+        if key.eq_ignore_ascii_case("async") && is_truthy_flag(val) {
+            return true;
+        }
+        if (key.eq_ignore_ascii_case("wait") || key.eq_ignore_ascii_case("sync"))
+            && is_falsy_flag(val)
+        {
+            return true;
         }
     }
+    false
+}
 
-    if let Ok(json) = serde_json::from_slice::<serde_json::Value>(body) {
-        if let Some(async_val) = json.get("async") {
-            if async_val.as_bool() == Some(true)
-                || async_val
-                    .as_str()
-                    .map(|s| s.eq_ignore_ascii_case("true") || s == "1")
-                    .unwrap_or(false)
-            {
-                return false;
-            }
-        }
-        if let Some(wait_val) = json.get("wait").or_else(|| json.get("sync")) {
-            if wait_val.as_bool() == Some(false)
-                || wait_val
-                    .as_str()
-                    .map(|s| s.eq_ignore_ascii_case("false") || s == "0")
-                    .unwrap_or(false)
-            {
-                return false;
-            }
+fn body_signals_explicit_async(body: &[u8]) -> bool {
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    if let Some(async_val) = json.get("async") {
+        if async_val.as_bool() == Some(true)
+            || async_val
+                .as_str()
+                .map(|s| is_truthy_flag(s.trim()))
+                .unwrap_or(false)
+        {
+            return true;
         }
     }
-
-    // 2. Check query params in path
-    if let Some(query) = path.split('?').nth(1) {
-        for param in query.split('&') {
-            let mut parts = param.split('=');
-            let key = parts.next().unwrap_or("").trim();
-            let val = parts.next().unwrap_or("").trim();
-            if (key.eq_ignore_ascii_case("wait") || key.eq_ignore_ascii_case("sync"))
-                && (val.is_empty()
-                    || val.eq_ignore_ascii_case("true")
-                    || val == "1"
-                    || val.eq_ignore_ascii_case("yes"))
-            {
-                return true;
-            }
+    if let Some(wait_val) = json.get("wait").or_else(|| json.get("sync")) {
+        if wait_val.as_bool() == Some(false)
+            || wait_val
+                .as_str()
+                .map(|s| is_falsy_flag(s.trim()))
+                .unwrap_or(false)
+        {
+            return true;
         }
     }
+    false
+}
 
-    // 3. Check headers
+fn query_signals_explicit_sync(query: &str) -> bool {
+    for param in query.split('&') {
+        let mut parts = param.split('=');
+        let key = parts.next().unwrap_or("").trim();
+        let val = parts.next().unwrap_or("").trim();
+        if (key.eq_ignore_ascii_case("wait") || key.eq_ignore_ascii_case("sync"))
+            && is_truthy_flag(val)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn headers_signal_sync(headers: &[(String, String)]) -> bool {
     for (k, v) in headers {
         if k.eq_ignore_ascii_case("prefer") {
             let lower = v.to_ascii_lowercase();
@@ -191,38 +195,42 @@ pub fn is_sync_requested(path: &str, headers: &[(String, String)], body: &[u8]) 
         }
         if k.eq_ignore_ascii_case("x-wait") || k.eq_ignore_ascii_case("x-sync") {
             let lower = v.trim().to_ascii_lowercase();
-            if lower == "true" || lower == "1" || lower == "yes" {
+            if !lower.is_empty() && is_truthy_flag(&lower) {
                 return true;
             }
         }
-    }
-
-    // 4. Check JSON body
-    if let Ok(json) = serde_json::from_slice::<serde_json::Value>(body) {
-        if let Some(wait_val) = json.get("wait").or_else(|| json.get("sync")) {
-            if wait_val.as_bool() == Some(true)
-                || wait_val
-                    .as_str()
-                    .map(|s| {
-                        s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("yes")
-                    })
-                    .unwrap_or(false)
-            {
-                return true;
-            }
+        if k.eq_ignore_ascii_case("user-agent") && v.to_ascii_lowercase().starts_with("curl/") {
+            return true;
         }
     }
+    false
+}
 
-    // 5. Default to sync for command-line clients (e.g. curl) if not explicitly set to async
-    for (k, v) in headers {
-        if k.eq_ignore_ascii_case("user-agent") {
-            let lower = v.to_ascii_lowercase();
-            if lower.starts_with("curl/") {
-                return true;
-            }
-        }
+fn body_signals_explicit_sync(body: &[u8]) -> bool {
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    if let Some(wait_val) = json.get("wait").or_else(|| json.get("sync")) {
+        return wait_val.as_bool() == Some(true)
+            || wait_val
+                .as_str()
+                .map(|s| is_truthy_flag(s.trim()))
+                .unwrap_or(false);
     }
+    false
+}
 
+pub fn is_sync_requested(path: &str, headers: &[(String, String)], body: &[u8]) -> bool {
+    let query = path.split('?').nth(1).unwrap_or("");
+    if query_signals_explicit_async(query) || body_signals_explicit_async(body) {
+        return false;
+    }
+    if query_signals_explicit_sync(query)
+        || headers_signal_sync(headers)
+        || body_signals_explicit_sync(body)
+    {
+        return true;
+    }
     false
 }
 

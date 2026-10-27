@@ -12,6 +12,184 @@ static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 pub struct ProxyService;
 
 impl ProxyService {
+    fn forward_muse(
+        client: &mut TcpStream,
+        request: &Request,
+        config: &Config,
+        index: usize,
+        last: bool,
+    ) -> io::Result<Option<u16>> {
+        match crate::museai::request_museai_chat_completion(&request.body, config, false) {
+            Ok(response) => {
+                crate::runtime::logger::log_message(
+                    "INFO",
+                    "gateway_proxy",
+                    &format!(
+                        "Model 'muse' completed chat completion for path {}",
+                        request.path
+                    ),
+                );
+                crate::museai::write_chat_completion(client, &response)?;
+                Ok(Some(200))
+            }
+            Err(_error) if !last => {
+                let delay = crate::omniroute::calculate_retry_delay(
+                    index,
+                    config.retry_base_delay_ms,
+                    config.max_retry_delay_ms,
+                    None,
+                );
+                crate::runtime::logger::log_message(
+                    "WARN",
+                    "gateway_proxy",
+                    &format!(
+                        "Model 'muse' failed ({_error}); failing over to next candidate (retry in {}ms)",
+                        delay.as_millis()
+                    ),
+                );
+                if !delay.is_zero() {
+                    thread::sleep(delay);
+                }
+                Ok(None)
+            }
+            Err(error) => {
+                crate::runtime::logger::log_message(
+                    "ERROR",
+                    "gateway_proxy",
+                    &format!("All upstream models exhausted; model 'muse' failed ({error})"),
+                );
+                crate::http::write_error(
+                    client,
+                    502,
+                    "Bad Gateway",
+                    &format!("toolcase-gateway: all upstream models exhausted; model \"muse\" failed ({error})"),
+                )?;
+                Ok(Some(502))
+            }
+        }
+    }
+
+    fn forward_upstream(
+        client: &mut TcpStream,
+        request: &Request,
+        config: &Config,
+        model: &str,
+        index: usize,
+        last: bool,
+        last_status: &mut Option<u16>,
+    ) -> io::Result<Option<u16>> {
+        let mut upstream = match OmniRouteAdapter::open_upstream(client, request, config, model) {
+            Ok(u) => u,
+            Err(e) => {
+                crate::runtime::logger::log_message(
+                    "WARN",
+                    "gateway_proxy",
+                    &format!(
+                        "Upstream connection failed for model '{}' on path {}: {e}",
+                        model, request.path
+                    ),
+                );
+                if !last {
+                    return Ok(None);
+                }
+                crate::runtime::logger::log_message(
+                    "ERROR",
+                    "gateway_proxy",
+                    &format!("All upstream models exhausted; upstream connection error: {e}"),
+                );
+                crate::http::write_error(
+                    client,
+                    502,
+                    "Bad Gateway",
+                    &format!("toolcase-gateway: upstream connection failed: {e}"),
+                )?;
+                return Ok(Some(502));
+            }
+        };
+
+        let head = match crate::http::read_response_head(&mut upstream) {
+            Ok(h) => h,
+            Err(e) => {
+                crate::runtime::logger::log_message(
+                    "WARN",
+                    "gateway_proxy",
+                    &format!(
+                        "Upstream read head failed for model '{}' on path {}: {e}",
+                        model, request.path
+                    ),
+                );
+                if !last {
+                    return Ok(None);
+                }
+                crate::runtime::logger::log_message(
+                    "ERROR",
+                    "gateway_proxy",
+                    &format!("All upstream models exhausted; upstream read head error: {e}"),
+                );
+                crate::http::write_error(
+                    client,
+                    502,
+                    "Bad Gateway",
+                    &format!("toolcase-gateway: upstream read head failed: {e}"),
+                )?;
+                return Ok(Some(502));
+            }
+        };
+
+        *last_status = Some(head.status);
+        if crate::gateway::retry::is_safe_to_retry(head.status) {
+            let delay = crate::omniroute::calculate_retry_delay(
+                index,
+                config.retry_base_delay_ms,
+                config.max_retry_delay_ms,
+                Some(&head.headers),
+            );
+            crate::runtime::logger::log_message(
+                "WARN",
+                "gateway_proxy",
+                &format!(
+                    "Upstream model '{}' returned HTTP {}; failing over (retry in {}ms)",
+                    model,
+                    head.status,
+                    delay.as_millis()
+                ),
+            );
+            if !last {
+                if !delay.is_zero() {
+                    thread::sleep(delay);
+                }
+                return Ok(None);
+            }
+            crate::runtime::logger::log_message(
+                "ERROR",
+                "gateway_proxy",
+                &format!(
+                    "All upstream models exhausted; final model '{}' returned HTTP {}",
+                    model, head.status
+                ),
+            );
+            crate::http::write_error(
+                client,
+                head.status,
+                &head.reason,
+                &format!("toolcase-gateway: all upstream models exhausted; model \"{model}\" returned HTTP {}", head.status),
+            )?;
+            return Ok(Some(head.status));
+        }
+
+        crate::runtime::logger::log_message(
+            "INFO",
+            "gateway_proxy",
+            &format!(
+                "Upstream model '{}' responded with HTTP {} {} for path {}",
+                model, head.status, head.reason, request.path
+            ),
+        );
+        let status = head.status;
+        crate::http::stream_response(client, &mut upstream, head, &request.body)?;
+        Ok(Some(status))
+    }
+
     pub fn forward(client: &mut TcpStream, request: &Request, config: &Config) -> io::Result<u16> {
         let rotation = RR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let candidates = crate::gateway::candidates::plan_candidates(
@@ -55,60 +233,13 @@ impl ProxyService {
         let mut last_status: Option<u16> = None;
 
         for (index, model) in candidates.iter().enumerate() {
-            let attempt_number = index + 1;
-            let last = attempt_number == candidates.len();
+            let last = index + 1 == candidates.len();
 
             if model == "muse" {
-                match crate::museai::request_museai_chat_completion(&request.body, config, false) {
-                    Ok(response) => {
-                        crate::runtime::logger::log_message(
-                            "INFO",
-                            "gateway_proxy",
-                            &format!(
-                                "Model 'muse' completed chat completion for path {}",
-                                request.path
-                            ),
-                        );
-                        crate::museai::write_chat_completion(client, &response)?;
-                        return Ok(200);
-                    }
-                    Err(_error) if !last => {
-                        let delay = crate::omniroute::calculate_retry_delay(
-                            index,
-                            config.retry_base_delay_ms,
-                            config.max_retry_delay_ms,
-                            None,
-                        );
-                        crate::runtime::logger::log_message(
-                            "WARN",
-                            "gateway_proxy",
-                            &format!(
-                                "Model 'muse' failed ({_error}); failing over to next candidate (retry in {}ms)",
-                                delay.as_millis()
-                            ),
-                        );
-                        if !delay.is_zero() {
-                            thread::sleep(delay);
-                        }
-                        continue;
-                    }
-                    Err(error) => {
-                        crate::runtime::logger::log_message(
-                            "ERROR",
-                            "gateway_proxy",
-                            &format!(
-                                "All upstream models exhausted; model 'muse' failed ({error})"
-                            ),
-                        );
-                        crate::http::write_error(
-                            client,
-                            502,
-                            "Bad Gateway",
-                            &format!("toolcase-gateway: all upstream models exhausted; model \"muse\" failed ({error})"),
-                        )?;
-                        return Ok(502);
-                    }
+                if let Some(status) = Self::forward_muse(client, request, config, index, last)? {
+                    return Ok(status);
                 }
+                continue;
             }
 
             crate::runtime::logger::log_message(
@@ -120,125 +251,21 @@ impl ProxyService {
                     config.target_host,
                     config.target_port,
                     model,
-                    attempt_number,
+                    index + 1,
                     candidates.len()
                 ),
             );
 
-            match OmniRouteAdapter::open_upstream(client, request, config, model) {
-                Ok(mut upstream) => match crate::http::read_response_head(&mut upstream) {
-                    Ok(head) => {
-                        last_status = Some(head.status);
-                        if crate::gateway::retry::is_safe_to_retry(head.status) {
-                            let delay = crate::omniroute::calculate_retry_delay(
-                                index,
-                                config.retry_base_delay_ms,
-                                config.max_retry_delay_ms,
-                                Some(&head.headers),
-                            );
-                            crate::runtime::logger::log_message(
-                                "WARN",
-                                "gateway_proxy",
-                                &format!(
-                                    "Upstream model '{}' returned HTTP {}; failing over (retry in {}ms)",
-                                    model,
-                                    head.status,
-                                    delay.as_millis()
-                                ),
-                            );
-                            if !last {
-                                if !delay.is_zero() {
-                                    thread::sleep(delay);
-                                }
-                                continue;
-                            }
-                            crate::runtime::logger::log_message(
-                                "ERROR",
-                                "gateway_proxy",
-                                &format!(
-                                    "All upstream models exhausted; final model '{}' returned HTTP {}",
-                                    model, head.status
-                                ),
-                            );
-                            crate::http::write_error(
-                                client,
-                                head.status,
-                                &head.reason,
-                                &format!("toolcase-gateway: all upstream models exhausted; model \"{model}\" returned HTTP {}", head.status),
-                            )?;
-                            return Ok(head.status);
-                        } else {
-                            crate::runtime::logger::log_message(
-                                "INFO",
-                                "gateway_proxy",
-                                &format!(
-                                    "Upstream model '{}' responded with HTTP {} {} for path {}",
-                                    model, head.status, head.reason, request.path
-                                ),
-                            );
-                            let status = head.status;
-                            crate::http::stream_response(
-                                client,
-                                &mut upstream,
-                                head,
-                                &request.body,
-                            )?;
-                            return Ok(status);
-                        }
-                    }
-                    Err(e) => {
-                        crate::runtime::logger::log_message(
-                            "WARN",
-                            "gateway_proxy",
-                            &format!(
-                                "Upstream read head failed for model '{}' on path {}: {e}",
-                                model, request.path
-                            ),
-                        );
-                        if !last {
-                            continue;
-                        }
-                        crate::runtime::logger::log_message(
-                            "ERROR",
-                            "gateway_proxy",
-                            &format!(
-                                "All upstream models exhausted; upstream read head error: {e}"
-                            ),
-                        );
-                        crate::http::write_error(
-                            client,
-                            502,
-                            "Bad Gateway",
-                            &format!("toolcase-gateway: upstream read head failed: {e}"),
-                        )?;
-                        return Ok(502);
-                    }
-                },
-                Err(e) => {
-                    crate::runtime::logger::log_message(
-                        "WARN",
-                        "gateway_proxy",
-                        &format!(
-                            "Upstream connection failed for model '{}' on path {}: {e}",
-                            model, request.path
-                        ),
-                    );
-                    if !last {
-                        continue;
-                    }
-                    crate::runtime::logger::log_message(
-                        "ERROR",
-                        "gateway_proxy",
-                        &format!("All upstream models exhausted; upstream connection error: {e}"),
-                    );
-                    crate::http::write_error(
-                        client,
-                        502,
-                        "Bad Gateway",
-                        &format!("toolcase-gateway: upstream connection failed: {e}"),
-                    )?;
-                    return Ok(502);
-                }
+            if let Some(status) = Self::forward_upstream(
+                client,
+                request,
+                config,
+                model,
+                index,
+                last,
+                &mut last_status,
+            )? {
+                return Ok(status);
             }
         }
 

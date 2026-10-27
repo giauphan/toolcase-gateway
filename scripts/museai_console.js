@@ -1,7 +1,6 @@
-void (async () => {
-  if (location.hostname !== "muse.ai" && !location.hostname.endsWith(".muse.ai")) {
-    throw new Error("Run this script on https://muse.ai");
-  }
+if (location.hostname !== "muse.ai" && !location.hostname.endsWith(".muse.ai")) {
+  throw new Error("Run this script on https://muse.ai");
+}
 
   const values = new Map([["GW_MUSEAI_BASE_URL", location.origin]]);
   const originalFetch = window.fetch;
@@ -54,17 +53,22 @@ void (async () => {
       .map(([key, value]) => `${key}=${envValue(value)}`)
       .join("\n");
 
-    try {
-      await navigator.clipboard.writeText(`${text}\n`);
-    } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = `${text}\n`;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      textarea.remove();
+    let copied = false;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      try {
+        await navigator.clipboard.writeText(`${text}\n`);
+        copied = true;
+      } catch (err) {
+        console.warn(`Clipboard write failed: ${err.message}`);
+      }
+    } else {
+      console.warn("Clipboard API not supported in this context.");
+    }
+
+    if (!copied) {
+      console.info(`${text}\n`);
+      console.warn("Copy the config above manually.");
+      return [...values.keys()];
     }
 
     const keys = [...values.keys()];
@@ -128,4 +132,3 @@ void (async () => {
   console.warn(
     "GW_MUSEAI_COOKIE can omit HttpOnly cookies. If requests fail, copy full Cookie request header from DevTools Network > /api/session > Headers."
   );
-})();

@@ -221,6 +221,58 @@ pub fn create_zip_archive(entry_name: &str, uncompressed_data: &[u8]) -> Vec<u8>
     zip
 }
 
+fn resolve_archive_path(dir: &Path, filename: &str, zip_enabled: bool) -> PathBuf {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let date_str = format_date(now);
+    let stem = filename.strip_suffix(".log").unwrap_or(filename);
+    let base_stem = if extract_date_from_filename(stem).is_some() {
+        stem.to_string()
+    } else {
+        format!("{stem}-{date_str}")
+    };
+
+    let ext = if zip_enabled { "zip" } else { "log" };
+    let mut idx = 1;
+    loop {
+        let candidate = format!("{base_stem}-{idx}.{ext}");
+        let p = dir.join(&candidate);
+        if !p.exists() {
+            return p;
+        }
+        idx += 1;
+    }
+}
+
+fn write_archive_file(
+    archive_path: &Path,
+    filename: &str,
+    data: &[u8],
+    zip_enabled: bool,
+) -> io::Result<()> {
+    if zip_enabled {
+        let zip_bytes = create_zip_archive(filename, data);
+        fs::write(archive_path, &zip_bytes)
+    } else {
+        fs::write(archive_path, data)
+    }
+}
+
+fn perform_log_rotation(target_path: &Path, dir: &Path, filename: &str, zip_enabled: bool) {
+    let Ok(data) = fs::read(target_path) else {
+        return;
+    };
+    if data.is_empty() {
+        return;
+    }
+    let archive_path = resolve_archive_path(dir, filename, zip_enabled);
+    if write_archive_file(&archive_path, filename, &data, zip_enabled).is_ok() {
+        let _ = fs::remove_file(target_path);
+    }
+}
+
 fn rotate_if_needed(
     file: &mut Option<File>,
     dir: &Path,
@@ -239,47 +291,14 @@ fn rotate_if_needed(
         .map(|m| m.len())
         .unwrap_or_else(|| fs::metadata(&target_path).map(|m| m.len()).unwrap_or(0));
 
-    if current_len > 0 && current_len + (additional_bytes as u64) > max_size_bytes {
-        if let Some(mut f) = file.take() {
-            let _ = f.flush();
-        }
-
-        if let Ok(data) = fs::read(&target_path) {
-            if !data.is_empty() {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let date_str = format_date(now);
-                let stem = filename.strip_suffix(".log").unwrap_or(filename);
-                let base_stem = if extract_date_from_filename(stem).is_some() {
-                    stem.to_string()
-                } else {
-                    format!("{stem}-{date_str}")
-                };
-
-                let mut idx = 1;
-                let archive_path = loop {
-                    let ext = if zip_enabled { "zip" } else { "log" };
-                    let candidate = format!("{base_stem}-{idx}.{ext}");
-                    let p = dir.join(&candidate);
-                    if !p.exists() {
-                        break p;
-                    }
-                    idx += 1;
-                };
-
-                if zip_enabled {
-                    let zip_bytes = create_zip_archive(filename, &data);
-                    let _ = fs::write(&archive_path, &zip_bytes);
-                } else {
-                    let _ = fs::write(&archive_path, &data);
-                }
-
-                let _ = fs::remove_file(&target_path);
-            }
-        }
+    if current_len == 0 || current_len + (additional_bytes as u64) <= max_size_bytes {
+        return;
     }
+
+    if let Some(mut f) = file.take() {
+        let _ = f.flush();
+    }
+    perform_log_rotation(&target_path, dir, filename, zip_enabled);
 }
 
 fn write_line(
@@ -596,7 +615,7 @@ pub fn cleanup_expired_logs(dir: &Path, retention_days: u64) -> io::Result<usize
             if !path.is_file() {
                 continue;
             }
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            let Some(name) = path.file_name().and_then(std::ffi::OsStr::to_str) else {
                 continue;
             };
             let is_log = name.ends_with(".log");

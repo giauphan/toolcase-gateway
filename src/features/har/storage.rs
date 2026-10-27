@@ -25,7 +25,7 @@ pub fn persist_muse_env(path: &Path, fields: &[(&str, &str)]) -> io::Result<()> 
     let lines: Vec<String> = if path.exists() {
         fs::read_to_string(path)?
             .lines()
-            .map(|l| l.to_string())
+            .map(ToString::to_string)
             .collect()
     } else {
         vec![]

@@ -520,7 +520,7 @@ pub fn persist_jev_keys(path: &Path, keys: &[String]) -> io::Result<()> {
     let lines: Vec<String> = if path.exists() {
         fs::read_to_string(path)?
             .lines()
-            .map(|l| l.to_string())
+            .map(ToString::to_string)
             .collect()
     } else {
         Vec::new()

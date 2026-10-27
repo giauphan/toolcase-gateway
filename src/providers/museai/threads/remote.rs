@@ -244,16 +244,19 @@ pub fn delete_muse_thread(base_url: &str, thread_id: &str, config: &Config) -> i
     }
 }
 
-pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io::Result<usize> {
-    if config.museai_cookie.is_empty() && config.museai_notary_token.is_empty() {
-        return Ok(0);
-    }
-
+fn init_remote_cvm_session(
+    config: &Config,
+) -> io::Result<
+    Option<(
+        crate::providers::museai::transport::MuseWebSocket,
+        crate::providers::museai::noise::MuseNoiseSession,
+    )>,
+> {
     let bootstrapped = match crate::providers::museai::session::bootstrap_museai_config(config) {
         Ok(c) => c,
         Err(e) => {
             debug_log(&format!("Remote CVM session sync skipped: {e}"));
-            return Ok(0);
+            return Ok(None);
         }
     };
 
@@ -270,7 +273,7 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
             Ok(u) => u,
             Err(e) => {
                 debug_log(&format!("Failed to build CVM ws url: {e}"));
-                return Ok(0);
+                return Ok(None);
             }
         };
 
@@ -280,7 +283,7 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
             Ok(s) => s,
             Err(e) => {
                 debug_log(&format!("Failed to connect to CVM WebSocket: {e}"));
-                return Ok(0);
+                return Ok(None);
             }
         };
 
@@ -291,17 +294,24 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
         Ok(s) => s,
         Err(e) => {
             debug_log(&format!("Noise initiator error: {e}"));
-            return Ok(0);
+            return Ok(None);
         }
     };
 
     if let Err(e) = session.perform_client_handshake(&mut socket, &bootstrapped.museai_notary_token)
     {
         debug_log(&format!("Noise handshake error: {e}"));
-        return Ok(0);
+        return Ok(None);
     }
 
-    let mut stream_id = 1;
+    Ok(Some((socket, session)))
+}
+
+fn fetch_remote_session_list(
+    socket: &mut crate::providers::museai::transport::MuseWebSocket,
+    session: &mut crate::providers::museai::noise::MuseNoiseSession,
+    stream_id: u64,
+) -> Option<Vec<serde_json::Value>> {
     let headers = vec![
         Header {
             key: "Host".to_string(),
@@ -323,7 +333,7 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
 
     if socket
         .send_encrypted_service_request(
-            &mut session,
+            session,
             SERVICE_DAEMON,
             stream_id,
             "GET",
@@ -333,11 +343,11 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
         )
         .is_err()
     {
-        return Ok(0);
+        return None;
     }
 
     let mut body_bytes = Vec::new();
-    while let Ok(frame) = socket.read_encrypted_service_frame(&mut session) {
+    while let Ok(frame) = socket.read_encrypted_service_frame(session) {
         if frame.stream_id != stream_id {
             continue;
         }
@@ -361,22 +371,189 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
         }
     }
 
-    let session_list: serde_json::Value = match serde_json::from_slice(&body_bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            debug_log(&format!("Failed to parse session list JSON: {e}"));
-            return Ok(0);
-        }
-    };
-
-    let sessions_array = session_list
+    let session_list: serde_json::Value = serde_json::from_slice(&body_bytes).ok()?;
+    session_list
         .get("result")
         .and_then(|r| r.get("sessions"))
         .and_then(|s| s.as_array())
         .or_else(|| session_list.get("sessions").and_then(|s| s.as_array()))
-        .or_else(|| session_list.as_array());
+        .or_else(|| session_list.as_array())
+        .cloned()
+}
 
-    let Some(sessions) = sessions_array else {
+fn delete_cvm_session_remote(
+    socket: &mut crate::providers::museai::transport::MuseWebSocket,
+    session: &mut crate::providers::museai::noise::MuseNoiseSession,
+    sid: &str,
+    stream_id: &mut u64,
+) -> bool {
+    *stream_id = stream_id.wrapping_add(2);
+    let del_headers = vec![
+        Header {
+            key: "Host".to_string(),
+            value: "hatch.metaaivm.com".to_string(),
+        },
+        Header {
+            key: "Content-Type".to_string(),
+            value: "application/json".to_string(),
+        },
+        Header {
+            key: "Accept".to_string(),
+            value: "application/json".to_string(),
+        },
+        Header {
+            key: "x-request-id".to_string(),
+            value: uuid::Uuid::new_v4().to_string(),
+        },
+        Header {
+            key: "x-app-id".to_string(),
+            value: "hatch-web".to_string(),
+        },
+    ];
+    let del_payload = serde_json::json!({
+        "method": "/api/session/delete",
+        "session_id": sid,
+        "id": sid,
+    });
+    let Ok(bytes) = serde_json::to_vec(&del_payload) else {
+        return false;
+    };
+    if socket
+        .send_encrypted_service_request(
+            session,
+            SERVICE_DAEMON,
+            *stream_id,
+            "POST",
+            "/api/session/delete",
+            &del_headers,
+            &bytes,
+        )
+        .is_err()
+    {
+        return false;
+    }
+
+    let mut del_success = false;
+    while let Ok(frame) = socket.read_encrypted_service_frame(session) {
+        if frame.stream_id != *stream_id {
+            continue;
+        }
+        match frame.kind {
+            ServiceFrameKind::Response {
+                status, end_body, ..
+            } => {
+                if (200..300).contains(&status) {
+                    del_success = true;
+                }
+                if end_body {
+                    break;
+                }
+            }
+            ServiceFrameKind::BodyChunk { end_body, .. } => {
+                if end_body {
+                    break;
+                }
+            }
+            ServiceFrameKind::Reset { .. } => {
+                break;
+            }
+        }
+    }
+    del_success
+}
+
+fn archive_cvm_session_remote(
+    socket: &mut crate::providers::museai::transport::MuseWebSocket,
+    session: &mut crate::providers::museai::noise::MuseNoiseSession,
+    sid: &str,
+    stream_id: &mut u64,
+) -> bool {
+    *stream_id = stream_id.wrapping_add(2);
+    let arc_headers = vec![
+        Header {
+            key: "Host".to_string(),
+            value: "hatch.metaaivm.com".to_string(),
+        },
+        Header {
+            key: "Content-Type".to_string(),
+            value: "application/json".to_string(),
+        },
+        Header {
+            key: "Accept".to_string(),
+            value: "application/json".to_string(),
+        },
+        Header {
+            key: "x-request-id".to_string(),
+            value: uuid::Uuid::new_v4().to_string(),
+        },
+        Header {
+            key: "x-app-id".to_string(),
+            value: "hatch-web".to_string(),
+        },
+    ];
+    let arc_payload = serde_json::json!({
+        "method": "/api/session/archive",
+        "session_id": sid,
+        "id": sid,
+    });
+    let Ok(arc_bytes) = serde_json::to_vec(&arc_payload) else {
+        return false;
+    };
+    if socket
+        .send_encrypted_service_request(
+            session,
+            SERVICE_DAEMON,
+            *stream_id,
+            "POST",
+            "/api/session/archive",
+            &arc_headers,
+            &arc_bytes,
+        )
+        .is_err()
+    {
+        return false;
+    }
+
+    let mut arc_success = false;
+    while let Ok(frame) = socket.read_encrypted_service_frame(session) {
+        if frame.stream_id != *stream_id {
+            continue;
+        }
+        match frame.kind {
+            ServiceFrameKind::Response {
+                status, end_body, ..
+            } => {
+                if (200..300).contains(&status) {
+                    arc_success = true;
+                }
+                if end_body {
+                    break;
+                }
+            }
+            ServiceFrameKind::BodyChunk { end_body, .. } => {
+                if end_body {
+                    break;
+                }
+            }
+            ServiceFrameKind::Reset { .. } => {
+                break;
+            }
+        }
+    }
+    arc_success
+}
+
+pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io::Result<usize> {
+    if config.museai_cookie.is_empty() && config.museai_notary_token.is_empty() {
+        return Ok(0);
+    }
+
+    let Some((mut socket, mut session)) = init_remote_cvm_session(config)? else {
+        return Ok(0);
+    };
+
+    let mut stream_id: u64 = 1;
+    let Some(sessions) = fetch_remote_session_list(&mut socket, &mut session, stream_id) else {
         crate::runtime::logger::log_message(
             "INFO",
             "museai_threads",
@@ -407,7 +584,7 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
         };
 
         let is_primary = s.get("is_primary").and_then(|v| v.as_bool()) == Some(true);
-        let timestamp_sec = extract_session_timestamp(s);
+        let timestamp_sec = extract_session_timestamp(&s);
         let age_secs = if timestamp_sec > 0 && now >= timestamp_sec {
             now - timestamp_sec
         } else {
@@ -427,137 +604,22 @@ pub fn purge_remote_cvm_threads_older_than(ttl_secs: u64, config: &Config) -> io
         }
 
         if timestamp_sec > 0 && now >= timestamp_sec.saturating_add(ttl_secs) {
-            stream_id = stream_id.wrapping_add(2);
-            let del_headers = vec![
-                Header {
-                    key: "Host".to_string(),
-                    value: "hatch.metaaivm.com".to_string(),
-                },
-                Header {
-                    key: "Content-Type".to_string(),
-                    value: "application/json".to_string(),
-                },
-                Header {
-                    key: "Accept".to_string(),
-                    value: "application/json".to_string(),
-                },
-                Header {
-                    key: "x-request-id".to_string(),
-                    value: uuid::Uuid::new_v4().to_string(),
-                },
-                Header {
-                    key: "x-app-id".to_string(),
-                    value: "hatch-web".to_string(),
-                },
-            ];
-            let del_payload = serde_json::json!({
-                "method": "/api/session/delete",
-                "session_id": sid,
-                "id": sid,
-            });
-            if let Ok(bytes) = serde_json::to_vec(&del_payload) {
-                if socket
-                    .send_encrypted_service_request(
-                        &mut session,
-                        SERVICE_DAEMON,
-                        stream_id,
-                        "POST",
-                        "/api/session/delete",
-                        &del_headers,
-                        &bytes,
-                    )
-                    .is_ok()
-                {
-                    let mut del_success = false;
-                    while let Ok(frame) = socket.read_encrypted_service_frame(&mut session) {
-                        if frame.stream_id != stream_id {
-                            continue;
-                        }
-                        match frame.kind {
-                            ServiceFrameKind::Response {
-                                status, end_body, ..
-                            } => {
-                                if (200..300).contains(&status) {
-                                    del_success = true;
-                                }
-                                if end_body {
-                                    break;
-                                }
-                            }
-                            ServiceFrameKind::BodyChunk { end_body, .. } => {
-                                if end_body {
-                                    break;
-                                }
-                            }
-                            ServiceFrameKind::Reset { .. } => {
-                                break;
-                            }
-                        }
-                    }
-
-                    if del_success {
-                        unregister_thread(sid);
-                        purged += 1;
-                        crate::runtime::logger::log_message(
-                            "INFO",
-                            "museai_threads",
-                            &format!(
-                                "Purged remote CVM thread session {sid} older than {ttl_secs}s"
-                            ),
-                        );
-                    } else {
-                        // Fallback: Attempt archive if delete did not acknowledge 200
-                        stream_id = stream_id.wrapping_add(2);
-                        let arc_payload = serde_json::json!({
-                            "method": "/api/session/archive",
-                            "session_id": sid,
-                            "id": sid,
-                        });
-                        if let Ok(arc_bytes) = serde_json::to_vec(&arc_payload) {
-                            let _ = socket.send_encrypted_service_request(
-                                &mut session,
-                                SERVICE_DAEMON,
-                                stream_id,
-                                "POST",
-                                "/api/session/archive",
-                                &del_headers,
-                                &arc_bytes,
-                            );
-                            while let Ok(frame) = socket.read_encrypted_service_frame(&mut session)
-                            {
-                                if frame.stream_id != stream_id {
-                                    continue;
-                                }
-                                match frame.kind {
-                                    ServiceFrameKind::Response {
-                                        status, end_body, ..
-                                    } => {
-                                        if (200..300).contains(&status) {
-                                            unregister_thread(sid);
-                                            purged += 1;
-                                            crate::runtime::logger::log_message(
-                                                "INFO",
-                                                "museai_threads",
-                                                &format!("Archived remote CVM thread session {sid} older than {ttl_secs}s"),
-                                            );
-                                        }
-                                        if end_body {
-                                            break;
-                                        }
-                                    }
-                                    ServiceFrameKind::BodyChunk { end_body, .. } => {
-                                        if end_body {
-                                            break;
-                                        }
-                                    }
-                                    ServiceFrameKind::Reset { .. } => {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            if delete_cvm_session_remote(&mut socket, &mut session, sid, &mut stream_id) {
+                unregister_thread(sid);
+                purged += 1;
+                crate::runtime::logger::log_message(
+                    "INFO",
+                    "museai_threads",
+                    &format!("Purged remote CVM thread session {sid} older than {ttl_secs}s"),
+                );
+            } else if archive_cvm_session_remote(&mut socket, &mut session, sid, &mut stream_id) {
+                unregister_thread(sid);
+                purged += 1;
+                crate::runtime::logger::log_message(
+                    "INFO",
+                    "museai_threads",
+                    &format!("Archived remote CVM thread session {sid} older than {ttl_secs}s"),
+                );
             }
         }
     }

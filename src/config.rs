@@ -363,6 +363,12 @@ impl PersistentConfig {
     }
 
     pub fn apply_to(&self, config: &mut Config) {
+        self.apply_proxy_to(config);
+        self.apply_jev_to(config);
+        self.apply_muse_to(config);
+    }
+
+    fn apply_proxy_to(&self, config: &mut Config) {
         if let Some(ref h) = self.target_host {
             config.target_host = h.clone();
         }
@@ -378,11 +384,12 @@ impl PersistentConfig {
         if let Some(secs) = self.io_timeout_secs {
             config.io_timeout = (secs > 0).then(|| Duration::from_secs(secs));
         }
+    }
+
+    fn apply_jev_to(&self, config: &mut Config) {
         if let Some(ref accounts) = self.jev_accounts {
             if !accounts.is_empty() {
-                // Load labeled accounts from storage.
                 config.jev_labeled_accounts = accounts.clone();
-                // Merge: keep env-var keys that are not already in stored accounts.
                 let stored: std::collections::HashSet<&str> =
                     accounts.iter().map(|a| a.api_key.as_str()).collect();
                 let extra: Vec<String> = config
@@ -391,7 +398,6 @@ impl PersistentConfig {
                     .filter(|k| !stored.contains(k.as_str()))
                     .cloned()
                     .collect();
-                // jev_api_keys reflects all keys: stored + env extras
                 let mut merged: Vec<String> = accounts.iter().map(|a| a.api_key.clone()).collect();
                 merged.extend(extra);
                 config.jev_api_keys = merged;
@@ -428,6 +434,9 @@ impl PersistentConfig {
                 config.jev_openrouter_accounts = or_accounts.clone();
             }
         }
+    }
+
+    fn apply_muse_to(&self, config: &mut Config) {
         if let Some(ref url) = self.museai_base_url {
             config.museai_base_url = url.clone();
         }

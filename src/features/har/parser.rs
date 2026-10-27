@@ -2,6 +2,61 @@ use super::types::{HarExtractError, MuseHarConfig, RestEntry, WsEntry};
 
 pub const MAX_HAR_BYTES: usize = 16 * 1024 * 1024;
 
+fn apply_ws_entry(out: &mut MuseHarConfig, ws: WsEntry) {
+    if let Some(v) = ws.ws_url {
+        out.ws_url = Some(v);
+    }
+    if let Some(v) = ws.access_token {
+        out.access_token = Some(v);
+    }
+    if let Some(v) = ws.notary_token {
+        out.notary_token = Some(v);
+    }
+    if let Some(v) = ws.vm_id {
+        out.vm_id = Some(v);
+    }
+}
+
+fn apply_rest_entry(out: &mut MuseHarConfig, rest: RestEntry) {
+    out.base_url = Some(rest.base_url);
+    if rest.cookie.is_some() {
+        out.cookie = rest.cookie;
+    }
+    if rest.ws_url.is_some() {
+        out.ws_url = rest.ws_url;
+    }
+    if rest.access_token.is_some() {
+        out.access_token = rest.access_token;
+    }
+    if rest.notary_token.is_some() {
+        out.notary_token = rest.notary_token;
+    }
+    if rest.vm_id.is_some() {
+        out.vm_id = rest.vm_id;
+    }
+}
+
+fn sanitize_extracted_config(out: &mut MuseHarConfig) {
+    if let Some(v) = &mut out.ws_url {
+        *v = sanitize_value(v);
+    }
+    if let Some(v) = &mut out.base_url {
+        *v = sanitize_value(v);
+    }
+    if let Some(v) = &mut out.access_token {
+        *v = sanitize_value(v);
+    }
+    if let Some(v) = &mut out.notary_token {
+        *v = sanitize_value(v);
+    }
+    if let Some(v) = &mut out.vm_id {
+        *v = sanitize_value(v);
+    }
+    if let Some(v) = &mut out.cookie {
+        *v = sanitize_value(v);
+    }
+}
+
 pub fn extract_muse_config_from_har(bytes: &[u8]) -> Result<MuseHarConfig, HarExtractError> {
     if bytes.len() > MAX_HAR_BYTES {
         return Err(HarExtractError::InvalidJson(
@@ -27,62 +82,13 @@ pub fn extract_muse_config_from_har(bytes: &[u8]) -> Result<MuseHarConfig, HarEx
             None => continue,
         };
         if let Some(ws) = parse_ws_muse_entry(url) {
-            // Freshest (last) non-empty value wins; an entry missing a param
-            // keeps the value found in an earlier entry.
-            if let Some(v) = ws.ws_url {
-                out.ws_url = Some(v);
-            }
-            if let Some(v) = ws.access_token {
-                out.access_token = Some(v);
-            }
-            if let Some(v) = ws.notary_token {
-                out.notary_token = Some(v);
-            }
-            if let Some(v) = ws.vm_id {
-                out.vm_id = Some(v);
-            }
-            continue;
-        }
-        if let Some(rest) = parse_rest_muse_entry(url, entry) {
-            out.base_url = Some(rest.base_url);
-            if rest.cookie.is_some() {
-                out.cookie = rest.cookie;
-            }
-            if rest.ws_url.is_some() {
-                out.ws_url = rest.ws_url;
-            }
-            if rest.access_token.is_some() {
-                out.access_token = rest.access_token;
-            }
-            if rest.notary_token.is_some() {
-                out.notary_token = rest.notary_token;
-            }
-            if rest.vm_id.is_some() {
-                out.vm_id = rest.vm_id;
-            }
+            apply_ws_entry(&mut out, ws);
+        } else if let Some(rest) = parse_rest_muse_entry(url, entry) {
+            apply_rest_entry(&mut out, rest);
         }
     }
 
-    // Sanitize all extracted values: strip ASCII control chars so a crafted
-    // HAR cannot break out of an env line (e.g. via an encoded newline).
-    if let Some(v) = &mut out.ws_url {
-        *v = sanitize_value(v);
-    }
-    if let Some(v) = &mut out.base_url {
-        *v = sanitize_value(v);
-    }
-    if let Some(v) = &mut out.access_token {
-        *v = sanitize_value(v);
-    }
-    if let Some(v) = &mut out.notary_token {
-        *v = sanitize_value(v);
-    }
-    if let Some(v) = &mut out.vm_id {
-        *v = sanitize_value(v);
-    }
-    if let Some(v) = &mut out.cookie {
-        *v = sanitize_value(v);
-    }
+    sanitize_extracted_config(&mut out);
 
     if out.found_fields() == 0 {
         return Err(HarExtractError::NoMuseEntries);
