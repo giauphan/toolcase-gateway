@@ -217,7 +217,7 @@ def apply_jev_accounts(conn: sqlite3.Connection, accounts: list, enc_key: str):
             if not raw_key:
                 continue
             prot_key = protect_credential(raw_key, enc_key)
-            acc_id = acc.get("id") or f"jev_{hashlib.md5(raw_key.encode()).hexdigest()[:8]}"
+            acc_id = acc.get("id") or f"jev_{hashlib.sha256(raw_key.encode()).hexdigest()[:12]}"
             label = acc.get("label", "jev-account")
             conn.execute("""
                 INSERT INTO accounts (id, provider, key, label, is_active, updated_at)
@@ -241,7 +241,7 @@ def apply_openrouter_accounts(conn: sqlite3.Connection, accounts: list, enc_key:
             if not raw_key:
                 continue
             prot_key = protect_credential(raw_key, enc_key)
-            acc_id = acc.get("id") or f"or_{hashlib.md5(raw_key.encode()).hexdigest()[:8]}"
+            acc_id = acc.get("id") or f"or_{hashlib.sha256(raw_key.encode()).hexdigest()[:12]}"
             label = acc.get("label", "openrouter-account")
             conn.execute("""
                 INSERT INTO accounts (id, provider, key, label, is_active, updated_at)

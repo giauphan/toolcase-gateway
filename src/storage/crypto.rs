@@ -1,7 +1,7 @@
 //! Cryptographic protection and blind indexing for credentials at rest.
 //! Implements NIST-compliant AES-256-GCM envelope encryption and blind indexing.
 
-use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -32,17 +32,11 @@ pub fn protect_secret(plaintext: &str, master_key: &str) -> String {
         Err(_) => return plaintext.to_string(),
     };
 
-    // Generate 12-byte random nonce using UUID entropy
-    let mut nonce_bytes = [0u8; 12];
-    let u1 = uuid::Uuid::new_v4();
-    let u2 = uuid::Uuid::new_v4();
-    nonce_bytes[..8].copy_from_slice(&u1.as_bytes()[..8]);
-    nonce_bytes[8..].copy_from_slice(&u2.as_bytes()[..4]);
-
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    match cipher.encrypt(nonce, plaintext.as_bytes()) {
+    // Generate cryptographically secure random 96-bit nonce via OS entropy
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    match cipher.encrypt(&nonce, plaintext.as_bytes()) {
         Ok(ciphertext) => {
-            let nonce_b64 = BASE64.encode(nonce_bytes);
+            let nonce_b64 = BASE64.encode(nonce.as_slice());
             let payload_b64 = BASE64.encode(ciphertext);
             format!("{ENVELOPE_PREFIX}{nonce_b64}:{payload_b64}")
         }
