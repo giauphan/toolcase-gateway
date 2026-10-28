@@ -386,18 +386,7 @@ fn validate_module_protocol(protocol: &str, entrypoint: &str) -> Result<(), Modu
 
 fn is_loopback_http_endpoint(ep: &str) -> bool {
     let lower = ep.to_ascii_lowercase();
-    lower.strip_prefix("http://").is_some_and(|rest| {
-        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-        if authority.contains('@') {
-            return false;
-        }
-        let host = if let Some(v6) = authority.strip_prefix('[') {
-            v6.split(']').next().unwrap_or("")
-        } else {
-            authority.split(':').next().unwrap_or("")
-        };
-        matches!(host, "localhost" | "127.0.0.1" | "::1")
-    })
+    lower.starts_with("http://") && crate::http::is_loopback_origin(ep)
 }
 
 #[cfg(test)]

@@ -192,17 +192,7 @@ fn read_chunked_body_with_admission(
                 return Err(io::Error::new(ErrorKind::InvalidInput, "request too large"));
             }
         }
-        let end = buffered.windows(2).position(|w| w == b"\r\n").unwrap();
-        let size = usize::from_str_radix(
-            String::from_utf8_lossy(&buffered[..end])
-                .split(';')
-                .next()
-                .unwrap_or("")
-                .trim(),
-            16,
-        )
-        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid chunk size"))?;
-        buffered.drain(..end + 2);
+        let size = parse_chunk_size(&mut buffered)?;
         if size == 0 {
             break;
         }
@@ -367,14 +357,11 @@ pub fn write_chunk(client: &mut TcpStream, body: &[u8], request_body: &[u8]) -> 
     client.write_all(b"\r\n")
 }
 
-pub fn read_one_chunk(
-    stream: &mut TcpStream,
-    buffered: &mut Vec<u8>,
-) -> io::Result<Option<Vec<u8>>> {
-    while !buffered.windows(2).any(|w| w == b"\r\n") {
-        read_more(stream, buffered)?;
-    }
-    let end = buffered.windows(2).position(|w| w == b"\r\n").unwrap();
+fn parse_chunk_size(buffered: &mut Vec<u8>) -> io::Result<usize> {
+    let end = buffered
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "missing chunk delimiter"))?;
     let size = usize::from_str_radix(
         String::from_utf8_lossy(&buffered[..end])
             .split(';')
@@ -385,6 +372,17 @@ pub fn read_one_chunk(
     )
     .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid chunk size"))?;
     buffered.drain(..end + 2);
+    Ok(size)
+}
+
+pub fn read_one_chunk(
+    stream: &mut TcpStream,
+    buffered: &mut Vec<u8>,
+) -> io::Result<Option<Vec<u8>>> {
+    while !buffered.windows(2).any(|w| w == b"\r\n") {
+        read_more(stream, buffered)?;
+    }
+    let size = parse_chunk_size(buffered)?;
     if size == 0 {
         return Ok(None);
     }

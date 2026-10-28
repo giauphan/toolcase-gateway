@@ -182,73 +182,21 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
             }))
         }
         "gateway_install_personal_module" => {
-            let manifest = if let Some(src) = params.get("source").and_then(|v| v.as_str()) {
-                let source = crate::gateway::installer::resolve_source(src);
-                let opts = crate::gateway::installer::InstallOptions {
-                    id: params
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    name: params
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    namespace: params
-                        .get("namespace")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    entrypoint: params
-                        .get("entrypoint")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    protocol: params
-                        .get("protocol")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    branch: params
-                        .get("branch")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                };
-                let state_dir = crate::gateway::installer::get_state_dir();
-                crate::gateway::installer::install_module(source, opts, &state_dir)
-                    .map_err(|e| format!("Module installation failed: {e}"))?
+            let opts = extract_install_options(params);
+            let state_dir = crate::gateway::installer::get_state_dir();
+            let source_opt = if let Some(src) = params.get("source").and_then(|v| v.as_str()) {
+                Some(crate::gateway::installer::resolve_source(src))
             } else if let Some(b64) = params.get("zip_base64").and_then(|v| v.as_str()) {
                 let bytes = crate::gateway::installer::decode_base64(b64)
                     .map_err(|e| format!("Invalid zip_base64: {e}"))?;
-                let opts = crate::gateway::installer::InstallOptions {
-                    id: params
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    name: params
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    namespace: params
-                        .get("namespace")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    entrypoint: params
-                        .get("entrypoint")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    protocol: params
-                        .get("protocol")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    branch: params
-                        .get("branch")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                };
-                let state_dir = crate::gateway::installer::get_state_dir();
-                crate::gateway::installer::install_module(
-                    crate::gateway::installer::InstallSource::ZipBytes(bytes),
-                    opts,
-                    &state_dir,
-                )
-                .map_err(|e| format!("Module installation failed: {e}"))?
+                Some(crate::gateway::installer::InstallSource::ZipBytes(bytes))
+            } else {
+                None
+            };
+
+            let manifest = if let Some(source) = source_opt {
+                crate::gateway::installer::install_module(source, opts, &state_dir)
+                    .map_err(|e| format!("Module installation failed: {e}"))?
             } else {
                 serde_json::from_value::<PersonalManifest>(params.clone())
                     .map_err(|e| format!("Invalid personal module manifest parameters: {e}"))?
@@ -373,6 +321,23 @@ pub fn read_resource(uri: &str, store: &ConfigStore) -> Result<Value, String> {
             }))
         }
         _ => Err(format!("Resource '{uri}' not found")),
+    }
+}
+
+fn extract_install_options(params: &Value) -> crate::gateway::installer::InstallOptions {
+    let opt_str = |key| {
+        params
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    };
+    crate::gateway::installer::InstallOptions {
+        id: opt_str("id"),
+        name: opt_str("name"),
+        namespace: opt_str("namespace"),
+        entrypoint: opt_str("entrypoint"),
+        protocol: opt_str("protocol"),
+        branch: opt_str("branch"),
     }
 }
 
