@@ -50,7 +50,7 @@ impl From<std::io::Error> for StorageError {
 }
 
 /// Pluggable database engine configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum DatabaseEngine {
     /// Local zero-configuration embedded SQLite database.
     Sqlite(PathBuf),
@@ -58,6 +58,16 @@ pub enum DatabaseEngine {
     Postgres(String),
     /// MySQL connection URL string for enterprise deployments.
     Mysql(String),
+}
+
+impl std::fmt::Debug for DatabaseEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sqlite(path) => f.debug_tuple("Sqlite").field(path).finish(),
+            Self::Postgres(_) => write!(f, "Postgres([REDACTED])"),
+            Self::Mysql(_) => write!(f, "Mysql([REDACTED])"),
+        }
+    }
 }
 
 /// Parses a database connection URL or falls back to local SQLite in `state_dir`.
@@ -81,9 +91,18 @@ pub fn parse_database_url(
             Ok(DatabaseEngine::Postgres(u.to_string()))
         }
         Some(u) if u.starts_with("mysql://") => Ok(DatabaseEngine::Mysql(u.to_string())),
-        Some(other) if !other.trim().is_empty() => Err(StorageError::UnsupportedEngine(format!(
-            "Scheme in '{other}' not recognized. Supported: sqlite://, postgres://, mysql://"
-        ))),
+        Some(other) if !other.trim().is_empty() => {
+            let scheme = other
+                .split("://")
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(32)
+                .collect::<String>();
+            Err(StorageError::UnsupportedEngine(format!(
+                "Scheme '{scheme}' not recognized. Supported: sqlite://, postgres://, mysql://"
+            )))
+        }
         _ => {
             let default_sqlite_path = state_dir.join("gateway.db");
             Ok(DatabaseEngine::Sqlite(default_sqlite_path))

@@ -613,3 +613,77 @@ fn test_dashboard_module_api_lifecycle() {
     handle.join().unwrap();
     let _ = fs::remove_file(temp_env);
 }
+
+#[test]
+fn test_system_catalog_and_one_click_installation() {
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use toolcase_gateway::config::{Config, ConfigStore};
+    use toolcase_gateway::http::read_response_head;
+
+    let catalog = toolcase_gateway::gateway::modules::get_system_module_catalog();
+    assert!(catalog.iter().any(|c| c.id == "cohere-provider"));
+    assert!(catalog.iter().any(|c| c.id == "claude-adapter"));
+    assert!(catalog.iter().any(|c| c.id == "groq-fast"));
+
+    let temp_env = std::env::temp_dir().join(format!("cat_test_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(Config::default(), temp_env.clone());
+
+    // 1. Install cohere-provider from catalog by ID
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let store_clone = store.clone();
+
+    let handle = thread::spawn(move || {
+        let (mut client, _) = listener.accept().unwrap();
+        let payload = br#"{"id":"cohere-provider"}"#;
+        toolcase_gateway::features::dashboard::handle_install_personal_module(
+            &mut client,
+            payload,
+            &store_clone,
+        )
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+    handle.join().unwrap();
+
+    // 2. Verify registered in module registry
+    let reg = store.module_registry();
+    let guard = reg.read().unwrap();
+    let cohere_mod = guard
+        .get_module("cohere-provider")
+        .expect("cohere-provider registered");
+    assert_eq!(cohere_mod.name, "Cohere Provider Adapter");
+    assert_eq!(cohere_mod.namespace, "/custom/cohere");
+    assert_eq!(
+        cohere_mod.status,
+        toolcase_gateway::gateway::modules::ModuleStatus::Enabled
+    );
+    drop(guard);
+
+    // 3. Namespace collision returns 400 Bad Request
+    let listener2 = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port2 = listener2.local_addr().unwrap().port();
+    let store_clone2 = store.clone();
+
+    let handle2 = thread::spawn(move || {
+        let (mut client, _) = listener2.accept().unwrap();
+        let payload = br#"{"id":"another-cohere","namespace":"/custom/cohere"}"#;
+        let _ = toolcase_gateway::features::dashboard::handle_install_personal_module(
+            &mut client,
+            payload,
+            &store_clone2,
+        );
+    });
+
+    let mut client2 = TcpStream::connect(("127.0.0.1", port2)).unwrap();
+    let head2 = read_response_head(&mut client2).unwrap();
+    assert_eq!(head2.status, 400);
+    handle2.join().unwrap();
+
+    let _ = fs::remove_file(temp_env);
+    let _ = fs::remove_file(store.config_file);
+}

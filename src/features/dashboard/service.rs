@@ -117,6 +117,7 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
             }
         },
         "modules": store.module_registry().read().map(|r| r.list_modules()).unwrap_or_default(),
+        "catalog": crate::gateway::modules::get_system_module_catalog(),
         "mcp": {
             "status": "enabled",
             "transports": ["stdio", "http-sse"],

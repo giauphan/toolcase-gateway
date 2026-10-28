@@ -525,11 +525,31 @@ footer.site-footer {
       </table>
     </div>
 
+    <!-- System Module Catalog (1-Click Install) -->
+    <div style="margin-top: 24px; margin-bottom: 20px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
+          <span>System Module Catalog</span>
+          <span class="tag ok" style="font-size: 11px;">1-Click Install</span>
+        </h3>
+        <span style="font-size: 12px; color: var(--text-muted);">Standard provider adapters following platform module format</span>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+        Deploy pre-configured provider modules directly into your gateway routing tree. Click <strong>Install</strong> on any module below.
+      </p>
+      <div id="catalog-grid" class="grid-2" style="gap: 12px;">
+        <div class="empty-hint" style="grid-column: 1/-1;">Loading system catalog...</div>
+      </div>
+    </div>
+
     <!-- Personal Module Installation -->
     <details style="margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; background: var(--surface-2);">
       <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary); outline: none;">
-        Install Self-Contained Module (GitHub, ZIP Archive, or Local Script)
+        Install Custom Module (GitHub Repo, ZIP Archive, or Upload)
       </summary>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px; margin-bottom: 12px;">
+        Custom packages must follow the standardized gateway module specification (with <code>module.json</code>, <code>manifest.json</code>, or <code>__manifest__.json</code> declaring <code>id</code>, <code>namespace</code>, and <code>entrypoint</code>).
+      </p>
       <form id="install-module-form" style="margin-top: 16px;">
         <div class="field-group" style="margin-bottom: 14px;">
           <label for="mod-source">Source (GitHub Repository URL or ZIP Archive URL/Path)</label>
@@ -941,6 +961,18 @@ footer.site-footer {
   const jevErrMsg = byId('jev-err-msg');
 
   const modulesTbody = byId('modules-tbody');
+  const catalogGrid = byId('catalog-grid');
+  if (catalogGrid) {
+    catalogGrid.addEventListener('click', function(ev) {
+      const btn = ev.target.closest('.catalog-install-btn');
+      if (!btn) return;
+      const id = btn.getAttribute('data-catalog-id');
+      if (!id) return;
+      btn.disabled = true;
+      btn.textContent = 'Installing...';
+      executeModuleInstall({ id: id });
+    });
+  }
   if (modulesTbody) {
     modulesTbody.addEventListener('click', function(e) {
       const toggleBtn = e.target.closest('.module-toggle');
@@ -1036,6 +1068,48 @@ footer.site-footer {
         + '</tr>';
     });
     modulesTbody.innerHTML = rows.join('');
+  }
+
+  function isModuleInstalled(id, installedModules) {
+    if (!installedModules) return false;
+    return installedModules.some(function(m) { return m.id === id; });
+  }
+
+  function renderCatalogItem(item, isInstalled) {
+    const actionHtml = isInstalled
+      ? '<span class="tag ok" style="padding:4px 8px; font-size:11px;">Installed</span>'
+      : '<button type="button" class="btn-primary btn-sm catalog-install-btn" style="padding:4px 10px; font-size:12px;" data-catalog-id="'
+        + escapeHtml(item.id)
+        + '">Install</button>';
+
+    const capsHtml = (item.capabilities || []).map(function(c) {
+      return '<span class="tag" style="padding:2px 6px; font-size:10px;">' + escapeHtml(c) + '</span>';
+    }).join(' ');
+
+    return '<div class="card" style="margin:0; padding:12px; background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; justify-content:space-between; gap:8px;">'
+      + '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">'
+      + '<div>'
+      + '<strong style="font-size:13px; color:var(--text-primary);">' + escapeHtml(item.name) + '</strong>'
+      + '<div class="mono" style="font-size:11px; color:var(--text-muted); margin-top:2px;">' + escapeHtml(item.namespace) + '</div>'
+      + '</div>'
+      + actionHtml
+      + '</div>'
+      + '<p style="font-size:12px; color:var(--text-secondary); margin:0;">' + escapeHtml(item.description) + '</p>'
+      + '<div style="display:flex; gap:6px; flex-wrap:wrap;">'
+      + capsHtml
+      + '</div>'
+      + '</div>';
+  }
+
+  function renderCatalog(catalog, installedModules) {
+    if (!catalogGrid) return;
+    if (!catalog || catalog.length === 0) {
+      catalogGrid.innerHTML = '<div class="empty-hint" style="grid-column: 1/-1;">No catalog modules available</div>';
+      return;
+    }
+    catalogGrid.innerHTML = catalog.map(function(item) {
+      return renderCatalogItem(item, isModuleInstalled(item.id, installedModules));
+    }).join('');
   }
 
   function formatAccountCount(count) {
@@ -1346,6 +1420,7 @@ footer.site-footer {
       .then(function(data) {
         if (data.config) renderConfigSection(data.config);
         if (data.modules) renderModules(data.modules);
+        if (data.catalog) renderCatalog(data.catalog, data.modules);
         const p = data.providers;
         if (p) {
           if (p.omniroute) renderOmnirouteSection(p.omniroute);

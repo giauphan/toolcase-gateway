@@ -36,6 +36,27 @@ fn parse_or_synthesize_manifest(
     if let Ok(m) = serde_json::from_slice::<PersonalManifest>(body) {
         return Ok(m);
     }
+    if let Some(target_id) = payload.id.as_deref().or(payload.namespace.as_deref()) {
+        if let Some(cat) = crate::gateway::modules::get_system_module_catalog()
+            .into_iter()
+            .find(|c| c.id == target_id || c.namespace == target_id)
+        {
+            return Ok(PersonalManifest {
+                id: cat.id,
+                name: cat.name,
+                version: cat.version,
+                namespace: cat.namespace,
+                entrypoint: payload
+                    .entrypoint
+                    .clone()
+                    .unwrap_or_else(|| "/bin/echo".to_string()),
+                protocol: cat.protocol,
+                capabilities: cat.capabilities,
+                config_schema: None,
+                permissions: Vec::new(),
+            });
+        }
+    }
     let Some(ref ns) = payload.namespace else {
         return Err("Route Path URL Prefix (namespace) is required (e.g. /custom/my-tool)".into());
     };
