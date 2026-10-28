@@ -469,7 +469,7 @@ footer.site-footer {
 
   <div class="grid" id="stats-grid">
     <div class="stat-box">
-      <div class="title">OmniRoute Proxy</div>
+      <div class="title"><a href="/ominroute/dashboard" style="color:inherit;text-decoration:none;">OmniRoute Proxy ↗</a></div>
       <div class="val" id="omni-target">--</div>
       <div class="desc" id="omni-desc">Default fallback &amp; OpenAI chat router</div>
     </div>
@@ -1057,11 +1057,15 @@ footer.site-footer {
           + '">Remove</button>';
       }
 
+      const nsCell = m.id === 'omniroute'
+        ? '<a href="' + escapeHtml(m.namespace) + '/dashboard" style="color:var(--primary);text-decoration:underline;">' + escapeHtml(m.namespace) + '</a>'
+        : escapeHtml(m.namespace);
+
       return '<tr>'
         + '<td class="mono"><strong>' + escapeHtml(m.id) + '</strong></td>'
         + '<td>' + escapeHtml(m.name) + '</td>'
         + '<td>' + kindBadge + '</td>'
-        + '<td class="mono">' + escapeHtml(m.namespace) + '</td>'
+        + '<td class="mono">' + nsCell + '</td>'
         + '<td style="font-size:12px;color:var(--text-muted);">' + escapeHtml((m.capabilities || []).join(', ')) + '</td>'
         + '<td>' + statusBadge + '</td>'
         + '<td>' + toggleAction + removeAction + '</td>'

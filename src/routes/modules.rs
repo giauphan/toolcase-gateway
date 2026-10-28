@@ -3,8 +3,8 @@
 use crate::config::{Config, ConfigStore};
 use crate::gateway::modules::{ModuleKind, ModuleStatus, PersonalManifest};
 use crate::http::write_error;
-use crate::omniroute::handle_omniroute_proxy;
-use std::io;
+use crate::omniroute::handle_omniroute_proxy_with_prefix;
+use std::io::{self, Write};
 use std::net::TcpStream;
 
 fn dispatch_builtin_omniroute(
@@ -13,13 +13,38 @@ fn dispatch_builtin_omniroute(
     config: &Config,
     subpath: &str,
 ) -> io::Result<u16> {
+    let clean_sub = subpath.trim_matches('/');
+    let prefix = if request.path.starts_with("/omniroute") {
+        "/omniroute"
+    } else {
+        "/ominroute"
+    };
+
+    if request.method.eq_ignore_ascii_case("get")
+        && (clean_sub.is_empty() || clean_sub == "dashbard")
+    {
+        let query_suffix = match request.path.split_once('?') {
+            Some((_, q)) => format!("?{q}"),
+            None => String::new(),
+        };
+        let location = format!("{prefix}/dashboard{query_suffix}");
+        client.write_all(
+            format!(
+                "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )?;
+        client.flush()?;
+        return Ok(302);
+    }
+
     let mut req_clone = request.clone();
     let base = if subpath.is_empty() { "/" } else { subpath };
     req_clone.path = match request.path.split_once('?') {
         Some((_, q)) => format!("{base}?{q}"),
         None => base.to_string(),
     };
-    handle_omniroute_proxy(client, &req_clone, config)
+    handle_omniroute_proxy_with_prefix(client, &req_clone, config, Some(prefix))
 }
 
 fn dispatch_builtin_muse(

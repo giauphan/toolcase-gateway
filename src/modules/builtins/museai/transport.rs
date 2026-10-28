@@ -13,6 +13,30 @@ const MAX_MUSE_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
 pub const MUSE_WS_OPERATION_DEADLINE_SECS: u64 = 360;
 
+/// Applies standard browser headers required for HTTP communication with Muse.ai endpoints.
+pub fn apply_muse_http_headers<B>(
+    mut req: ureq::RequestBuilder<B>,
+    base_url: &str,
+) -> ureq::RequestBuilder<B> {
+    req = req
+        .header("Origin", base_url)
+        .header("Referer", &format!("{base_url}/"))
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+        )
+        .header(
+            "sec-ch-ua",
+            r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#,
+        )
+        .header("sec-ch-ua-mobile", "?0")
+        .header("sec-ch-ua-platform", r#""Windows""#)
+        .header("sec-fetch-dest", "empty")
+        .header("sec-fetch-mode", "cors")
+        .header("sec-fetch-site", "same-origin");
+    req
+}
+
 #[allow(dead_code)]
 pub struct MuseWebSocket {
     socket: WebSocket<MaybeTlsStream<TcpStream>>,

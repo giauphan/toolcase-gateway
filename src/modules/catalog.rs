@@ -14,71 +14,68 @@ pub struct SystemCatalogModule {
     pub capabilities: Vec<String>,
 }
 
+fn catalog_item(
+    id: &str,
+    name: &str,
+    description: &str,
+    namespace: &str,
+    capabilities: &[&str],
+) -> SystemCatalogModule {
+    SystemCatalogModule {
+        id: id.to_string(),
+        name: name.to_string(),
+        description: description.to_string(),
+        namespace: namespace.to_string(),
+        version: "1.0.0".to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: capabilities.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
 /// Returns the available catalog of standard provider modules ready for installation.
 pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
     vec![
-        SystemCatalogModule {
-            id: "cohere-provider".to_string(),
-            name: "Cohere Provider Adapter".to_string(),
-            description: "Cohere Command-R & Embeddings provider adapter".to_string(),
-            namespace: "/custom/cohere".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec!["chat_completions".to_string(), "models".to_string()],
-        },
-        SystemCatalogModule {
-            id: "claude-adapter".to_string(),
-            name: "Anthropic Claude Adapter".to_string(),
-            description: "Anthropic Claude 3.5 Sonnet & Haiku bridge".to_string(),
-            namespace: "/custom/claude".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![
-                "chat_completions".to_string(),
-                "models".to_string(),
-                "streaming".to_string(),
-            ],
-        },
-        SystemCatalogModule {
-            id: "groq-fast".to_string(),
-            name: "Groq High-Speed LLM".to_string(),
-            description: "Ultra-low latency inference via Groq LPU".to_string(),
-            namespace: "/custom/groq".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec!["chat_completions".to_string(), "models".to_string()],
-        },
-        SystemCatalogModule {
-            id: "mistral-ai".to_string(),
-            name: "Mistral AI Provider".to_string(),
-            description: "Mistral Large, Codestral & Mixtral models".to_string(),
-            namespace: "/custom/mistral".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec!["chat_completions".to_string(), "models".to_string()],
-        },
-        SystemCatalogModule {
-            id: "local-echo".to_string(),
-            name: "Local Echo Test Module".to_string(),
-            description: "Diagnostic echo adapter for local routing testing".to_string(),
-            namespace: "/custom/echo".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec!["chat_completions".to_string()],
-        },
-        SystemCatalogModule {
-            id: "suite-test".to_string(),
-            name: "Suite Provider Group".to_string(),
-            description: "Bundled multi-provider group (chat completions, vision, models)"
-                .to_string(),
-            namespace: "/custom/suite-test".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![
-                "chat_completions".to_string(),
-                "vision".to_string(),
-                "models".to_string(),
-            ],
-        },
+        catalog_item(
+            "cohere-provider",
+            "Cohere Provider Adapter",
+            "Cohere Command-R & Embeddings provider adapter",
+            "/custom/cohere",
+            &["chat_completions", "models"],
+        ),
+        catalog_item(
+            "claude-adapter",
+            "Anthropic Claude Adapter",
+            "Anthropic Claude 3.5 Sonnet & Haiku bridge",
+            "/custom/claude",
+            &["chat_completions", "models", "streaming"],
+        ),
+        catalog_item(
+            "groq-fast",
+            "Groq High-Speed LLM",
+            "Ultra-low latency inference via Groq LPU",
+            "/custom/groq",
+            &["chat_completions", "models"],
+        ),
+        catalog_item(
+            "mistral-ai",
+            "Mistral AI Provider",
+            "Mistral Large, Codestral & Mixtral models",
+            "/custom/mistral",
+            &["chat_completions", "models"],
+        ),
+        catalog_item(
+            "local-echo",
+            "Local Echo Test Module",
+            "Diagnostic echo adapter for local routing testing",
+            "/custom/echo",
+            &["chat_completions"],
+        ),
+        catalog_item(
+            "suite-test",
+            "Suite Provider Group",
+            "Bundled multi-provider group (chat completions, vision, models)",
+            "/custom/suite-test",
+            &["chat_completions", "vision", "models"],
+        ),
     ]
 }

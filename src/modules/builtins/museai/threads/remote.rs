@@ -175,16 +175,9 @@ pub fn delete_muse_thread(base_url: &str, thread_id: &str, config: &Config) -> i
     let delete_thread_url = format!("{base_url}/api/thread/{thread_id}");
     let mut req = ureq::delete(&delete_thread_url)
         .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .header("Origin", base_url)
-        .header("Referer", &format!("{base_url}/"))
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
-        .header("sec-ch-ua", r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#)
-        .header("sec-ch-ua-mobile", "?0")
-        .header("sec-ch-ua-platform", r#""Windows""#)
-        .header("sec-fetch-dest", "empty")
-        .header("sec-fetch-mode", "cors")
-        .header("sec-fetch-site", "same-origin");
+        .header("Accept", "application/json");
+
+    req = crate::providers::museai::transport::apply_muse_http_headers(req, base_url);
 
     if !config.museai_cookie.is_empty() {
         req = req.header("Cookie", &config.museai_cookie);

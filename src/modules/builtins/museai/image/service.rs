@@ -174,6 +174,24 @@ fn create_init_job_record(req: &ValidatedImageRequest) -> ImageJobRecord {
     }
 }
 
+fn check_or_reserve_image_job(
+    req: &ValidatedImageRequest,
+) -> io::Result<Option<serde_json::Value>> {
+    if let Some(existing) = &req.existing_job {
+        if existing.status == "completed" && !existing.image_url.is_empty() {
+            return Ok(Some(image_job_response(existing)));
+        }
+    }
+
+    let init_record = create_init_job_record(req);
+    if let Some(existing) = reserve_image_job(&init_record)? {
+        if existing.status == "completed" && !existing.image_url.is_empty() {
+            return Ok(Some(image_job_response(&existing)));
+        }
+    }
+    Ok(None)
+}
+
 pub fn create_image(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
     create_image_with_completion(request_body, config, request_museai_chat_completion)
 }
@@ -187,18 +205,8 @@ where
     F: Fn(&[u8], &Config, bool) -> io::Result<String>,
 {
     let req = parse_and_validate_image_request(request_body)?;
-
-    if let Some(existing) = &req.existing_job {
-        if existing.status == "completed" && !existing.image_url.is_empty() {
-            return Ok(image_job_response(existing));
-        }
-    }
-
-    let init_record = create_init_job_record(&req);
-    if let Some(existing) = reserve_image_job(&init_record)? {
-        if existing.status == "completed" && !existing.image_url.is_empty() {
-            return Ok(image_job_response(&existing));
-        }
+    if let Some(cached) = check_or_reserve_image_job(&req)? {
+        return Ok(cached);
     }
 
     finish_image_request(req, config, request_completion)
@@ -217,18 +225,8 @@ where
     F: Fn(&[u8], &Config, bool) -> io::Result<String> + Send + Sync + 'static,
 {
     let req = parse_and_validate_image_request(request_body)?;
-
-    if let Some(existing) = &req.existing_job {
-        if existing.status == "completed" && !existing.image_url.is_empty() {
-            return Ok(image_job_response(existing));
-        }
-    }
-
-    let init_record = create_init_job_record(&req);
-    if let Some(existing) = reserve_image_job(&init_record)? {
-        if existing.status == "completed" && !existing.image_url.is_empty() {
-            return Ok(image_job_response(&existing));
-        }
+    if let Some(cached) = check_or_reserve_image_job(&req)? {
+        return Ok(cached);
     }
 
     crate::runtime::logger::log_message(

@@ -55,6 +55,15 @@ pub fn handle_omniroute_proxy(
     crate::features::proxy::ProxyService::forward(client, request, config)
 }
 
+pub fn handle_omniroute_proxy_with_prefix(
+    client: &mut TcpStream,
+    request: &Request,
+    config: &Config,
+    prefix: Option<&str>,
+) -> io::Result<u16> {
+    crate::features::proxy::ProxyService::forward_with_prefix(client, request, config, prefix)
+}
+
 pub fn candidate_models(
     body: &[u8],
     fallbacks: &[String],

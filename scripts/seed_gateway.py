@@ -302,6 +302,34 @@ def seed_from_gateway_config(conn: sqlite3.Connection, config_path: str, enc_key
     apply_personal_modules(conn, data.get("personal_modules") or [])
 
 
+def read_key_from_env_file(env_path: Path) -> str:
+    """Extracts existing encryption key from an environment file if present."""
+    if not env_path.is_file():
+        return ""
+    try:
+        content = env_path.read_text(encoding="utf-8")
+        for line in content.splitlines():
+            line = line.strip()
+            if line.startswith("GW_ENCRYPTION_KEY=") and not line.startswith("#"):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return ""
+
+
+def generate_and_save_key(env_path: Path) -> str:
+    """Generates a secure 256-bit key and appends it to the env file."""
+    import secrets
+    new_key = secrets.token_hex(32)
+    try:
+        with open(env_path, "a", encoding="utf-8") as f:
+            f.write(f"\n# Auto-generated storage encryption key\nGW_ENCRYPTION_KEY={new_key}\n")
+        print(f"[SECURITY] Generated new GW_ENCRYPTION_KEY and saved to {env_path}")
+    except Exception as e:
+        print(f"[SECURITY] Warning: Could not write key to {env_path}: {e}")
+    return new_key
+
+
 def resolve_encryption_key(auto_generate: bool) -> str:
     """Resolves existing encryption key or optionally auto-generates one into .env."""
     key = os.environ.get("GW_ENCRYPTION_KEY", "").strip()
@@ -309,29 +337,12 @@ def resolve_encryption_key(auto_generate: bool) -> str:
         return key
 
     env_path = Path(".env")
-    if env_path.is_file():
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("GW_ENCRYPTION_KEY=") and not line.startswith("#"):
-                        val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        if val:
-                            return val
-        except Exception:
-            pass
+    key = read_key_from_env_file(env_path)
+    if key:
+        return key
 
     if auto_generate:
-        import secrets
-        new_key = secrets.token_hex(32)
-        try:
-            with open(env_path, "a", encoding="utf-8") as f:
-                f.write(f"\n# Auto-generated storage encryption key\nGW_ENCRYPTION_KEY={new_key}\n")
-            print(f"[SECURITY] Generated new GW_ENCRYPTION_KEY and saved to {env_path}")
-            return new_key
-        except Exception as e:
-            print(f"[SECURITY] Warning: Could not write key to {env_path}: {e}")
-            return new_key
+        return generate_and_save_key(env_path)
 
     return ""
 

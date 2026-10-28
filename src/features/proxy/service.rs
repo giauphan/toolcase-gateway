@@ -9,6 +9,13 @@ use std::thread;
 
 static RR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+struct UpstreamAttempt<'a> {
+    model: &'a str,
+    index: usize,
+    last: bool,
+    prefix: Option<&'a str>,
+}
+
 pub struct ProxyService;
 
 impl ProxyService {
@@ -73,11 +80,15 @@ impl ProxyService {
         client: &mut TcpStream,
         request: &Request,
         config: &Config,
-        model: &str,
-        index: usize,
-        last: bool,
+        attempt: UpstreamAttempt<'_>,
         last_status: &mut Option<u16>,
     ) -> io::Result<Option<u16>> {
+        let UpstreamAttempt {
+            model,
+            index,
+            last,
+            prefix,
+        } = attempt;
         let mut upstream = match OmniRouteAdapter::open_upstream(client, request, config, model) {
             Ok(u) => u,
             Err(e) => {
@@ -185,12 +196,33 @@ impl ProxyService {
                 model, head.status, head.reason, request.path
             ),
         );
+        let mut head = head;
+        if let Some(pfx) = prefix {
+            if (300..=399).contains(&head.status) {
+                let target_host = &config.target_host;
+                let target_port = config.target_port;
+                for (name, val) in &mut head.headers {
+                    if name.eq_ignore_ascii_case("location") {
+                        *val = rewrite_location_header(val, pfx, target_host, target_port);
+                    }
+                }
+            }
+        }
         let status = head.status;
         crate::http::stream_response(client, &mut upstream, head, &request.body)?;
         Ok(Some(status))
     }
 
     pub fn forward(client: &mut TcpStream, request: &Request, config: &Config) -> io::Result<u16> {
+        Self::forward_with_prefix(client, request, config, None)
+    }
+
+    pub fn forward_with_prefix(
+        client: &mut TcpStream,
+        request: &Request,
+        config: &Config,
+        prefix: Option<&str>,
+    ) -> io::Result<u16> {
         let rotation = RR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let candidates = crate::gateway::candidates::plan_candidates(
             &request.body,
@@ -256,15 +288,15 @@ impl ProxyService {
                 ),
             );
 
-            if let Some(status) = Self::forward_upstream(
-                client,
-                request,
-                config,
+            let attempt = UpstreamAttempt {
                 model,
                 index,
                 last,
-                &mut last_status,
-            )? {
+                prefix,
+            };
+            if let Some(status) =
+                Self::forward_upstream(client, request, config, attempt, &mut last_status)?
+            {
                 return Ok(status);
             }
         }
@@ -285,5 +317,33 @@ impl ProxyService {
             "toolcase-gateway: all upstream models exhausted",
         )?;
         Ok(final_status)
+    }
+}
+
+/// Rewrites redirect `Location` headers from an upstream service to remain within the mounted module prefix.
+pub fn rewrite_location_header(
+    location: &str,
+    prefix: &str,
+    upstream_host: &str,
+    upstream_port: u16,
+) -> String {
+    let upstream_prefix_http = format!("http://{upstream_host}:{upstream_port}");
+    let upstream_prefix_https = format!("https://{upstream_host}:{upstream_port}");
+    let path = if let Some(stripped) = location.strip_prefix(&upstream_prefix_http) {
+        stripped
+    } else if let Some(stripped) = location.strip_prefix(&upstream_prefix_https) {
+        stripped
+    } else if location.starts_with('/') {
+        location
+    } else {
+        return location.to_string();
+    };
+
+    if path == "/" || path.is_empty() {
+        format!("{prefix}/dashboard")
+    } else if path.starts_with(prefix) {
+        path.to_string()
+    } else {
+        format!("{prefix}{path}")
     }
 }

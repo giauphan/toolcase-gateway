@@ -6,16 +6,10 @@ pub fn spawn_muse_thread(base_url: &str, config: &Config) -> io::Result<String> 
     let mut req = ureq::post(&create_thread_url)
         .header("Content-Type", "text/plain;charset=UTF-8")
         .header("Accept", "text/x-component")
-        .header("Origin", base_url)
         .header("Referer", &format!("{base_url}/thread/new"))
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
-        .header("sec-ch-ua", r#""Brave";v="153", "Not_A Brand";v="8", "Chromium";v="153""#)
-        .header("sec-ch-ua-mobile", "?0")
-        .header("sec-ch-ua-platform", r#""Windows""#)
-        .header("sec-fetch-dest", "empty")
-        .header("sec-fetch-mode", "cors")
-        .header("sec-fetch-site", "same-origin")
         .header("next-action", "00eaaa570484d537580e0bf4e19ee28a65ac048d62");
+
+    req = crate::providers::museai::transport::apply_muse_http_headers(req, base_url);
 
     if !config.museai_cookie.is_empty() {
         req = req.header("Cookie", &config.museai_cookie);

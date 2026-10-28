@@ -16,6 +16,16 @@ pub struct ModuleRegistry {
     personal_manifests: HashMap<String, PersonalManifest>,
 }
 
+fn sub_provider(id: &str, name: &str, subpath: &str, caps: &[&str]) -> SubProviderDescriptor {
+    SubProviderDescriptor {
+        id: id.to_string(),
+        name: name.to_string(),
+        subpath: subpath.to_string(),
+        capabilities: caps.iter().map(|s| s.to_string()).collect(),
+        status: ModuleStatus::Enabled,
+    }
+}
+
 impl ModuleRegistry {
     /// Creates a registry initialized with default built-in platform modules.
     pub fn new() -> Self {
@@ -37,34 +47,15 @@ impl ModuleRegistry {
         );
 
         let muse_providers = vec![
-            SubProviderDescriptor {
-                id: "chat".to_string(),
-                name: "Muse Chat Completions".to_string(),
-                subpath: "/chat".to_string(),
-                capabilities: vec!["chat".to_string(), "models".to_string()],
-                status: ModuleStatus::Enabled,
-            },
-            SubProviderDescriptor {
-                id: "image".to_string(),
-                name: "Muse Image Generation".to_string(),
-                subpath: "/image".to_string(),
-                capabilities: vec!["image".to_string()],
-                status: ModuleStatus::Enabled,
-            },
-            SubProviderDescriptor {
-                id: "video".to_string(),
-                name: "Muse Video Generation".to_string(),
-                subpath: "/video".to_string(),
-                capabilities: vec!["video".to_string()],
-                status: ModuleStatus::Enabled,
-            },
-            SubProviderDescriptor {
-                id: "threads".to_string(),
-                name: "Muse Thread Memory".to_string(),
-                subpath: "/threads".to_string(),
-                capabilities: vec!["threads".to_string()],
-                status: ModuleStatus::Enabled,
-            },
+            sub_provider(
+                "chat",
+                "Muse Chat Completions",
+                "/chat",
+                &["chat", "models"],
+            ),
+            sub_provider("image", "Muse Image Generation", "/image", &["image"]),
+            sub_provider("video", "Muse Video Generation", "/video", &["video"]),
+            sub_provider("threads", "Muse Thread Memory", "/threads", &["threads"]),
         ];
 
         registry.register_builtin(
@@ -81,20 +72,13 @@ impl ModuleRegistry {
         );
 
         let jev_providers = vec![
-            SubProviderDescriptor {
-                id: "decisions".to_string(),
-                name: "Jev Decision Engine".to_string(),
-                subpath: "/decisions".to_string(),
-                capabilities: vec!["decisions".to_string()],
-                status: ModuleStatus::Enabled,
-            },
-            SubProviderDescriptor {
-                id: "models".to_string(),
-                name: "Jev Model Sampler".to_string(),
-                subpath: "/models".to_string(),
-                capabilities: vec!["models".to_string()],
-                status: ModuleStatus::Enabled,
-            },
+            sub_provider(
+                "decisions",
+                "Jev Decision Engine",
+                "/decisions",
+                &["decisions"],
+            ),
+            sub_provider("models", "Jev Model Sampler", "/models", &["models"]),
         ];
 
         registry.register_builtin(

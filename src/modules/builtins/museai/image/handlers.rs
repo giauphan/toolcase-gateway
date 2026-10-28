@@ -96,14 +96,7 @@ fn handle_create_image_internal(
             }
             let response_str = serde_json::to_string(&result_json)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            client.write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    response_str.len(),
-                    response_str
-                )
-                .as_bytes(),
-            )?;
+            crate::http::write_json_ok(client, &response_str)?;
             client.flush()
         }
         Err(e) => {

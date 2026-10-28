@@ -154,6 +154,18 @@ fn parse_approval_status(obj: &serde_json::Value) -> ApprovalStatus {
     }
 }
 
+fn apply_payload_fields(details: &mut ApprovalPayloadDetails, obj: &serde_json::Value) {
+    if let Some(host) = obj.get("host").and_then(|v| v.as_str()) {
+        details.host = Some(host.to_string());
+    }
+    if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
+        details.url = Some(url.to_string());
+    }
+    if let Some(method) = obj.get("method").and_then(|v| v.as_str()) {
+        details.method = Some(method.to_string());
+    }
+}
+
 fn parse_payload_details(
     obj: &serde_json::Value,
     payload_val: Option<&serde_json::Value>,
@@ -170,39 +182,15 @@ fn parse_payload_details(
         approval_type: payload_type.clone(),
         ..Default::default()
     };
-    if let Some(host) = obj.get("host").and_then(|v| v.as_str()) {
-        payload_details.host = Some(host.to_string());
-    }
-    if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
-        payload_details.url = Some(url.to_string());
-    }
-    if let Some(method) = obj.get("method").and_then(|v| v.as_str()) {
-        payload_details.method = Some(method.to_string());
-    }
+    apply_payload_fields(&mut payload_details, obj);
     if let Some(dest) = obj.get("destination").and_then(|v| v.as_str()) {
         payload_details.destination = Some(dest.to_string());
     }
     if let Some(p) = payload_val {
         if let Some(conn) = p.get("connector_payload") {
-            if let Some(host) = conn.get("host").and_then(|v| v.as_str()) {
-                payload_details.host = Some(host.to_string());
-            }
-            if let Some(url) = conn.get("url").and_then(|v| v.as_str()) {
-                payload_details.url = Some(url.to_string());
-            }
-            if let Some(method) = conn.get("method").and_then(|v| v.as_str()) {
-                payload_details.method = Some(method.to_string());
-            }
+            apply_payload_fields(&mut payload_details, conn);
         }
-        if let Some(host) = p.get("host").and_then(|v| v.as_str()) {
-            payload_details.host = Some(host.to_string());
-        }
-        if let Some(url) = p.get("url").and_then(|v| v.as_str()) {
-            payload_details.url = Some(url.to_string());
-        }
-        if let Some(method) = p.get("method").and_then(|v| v.as_str()) {
-            payload_details.method = Some(method.to_string());
-        }
+        apply_payload_fields(&mut payload_details, p);
         if let Some(dest) = p.get("destination").and_then(|v| v.as_str()) {
             payload_details.destination = Some(dest.to_string());
         }
@@ -210,8 +198,7 @@ fn parse_payload_details(
     (payload_type, payload_details)
 }
 
-fn parse_approval_scope(obj: &serde_json::Value) -> ApprovalScope {
-    let mut scope = ApprovalScope::default();
+fn apply_scope_fields(scope: &mut ApprovalScope, obj: &serde_json::Value) {
     if let Some(thread_id) = obj.get("thread_id").and_then(|v| v.as_str()) {
         scope.thread_id = Some(thread_id.to_string());
     }
@@ -224,19 +211,13 @@ fn parse_approval_scope(obj: &serde_json::Value) -> ApprovalScope {
     if let Some(owner_id) = obj.get("owner_id").and_then(|v| v.as_str()) {
         scope.owner_id = Some(owner_id.to_string());
     }
+}
+
+fn parse_approval_scope(obj: &serde_json::Value) -> ApprovalScope {
+    let mut scope = ApprovalScope::default();
+    apply_scope_fields(&mut scope, obj);
     if let Some(s) = obj.get("scope") {
-        if let Some(thread_id) = s.get("thread_id").and_then(|v| v.as_str()) {
-            scope.thread_id = Some(thread_id.to_string());
-        }
-        if let Some(session_scope_id) = s.get("session_scope_id").and_then(|v| v.as_str()) {
-            scope.session_scope_id = Some(session_scope_id.to_string());
-        }
-        if let Some(vm_id) = s.get("vm_id").and_then(|v| v.as_str()) {
-            scope.vm_id = Some(vm_id.to_string());
-        }
-        if let Some(owner_id) = s.get("owner_id").and_then(|v| v.as_str()) {
-            scope.owner_id = Some(owner_id.to_string());
-        }
+        apply_scope_fields(&mut scope, s);
     }
     scope
 }

@@ -412,6 +412,38 @@ pub fn write_error(
     write!(client, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{body}", body.len())
 }
 
+/// Maps a numeric HTTP status code to its standard reason phrase.
+pub fn http_status_text(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        408 => "Request Timeout",
+        409 => "Conflict",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Internal Server Error",
+    }
+}
+
+/// Writes a 200 OK JSON response body to the client stream.
+pub fn write_json_ok(client: &mut TcpStream, body: &str) -> io::Result<()> {
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+}
+
 /// Verifies whether an Origin header matches an exact loopback host.
 pub fn is_loopback_origin(origin: &str) -> bool {
     let lower = origin.to_ascii_lowercase();

@@ -6,14 +6,7 @@ use std::io::{self, Write};
 use std::net::TcpStream;
 
 pub fn write_chat_completion(client: &mut TcpStream, response: &str) -> io::Result<()> {
-    client.write_all(
-        format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            response.len(),
-            response
-        )
-        .as_bytes(),
-    )?;
+    crate::http::write_json_ok(client, response)?;
     client.flush()
 }
 
@@ -79,23 +72,7 @@ pub fn handle_museai_v1(
 
     match result {
         Ok(upstream_resp) => {
-            let status_text = match upstream_resp.status {
-                200 => "OK",
-                201 => "Created",
-                204 => "No Content",
-                400 => "Bad Request",
-                401 => "Unauthorized",
-                403 => "Forbidden",
-                404 => "Not Found",
-                408 => "Request Timeout",
-                429 => "Too Many Requests",
-                500 => "Internal Server Error",
-                502 => "Bad Gateway",
-                503 => "Service Unavailable",
-                504 => "Gateway Timeout",
-                _ => "Internal Server Error",
-            };
-
+            let status_text = crate::http::http_status_text(upstream_resp.status);
             let out = format!(
                 "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 upstream_resp.status,
@@ -285,14 +262,7 @@ fn handle_create_video_internal(
             }
             let response_str = serde_json::to_string(&result_json)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            client.write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    response_str.len(),
-                    response_str
-                )
-                .as_bytes(),
-            )?;
+            crate::http::write_json_ok(client, &response_str)?;
             client.flush()
         }
         Err(e) => {
@@ -350,14 +320,7 @@ pub fn handle_museai_thread_cleanup(
             });
             let response_str = serde_json::to_string(&body)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            client.write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    response_str.len(),
-                    response_str
-                )
-                .as_bytes(),
-            )?;
+            crate::http::write_json_ok(client, &response_str)?;
             client.flush()
         }
         Err(e) => crate::http::write_error(
@@ -406,14 +369,7 @@ pub fn handle_museai_threads_cleanup_run(
     });
     let response_str =
         serde_json::to_string(&body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    client.write_all(
-        format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            response_str.len(),
-            response_str
-        )
-        .as_bytes(),
-    )?;
+    crate::http::write_json_ok(client, &response_str)?;
     client.flush()
 }
 
@@ -457,14 +413,7 @@ pub fn handle_update_video_prompt(
             });
             let response_str = serde_json::to_string(&response)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            client.write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    response_str.len(),
-                    response_str
-                )
-                .as_bytes(),
-            )?;
+            crate::http::write_json_ok(client, &response_str)?;
             client.flush()
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => crate::http::write_error(
@@ -538,14 +487,7 @@ fn handle_get_video_with_host(
             }
             let response_str = serde_json::to_string(&response)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            client.write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    response_str.len(),
-                    response_str
-                )
-                .as_bytes(),
-            )?;
+            crate::http::write_json_ok(client, &response_str)?;
             client.flush()
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => crate::http::write_error(
