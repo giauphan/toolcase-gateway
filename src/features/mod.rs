@@ -1,5 +1,6 @@
 pub mod dashboard;
 pub mod har;
+pub mod mcp;
 pub mod proxy;
 pub mod video;
 

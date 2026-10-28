@@ -456,9 +456,9 @@ fn test_route_request_access_status_and_proxy_logs() {
         socket.flush().unwrap();
     });
 
-    // Client makes request to /v1/responses
+    // Client makes request to /ominroute/v1/responses
     let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
-    let req = b"POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 38\r\nConnection: close\r\n\r\n{\"model\":\"mock-model\",\"input\":\"hello\"}";
+    let req = b"POST /ominroute/v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 38\r\nConnection: close\r\n\r\n{\"model\":\"mock-model\",\"input\":\"hello\"}";
     client.write_all(req).unwrap();
     client.flush().unwrap();
 
@@ -475,7 +475,7 @@ fn test_route_request_access_status_and_proxy_logs() {
     assert!(acc_file.is_file(), "access.log must exist");
     let acc_content = fs::read_to_string(&acc_file).unwrap();
     assert!(
-        acc_content.contains(r#""POST /v1/responses" 200"#),
+        acc_content.contains(r#""POST /ominroute/v1/responses" 200"#),
         "access.log must record response status 200: {acc_content}"
     );
     assert!(

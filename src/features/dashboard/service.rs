@@ -115,6 +115,18 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
                     "timeout_secs": config.muse_approval.approval_timeout_secs,
                 },
             }
+        },
+        "modules": store.module_registry().read().map(|r| r.list_modules()).unwrap_or_default(),
+        "catalog": crate::gateway::modules::get_system_module_catalog(),
+        "mcp": {
+            "status": "enabled",
+            "transports": ["stdio", "http-sse"],
+            "endpoints": {
+                "jsonrpc": "/mcp",
+                "sse": "/mcp/sse"
+            },
+            "tools": crate::features::mcp::list_tools(),
+            "resources": crate::features::mcp::list_resources(),
         }
     });
 

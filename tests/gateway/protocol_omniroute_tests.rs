@@ -128,7 +128,7 @@ fn exhausted_models_report_final_model_and_status() {
     let request = b"{\"model\":\"primary-model\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         request.len(),
         std::str::from_utf8(request).unwrap()
     )
@@ -202,7 +202,7 @@ fn unauthorized_upstream_fails_over_to_next_model() {
     let request = b"{\"model\":\"primary-model\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         request.len(),
         std::str::from_utf8(request).unwrap()
     )
@@ -360,7 +360,7 @@ fn unknown_model_no_longer_exhausts_fallbacks() {
     let request = b"{\"model\":\"model-medium-hight\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         request.len(),
         std::str::from_utf8(request).unwrap()
     )
@@ -416,7 +416,7 @@ fn live_codex_model_repair_smoke() {
     );
     write!(
         socket,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     )
@@ -470,7 +470,7 @@ fn museai_fails_over_to_fallback() {
     let req = b"{\"model\":\"muse\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: loc\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: loc\r\nContent-Length: {}\r\n\r\n{}",
         req.len(),
         std::str::from_utf8(req).unwrap()
     )
@@ -677,4 +677,177 @@ fn test_confidential_vm_message_three_payload() {
 
     // Ensure rv_key isn't all zeros
     assert_ne!(&payload[token_end + 2..], &[0u8; 32]);
+}
+
+#[test]
+fn test_omniroute_root_redirects_to_dashboard() {
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_host = "127.0.0.1".into();
+    config.target_port = 20128;
+
+    let store =
+        toolcase_gateway::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let store_clone = store.clone();
+
+    let server_thread = thread::spawn(move || {
+        for _ in 0..4 {
+            let (client, _) = client_listener.accept().unwrap();
+            let _ = toolcase_gateway::routes::route_request(client, &store_clone);
+        }
+    });
+
+    for (path, expected_loc) in [
+        ("/ominroute", "/ominroute/dashboard"),
+        ("/ominroute/", "/ominroute/dashboard"),
+        ("/omniroute", "/omniroute/dashboard"),
+        ("/ominroute/dashbard", "/ominroute/dashboard"),
+    ] {
+        let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+        write!(
+            client,
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{client_port}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        client.flush().unwrap();
+
+        let head = toolcase_gateway::http::read_response_head(&mut client).unwrap();
+        assert_eq!(head.status, 302, "Failed for path {path}");
+        assert_eq!(
+            toolcase_gateway::http::header_value(&head.headers, "location"),
+            Some(expected_loc),
+            "Location header mismatch for {path}"
+        );
+    }
+
+    server_thread.join().unwrap();
+}
+
+#[test]
+fn test_omniroute_upstream_redirect_rewrites_location_header() {
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+    let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+
+    let mut config = test_config();
+    config.target_host = "127.0.0.1".into();
+    config.target_port = upstream_port;
+    config.retry_base_delay_ms = 0;
+    config.max_retry_delay_ms = 0;
+
+    let store =
+        toolcase_gateway::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let store_clone = store.clone();
+
+    let gateway = thread::spawn(move || {
+        for _ in 0..2 {
+            let (client, _) = client_listener.accept().unwrap();
+            let _ = toolcase_gateway::routes::route_request(client, &store_clone);
+        }
+    });
+
+    let upstream = thread::spawn(move || {
+        // First upstream request receives /dashboard and redirects to /
+        let (mut socket, _) = upstream_listener.accept().unwrap();
+        let _request = toolcase_gateway::http::read_request(&mut socket).unwrap();
+        write!(
+            socket,
+            "HTTP/1.1 302 Found\r\nLocation: /\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+
+        // Second upstream request redirects to /login
+        let (mut socket, _) = upstream_listener.accept().unwrap();
+        let _request = toolcase_gateway::http::read_request(&mut socket).unwrap();
+        write!(
+            socket,
+            "HTTP/1.1 302 Found\r\nLocation: /login\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    });
+
+    // Request 1: should rewrite Location: / to /ominroute/dashboard
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    write!(
+        client,
+        "GET /ominroute/dashboard HTTP/1.1\r\nHost: 127.0.0.1:{client_port}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+    let head = toolcase_gateway::http::read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 302);
+    assert_eq!(
+        toolcase_gateway::http::header_value(&head.headers, "location"),
+        Some("/ominroute/dashboard")
+    );
+
+    // Request 2: should rewrite Location: /login to /ominroute/login
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    write!(
+        client,
+        "GET /ominroute/dashboard HTTP/1.1\r\nHost: 127.0.0.1:{client_port}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    client.flush().unwrap();
+    let head = toolcase_gateway::http::read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 302);
+    assert_eq!(
+        toolcase_gateway::http::header_value(&head.headers, "location"),
+        Some("/ominroute/login")
+    );
+
+    gateway.join().unwrap();
+    upstream.join().unwrap();
+}
+
+#[test]
+fn test_omniroute_rewrite_location_unit_test() {
+    use toolcase_gateway::features::proxy::service::rewrite_location_header;
+
+    assert_eq!(
+        rewrite_location_header("/", "/ominroute", "127.0.0.1", 20128),
+        "/ominroute/dashboard"
+    );
+    assert_eq!(
+        rewrite_location_header("/dashboard", "/ominroute", "127.0.0.1", 20128),
+        "/ominroute/dashboard"
+    );
+    assert_eq!(
+        rewrite_location_header("/login", "/ominroute", "127.0.0.1", 20128),
+        "/ominroute/login"
+    );
+    assert_eq!(
+        rewrite_location_header("http://127.0.0.1:20128/", "/ominroute", "127.0.0.1", 20128),
+        "/ominroute/dashboard"
+    );
+    assert_eq!(
+        rewrite_location_header(
+            "http://127.0.0.1:20128/dashboard",
+            "/ominroute",
+            "127.0.0.1",
+            20128
+        ),
+        "/ominroute/dashboard"
+    );
+    assert_eq!(
+        rewrite_location_header(
+            "http://127.0.0.1:20128/login",
+            "/ominroute",
+            "127.0.0.1",
+            20128
+        ),
+        "/ominroute/login"
+    );
+    assert_eq!(
+        rewrite_location_header(
+            "https://auth.example.com/oauth",
+            "/ominroute",
+            "127.0.0.1",
+            20128
+        ),
+        "https://auth.example.com/oauth"
+    );
 }

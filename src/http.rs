@@ -16,6 +16,7 @@ const HOP_BY_HOP: [&str; 8] = [
 ];
 use std::net::TcpStream;
 
+#[derive(Clone, Debug)]
 pub struct Request {
     pub method: String,
     pub path: String,
@@ -191,17 +192,7 @@ fn read_chunked_body_with_admission(
                 return Err(io::Error::new(ErrorKind::InvalidInput, "request too large"));
             }
         }
-        let end = buffered.windows(2).position(|w| w == b"\r\n").unwrap();
-        let size = usize::from_str_radix(
-            String::from_utf8_lossy(&buffered[..end])
-                .split(';')
-                .next()
-                .unwrap_or("")
-                .trim(),
-            16,
-        )
-        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid chunk size"))?;
-        buffered.drain(..end + 2);
+        let size = parse_chunk_size(&mut buffered)?;
         if size == 0 {
             break;
         }
@@ -366,14 +357,11 @@ pub fn write_chunk(client: &mut TcpStream, body: &[u8], request_body: &[u8]) -> 
     client.write_all(b"\r\n")
 }
 
-pub fn read_one_chunk(
-    stream: &mut TcpStream,
-    buffered: &mut Vec<u8>,
-) -> io::Result<Option<Vec<u8>>> {
-    while !buffered.windows(2).any(|w| w == b"\r\n") {
-        read_more(stream, buffered)?;
-    }
-    let end = buffered.windows(2).position(|w| w == b"\r\n").unwrap();
+fn parse_chunk_size(buffered: &mut Vec<u8>) -> io::Result<usize> {
+    let end = buffered
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "missing chunk delimiter"))?;
     let size = usize::from_str_radix(
         String::from_utf8_lossy(&buffered[..end])
             .split(';')
@@ -384,6 +372,17 @@ pub fn read_one_chunk(
     )
     .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid chunk size"))?;
     buffered.drain(..end + 2);
+    Ok(size)
+}
+
+pub fn read_one_chunk(
+    stream: &mut TcpStream,
+    buffered: &mut Vec<u8>,
+) -> io::Result<Option<Vec<u8>>> {
+    while !buffered.windows(2).any(|w| w == b"\r\n") {
+        read_more(stream, buffered)?;
+    }
+    let size = parse_chunk_size(buffered)?;
     if size == 0 {
         return Ok(None);
     }
@@ -408,9 +407,73 @@ pub fn write_error(
     reason: &str,
     message: &str,
 ) -> io::Result<()> {
-    let body = format!(
-        "{{\"error\":{{\"message\":\"{}\"}}}}",
-        escape_json_string(message)
-    );
+    let escaped = escape_json_string(message);
+    let body = format!("{{\"error\":{{\"message\":\"{escaped}\"}},\"message\":\"{escaped}\"}}");
     write!(client, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{body}", body.len())
+}
+
+/// Maps a numeric HTTP status code to its standard reason phrase.
+pub fn http_status_text(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        408 => "Request Timeout",
+        409 => "Conflict",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Internal Server Error",
+    }
+}
+
+/// Maps an `io::ErrorKind` to its corresponding HTTP status code and reason phrase.
+pub fn io_error_to_http_status(kind: io::ErrorKind) -> (u16, &'static str) {
+    match kind {
+        io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
+        io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
+        io::ErrorKind::NotFound => (404, "Not Found"),
+        io::ErrorKind::WouldBlock | io::ErrorKind::AlreadyExists => (409, "Conflict"),
+        io::ErrorKind::Unsupported => (501, "Not Implemented"),
+        io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
+        _ => (502, "Bad Gateway"),
+    }
+}
+
+/// Writes a 200 OK JSON response body to the client stream.
+pub fn write_json_ok(client: &mut TcpStream, body: &str) -> io::Result<()> {
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+}
+
+/// Verifies whether an Origin header matches an exact loopback host.
+pub fn is_loopback_origin(origin: &str) -> bool {
+    let lower = origin.to_ascii_lowercase();
+    let Some(rest) = lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if let Some(v6) = authority.strip_prefix('[') {
+        v6.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }

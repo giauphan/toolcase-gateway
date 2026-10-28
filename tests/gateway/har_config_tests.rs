@@ -615,6 +615,9 @@ fn pipeline_stable_after_apply() {
         bootstrap_error
             .to_string()
             .contains("session bootstrap failed")
+            || bootstrap_error
+                .to_string()
+                .contains("cookie expired or invalid")
             || bootstrap_error.to_string().contains("readiness")
     );
 

@@ -3,68 +3,473 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>Gateway Dashboard — Provider &amp; Pipeline Control</title>
 <style>
-:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#e8eaf0;--muted:#9aa0b0;--accent:#5b8cff;--ok:#3fd08a;--err:#ff6b6b;--border:#2a2f3f;--radius:12px}
-@media (prefers-color-scheme: light){:root{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f6;--text:#1a1c24;--muted:#5a5f6e;--accent:#2f5be0;--ok:#1b9e68;--err:#d63;--border:#d8dbe4}}
-*{box-sizing:border-box}
-html,body{margin:0;min-height:100%}
-body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px 16px 60px}
-.wrap{max-width:960px;margin:0 auto}
-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:16px}
-h1{font-size:24px;margin:0 0 4px;font-weight:700}
-.sub{color:var(--muted);margin:0;font-size:14px}
-.nav-links{display:flex;gap:10px;align-items:center}
-.nav-link{padding:7px 14px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);text-decoration:none;font-size:13px;font-weight:600}
-.nav-link:hover{border-color:var(--accent);color:var(--accent)}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px}
-.card h2{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 16px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
-.grid{display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:16px;margin-bottom:20px}
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:640px){.grid-2{grid-template-columns:1fr}}
-.stat-box{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:16px}
-.stat-box .title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px;font-weight:700}
-.stat-box .val{font-size:18px;font-weight:700;color:var(--text);word-break:break-all}
-.stat-box .desc{font-size:12px;color:var(--muted);margin-top:6px}
-.table-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}
-th{color:var(--muted);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
-td{padding:12px;border-bottom:1px solid var(--border)}
-tr:last-child td{border-bottom:none}
-.tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
-.tag.ok{background:rgba(63,208,138,.15);color:var(--ok);border:1px solid var(--ok)}
-.tag.idle{background:var(--panel2);color:var(--muted);border:1px solid var(--border)}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-textarea,select,input[type=text],input[type=number]{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical}
-textarea:focus,select:focus,input[type=text]:focus,input[type=number]:focus{outline:none;border-color:var(--accent)}
-.field-group{margin-bottom:14px}
-label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
-.btns{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
-button{font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;padding:11px 22px;background:var(--accent);color:#fff}
-button:disabled{opacity:.5;cursor:not-allowed}
-.ok-box{background:rgba(63,208,138,.12);border:1px solid var(--ok);border-radius:8px;padding:14px;font-size:13px;color:var(--ok);margin-top:14px;display:none}
-.err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:14px;font-size:13px;color:var(--err);margin-top:14px;display:none;white-space:pre-wrap}
-.empty-hint{text-align:center;padding:24px;color:var(--muted);font-style:italic}
-.hint{font-size:12px;color:var(--muted);margin-top:4px}
+:root {
+  --bg: #000000;
+  --surface-1: #181818;
+  --surface-2: #1F1F1F;
+  --surface-3: #272727;
+  --border: #272727;
+  --border-focus: #FFFFFF;
+  --text-primary: #EDEDED;
+  --text-muted: #9B9B9B;
+  --text-subtle: #666666;
+  --accent: #FFFFFF;
+  --accent-text: #000000;
+  --ok: #10B981;
+  --ok-bg: rgba(16, 185, 129, 0.12);
+  --err: #EF4444;
+  --err-bg: rgba(239, 68, 68, 0.12);
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html, body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  min-height: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 88px 24px 80px;
+}
+header.nav-bar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1040px, calc(100% - 32px));
+  background: rgba(24, 24, 24, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 100;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--text-primary);
+}
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+.brand-name {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.nav-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  transition: color 200ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.nav-link:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+.hero {
+  padding: 32px 0 48px;
+  max-width: 680px;
+}
+h1.hero-title {
+  font-size: 36px;
+  line-height: 40px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  background: linear-gradient(180deg, #FFFFFF 0%, #9B9B9B 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-wrap: balance;
+  margin-bottom: 12px;
+}
+p.hero-sub {
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--text-muted);
+  text-wrap: pretty;
+  margin-bottom: 24px;
+}
+.hero-cta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.btn-primary:active {
+  opacity: 0.85;
+}
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 200ms cubic-bezier(0.22, 1, 0.36, 1), border-color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.btn-secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--surface-3);
+}
+.snippet {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.stat-box {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.stat-box:hover {
+  border-color: var(--surface-3);
+}
+.stat-box .title {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.stat-box .val {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.stat-box .desc {
+  font-size: 12px;
+  color: var(--text-subtle);
+  margin-top: 6px;
+}
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.card h2 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.card-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: -8px;
+  margin-bottom: 16px;
+  line-height: 20px;
+}
+.tagline-section {
+  padding: 48px 0;
+  margin: 32px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.tagline-text {
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-muted);
+  max-width: 680px;
+  text-wrap: balance;
+}
+.tagline-text span.active-word {
+  color: #FFFFFF;
+  transition: color 400ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.tag.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+.tag.idle {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media(max-width: 640px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.field-group {
+  margin-bottom: 16px;
+}
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+input[type=text], input[type=number], input[type=password], select, textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  outline: none;
+  transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+input[type=text]:focus, input[type=number]:focus, input[type=password]:focus, select:focus, textarea:focus {
+  border-color: var(--border-focus);
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-subtle);
+  margin-top: 4px;
+  line-height: 16px;
+}
+.btns {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.ok-box {
+  background: var(--ok-bg);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--ok);
+  margin-top: 16px;
+  display: none;
+}
+.err-box {
+  background: var(--err-bg);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--err);
+  margin-top: 16px;
+  display: none;
+  white-space: pre-wrap;
+}
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+th {
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  background: var(--surface-1);
+}
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+tr:last-child td {
+  border-bottom: none;
+}
+.empty-hint {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-subtle);
+}
+footer.site-footer {
+  margin-top: 64px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-subtle);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.footer-links {
+  display: flex;
+  gap: 16px;
+}
+.footer-links a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.footer-links a:hover {
+  color: var(--text-primary);
+}
+@media (prefers-reduced-motion: reduce) {
+  html:root body,
+  html:root body *,
+  html:root body *::before,
+  html:root body *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
+}
 </style>
 </head>
 <body>
+
+<header class="nav-bar">
+  <a href="/" class="brand">
+    <div class="brand-mark">G</div>
+    <span class="brand-name">Gateway Dashboard</span>
+  </a>
+  <div class="nav-status">
+    <div class="pulse-dot"></div>
+    <span>Gateway Online</span>
+  </div>
+  <div class="nav-actions">
+    <a class="nav-link" href="#modules-section">Modules</a>
+    <a class="nav-link" href="#mcp-section">MCP Tools</a>
+    <a class="nav-link" href="/video-template">Video Studio</a>
+    <a class="nav-link" href="/muse-config">Muse Config</a>
+  </div>
+</header>
+
 <div class="wrap">
-  <header>
-    <div>
-      <h1>Gateway Dashboard</h1>
-      <p class="sub">Pipeline routing, provider status, and standalone JSON configuration</p>
+  <section class="hero">
+    <h1 class="hero-title">Extensible AI Gateway for Local and Autonomous Agents</h1>
+    <p class="hero-sub">
+      Route requests with sub millisecond local dispatch, install out of tree provider modules, and manage system policy through Model Context Protocol.
+    </p>
+    <div class="hero-cta">
+      <a href="#modules-section" class="btn-primary">Manage Modules</a>
+      <a href="#mcp-section" class="btn-secondary">Inspect MCP Control Plane</a>
+      <span class="snippet">toolcase-gateway --mcp-stdio</span>
     </div>
-    <div class="nav-links">
-      <a class="nav-link" href="/video-template">Video Studio</a>
-      <a class="nav-link" href="/muse-config">Muse Config</a>
-    </div>
-  </header>
+  </section>
 
   <div class="grid" id="stats-grid">
     <div class="stat-box">
-      <div class="title">OmniRoute Proxy</div>
+      <div class="title"><a href="/ominroute/dashboard" style="color:inherit;text-decoration:none;">OmniRoute Proxy ↗</a></div>
       <div class="val" id="omni-target">--</div>
       <div class="desc" id="omni-desc">Default fallback &amp; OpenAI chat router</div>
     </div>
@@ -85,13 +490,159 @@ button:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
 
+  <section class="tagline-section" id="tagline-block">
+    <p class="tagline-text" id="tagline-content">
+      Zero async runtime overhead, fail closed routing security, and complete agentic control.
+    </p>
+  </section>
+
+  <!-- Platform Modules Management Section -->
+  <div class="card" id="modules-section">
+    <div class="card-header">
+      <h2>Platform Modules &amp; Personal Extensions</h2>
+      <span class="tag ok" id="modules-count-badge">3 active</span>
+    </div>
+    <p class="card-sub">
+      Governed by the central module registry. Built in providers and dynamically installed out of tree personal modules with isolated namespaces.
+    </p>
+
+    <div class="table-wrap" style="margin-bottom: 20px;">
+      <table id="modules-table">
+        <thead>
+          <tr>
+            <th>Module ID</th>
+            <th>Name</th>
+            <th>Kind</th>
+            <th>Namespace</th>
+            <th>Capabilities</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="modules-tbody">
+          <tr><td colspan="7" class="empty-hint">Loading installed modules...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- System Module Catalog (1-Click Install) -->
+    <div style="margin-top: 24px; margin-bottom: 20px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <h3 style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
+          <span>System Module Catalog</span>
+          <span class="tag ok" style="font-size: 11px;">1-Click Install</span>
+        </h3>
+        <span style="font-size: 12px; color: var(--text-muted);">Standard provider adapters following platform module format</span>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+        Deploy pre-configured provider modules directly into your gateway routing tree. Click <strong>Install</strong> on any module below.
+      </p>
+      <div id="catalog-grid" class="grid-2" style="gap: 12px;">
+        <div class="empty-hint" style="grid-column: 1/-1;">Loading system catalog...</div>
+      </div>
+    </div>
+
+    <!-- Personal Module Installation -->
+    <details style="margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; background: var(--surface-2);">
+      <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary); outline: none;">
+        Install Custom Module (GitHub Repo, ZIP Archive, or Upload)
+      </summary>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 8px; margin-bottom: 12px;">
+        Custom packages must follow the standardized gateway module specification (with <code>module.json</code>, <code>manifest.json</code>, or <code>__manifest__.json</code> declaring <code>id</code>, <code>namespace</code>, and <code>entrypoint</code>).
+      </p>
+      <form id="install-module-form" style="margin-top: 16px;">
+        <div class="field-group" style="margin-bottom: 14px;">
+          <label for="mod-source">Source (GitHub Repository URL or ZIP Archive URL/Path)</label>
+          <input type="text" id="mod-source" placeholder="https://github.com/owner/my-module or https://example.com/mod.zip">
+          <div class="hint">Leave empty if specifying a local script or uploading a ZIP file below.</div>
+        </div>
+        <div class="field-group" style="margin-bottom: 14px;">
+          <label for="mod-zip-file">Upload ZIP Archive</label>
+          <input type="file" id="mod-zip-file" accept=".zip">
+          <div class="hint">Upload a self-contained module zip package with code and optional module.json.</div>
+        </div>
+        <div class="grid-2">
+          <div class="field-group">
+            <label for="mod-id">Module Identifier (optional)</label>
+            <input type="text" id="mod-id" placeholder="custom-cohere">
+            <div class="hint">Alphanumeric identifier without spaces (auto-inferred if omitted).</div>
+          </div>
+          <div class="field-group">
+            <label for="mod-name">Display Name (optional)</label>
+            <input type="text" id="mod-name" placeholder="Custom Cohere Adapter">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="field-group">
+            <label for="mod-namespace">Route Path URL Prefix (Required)</label>
+            <input type="text" id="mod-namespace" placeholder="/custom/cohere" required>
+            <div class="hint">Unique routing path prefix starting with a forward slash (e.g. /custom/my-tool).</div>
+          </div>
+          <div class="field-group">
+            <label for="mod-entrypoint">Entrypoint Command or Script (optional)</label>
+            <input type="text" id="mod-entrypoint" placeholder="run.sh or /usr/local/bin/cohere-adapter">
+            <div class="hint">Auto-detected from run.sh, main.py, or index.js if omitted.</div>
+          </div>
+        </div>
+        <div class="field-group">
+          <label for="mod-caps">Capabilities (comma separated)</label>
+          <input type="text" id="mod-caps" placeholder="chat_completions, models">
+        </div>
+        <div class="btns">
+          <button type="submit" id="install-module-btn" class="btn-primary">Install Module</button>
+        </div>
+        <div class="ok-box" id="mod-ok-msg"></div>
+        <div class="err-box" id="mod-err-msg"></div>
+      </form>
+    </details>
+  </div>
+
+  <!-- Model Context Protocol (MCP) Section -->
+  <div class="card" id="mcp-section">
+    <div class="card-header">
+      <h2>Model Context Protocol (MCP) Control Plane</h2>
+      <span class="tag ok" id="mcp-status-badge">MCP Active</span>
+    </div>
+    <p class="card-sub">
+      Enables AI agents to safely connect, inspect installed modules, adjust failover policies, and invoke authorized tools over standard JSON-RPC 2.0 transports.
+    </p>
+
+    <div class="grid-2" style="margin-bottom: 20px;">
+      <div style="background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px;">
+        <div style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">Stdio Transport Connection</div>
+        <div class="mono" style="font-size: 13px; color: var(--text-primary); word-break: break-all;">toolcase-gateway --mcp-stdio</div>
+        <div class="hint">Use in Claude Desktop, Cursor, or Antigravity MCP settings.</div>
+      </div>
+      <div style="background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px;">
+        <div style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">HTTP Transport</div>
+        <div class="mono" style="font-size: 13px; color: var(--text-primary); word-break: break-all;">POST /mcp</div>
+        <div class="hint">JSON-RPC over HTTP POST. Complies with Streamable HTTP MCP standard.</div>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-muted);">Registered Management Tools</div>
+      <div id="mcp-tools-list" style="display: flex; flex-wrap: wrap; gap: 8px;">
+        <span class="tag idle mono">gateway_list_modules</span>
+        <span class="tag idle mono">gateway_get_module_info</span>
+        <span class="tag idle mono">gateway_set_module_state</span>
+        <span class="tag idle mono">gateway_install_personal_module</span>
+        <span class="tag idle mono">gateway_remove_personal_module</span>
+        <span class="tag idle mono">gateway_get_system_metrics</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gateway Configuration Section -->
   <div class="card">
-    <h2>
-      <span>Gateway Configuration</span>
-      <span class="tag idle" id="storage-badge">gateway_config.json</span>
-    </h2>
-    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
-      Settings saved here are stored in dedicated JSON storage (<code>gateway_config.json</code>) without modifying the <code>.env</code> file.
+    <div class="card-header">
+      <h2>
+        <span>Gateway Configuration</span>
+      </h2>
+      <span class="tag ok" id="storage-badge">Database Storage</span>
+    </div>
+    <p class="card-sub">
+      Operational settings are stored securely in the database repository (SQLite/PostgreSQL/MySQL) without modifying the <code>.env</code> security file.
     </p>
 
     <form id="config-form">
@@ -118,25 +669,28 @@ button:disabled{opacity:.5;cursor:not-allowed}
       </div>
 
       <div class="field-group">
-        <label for="cfg-fallbacks">Fallback Models (comma-separated)</label>
+        <label for="cfg-fallbacks">Fallback Models (comma separated)</label>
         <input type="text" id="cfg-fallbacks" name="fallbacks" placeholder="fail-try, gpt-4o">
         <div class="hint">Candidates tried sequentially on retryable HTTP errors (401, 403, 429, 500, etc.).</div>
       </div>
 
       <div class="btns">
-        <button id="save-cfg-btn" type="submit">Save Gateway Settings</button>
+        <button id="save-cfg-btn" type="submit" class="btn-primary">Save Gateway Settings</button>
       </div>
       <div class="ok-box" id="cfg-ok-msg"></div>
       <div class="err-box" id="cfg-err-msg"></div>
     </form>
   </div>
 
+  <!-- Muse AI Subsystem Configuration Section -->
   <div class="card">
-    <h2>
-      <span>Muse AI Subsystem Configuration</span>
+    <div class="card-header">
+      <h2>
+        <span>Muse AI Subsystem Configuration</span>
+      </h2>
       <span class="tag idle" id="muse-badge">Defaults</span>
-    </h2>
-    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
+    </div>
+    <p class="card-sub">
       Manage endpoints, VM ID, and session credentials for the Muse AI pipeline. Leave token or cookie fields blank to retain current values.
     </p>
 
@@ -148,271 +702,321 @@ button:disabled{opacity:.5;cursor:not-allowed}
         </div>
         <div class="field-group">
           <label for="cfg-muse-ws">Noise WebSocket URL</label>
-          <input type="text" id="cfg-muse-ws" name="ws_url" placeholder="wss://hatch.metaaivm.com/v1/noise">
+          <input type="text" id="cfg-muse-ws" name="ws_url" placeholder="wss://vm-438.metaaivm.com/">
         </div>
-      </div>
-
-      <div class="field-group">
-        <label for="cfg-muse-vmid">Target VM ID</label>
-        <input type="text" id="cfg-muse-vmid" name="vm_id" placeholder="vm-xxxxxxxx">
       </div>
 
       <div class="grid-2">
         <div class="field-group">
-          <label for="cfg-muse-token">Access Token (Bearer)</label>
-          <input type="text" id="cfg-muse-token" name="access_token" placeholder="Leave blank to retain current">
-          <div class="hint" id="hint-token">Current: not set</div>
+          <label for="cfg-muse-vmid">Target VM Identifier</label>
+          <input type="text" id="cfg-muse-vmid" name="vm_id" placeholder="vm-438">
         </div>
         <div class="field-group">
-          <label for="cfg-muse-notary">Notary Token</label>
-          <input type="text" id="cfg-muse-notary" name="notary_token" placeholder="Leave blank to retain current">
-          <div class="hint" id="hint-notary">Current: not set</div>
+          <label for="cfg-muse-token">Access Token (Bearer / Auth)</label>
+          <input type="password" id="cfg-muse-token" name="access_token" autocomplete="off" placeholder="Leave empty to keep existing">
+          <div class="hint" id="hint-token">Current: not set</div>
         </div>
       </div>
 
-      <div class="field-group">
-        <label for="cfg-muse-cookie">Session Cookie</label>
-        <textarea id="cfg-muse-cookie" name="cookie" rows="2" placeholder="Leave blank to retain current session cookie..."></textarea>
-        <div class="hint" id="hint-cookie">Current: not set</div>
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-muse-notary">Notary Token</label>
+          <input type="password" id="cfg-muse-notary" name="notary_token" autocomplete="off" placeholder="Leave empty to keep existing">
+          <div class="hint" id="hint-notary">Current: not set</div>
+        </div>
+        <div class="field-group">
+          <label for="cfg-muse-cookie">Session Cookie</label>
+          <input type="password" id="cfg-muse-cookie" name="cookie" autocomplete="off" placeholder="Leave empty to keep existing">
+          <div class="hint" id="hint-cookie">Current: not set</div>
+        </div>
       </div>
 
       <div class="field-group">
         <label for="cfg-muse-video-prompt">Default Video Prompt</label>
-        <textarea id="cfg-muse-video-prompt" name="default_video_prompt" rows="2" placeholder="A colorful butterfly landing gently on a blooming sunflower, macro video"></textarea>
-        <div class="hint">Fallback prompt used when none is provided in video creation requests.</div>
+        <textarea id="cfg-muse-video-prompt" name="default_video_prompt" rows="2" placeholder="Cinematic drone shot over mist covered pine mountains at golden hour"></textarea>
       </div>
 
       <div class="grid-2">
         <div class="field-group">
           <label for="cfg-muse-approval-mode">Muse Sentinel Approval Mode</label>
           <select id="cfg-muse-approval-mode" name="approval_mode">
-            <option value="off">Off (Fail-Closed, prompt manual browser approval)</option>
-            <option value="observe">Observe (Log decisions without auto-approving)</option>
-            <option value="on">On (Headless auto-approval for allowed destinations)</option>
+            <option value="off">Off (Allow All)</option>
+            <option value="observe">Observe (Log Only)</option>
+            <option value="on">On (Scoped Auto Approval)</option>
           </select>
         </div>
         <div class="field-group">
-          <label for="cfg-muse-approval-destinations">Allowed Approval Destinations</label>
-          <input type="text" id="cfg-muse-approval-destinations" name="allowed_destinations" placeholder="muse.ai, api.muse.ai">
-          <div class="hint">Comma-separated host patterns permitted for auto-approval.</div>
+          <label for="cfg-muse-approval-timeout">Approval Timeout (seconds)</label>
+          <input type="number" id="cfg-muse-approval-timeout" name="timeout_secs" placeholder="30" min="1">
         </div>
       </div>
 
       <div class="grid-2">
         <div class="field-group">
-          <label for="cfg-muse-approval-types">Allowed Decision Types</label>
-          <input type="text" id="cfg-muse-approval-types" name="allowed_types" placeholder="network">
-          <div class="hint">Comma-separated decision categories (e.g. network).</div>
+          <label for="cfg-muse-approval-destinations">Allowed Destinations (comma separated)</label>
+          <input type="text" id="cfg-muse-approval-destinations" name="allowed_destinations" placeholder="https://cdn.example.com, https://metaaivm.com">
         </div>
         <div class="field-group">
-          <label for="cfg-muse-approval-timeout">Approval Timeout (seconds)</label>
-          <input type="number" id="cfg-muse-approval-timeout" name="timeout_secs" placeholder="30" min="1" max="3600">
+          <label for="cfg-muse-approval-types">Allowed Media Types (comma separated)</label>
+          <input type="text" id="cfg-muse-approval-types" name="allowed_types" placeholder="video/mp4, image/png">
         </div>
       </div>
 
       <div class="btns">
-        <button id="save-muse-btn" type="submit">Save Muse AI Settings</button>
+        <button id="save-muse-btn" type="submit" class="btn-primary">Save Muse AI Settings</button>
       </div>
       <div class="ok-box" id="muse-ok-msg"></div>
       <div class="err-box" id="muse-err-msg"></div>
     </form>
   </div>
 
+  <!-- Jev AI Provider Multi-Account Pool Section -->
   <div class="card">
-    <h2>
-      <span>Jev &amp; OpenRouter Decision API Settings</span>
-      <span class="tag ok" id="jev-mode-badge">Active</span>
-    </h2>
-    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
-      Configure upstream direct Jev API and OpenRouter browser session credentials. When direct Jev credit is exhausted (HTTP 402/429), requests automatically fail over and switch to OpenRouter.
+    <div class="card-header">
+      <h2>
+        <span>Jev AI Provider Multi-Account Pool</span>
+      </h2>
+      <span class="tag ok" id="accounts-count-badge">0 accounts</span>
+    </div>
+    <p class="card-sub">
+      Multi account failover pool for Jev AI Decision engine and OpenRouter browser session integration.
+    </p>
+
+    <div class="table-wrap" style="margin-bottom: 20px;">
+      <table id="accounts-table">
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>Label</th>
+            <th>Masked Secret</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody id="accounts-tbody">
+          <tr><td colspan="4" class="empty-hint">Loading account pool...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <form id="accounts-form">
+      <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">
+        Add Multi API Keys / Accounts
+      </div>
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="provider-select">Provider Target</label>
+          <select id="provider-select">
+            <option value="jev">Jev AI Native (jev_key_...)</option>
+            <option value="openrouter">OpenRouter API Key (sk-or-v1-...)</option>
+            <option value="openrouter_browser">OpenRouter Browser Session Cookie</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label for="jev-label-input">Custom Account Label (optional)</label>
+          <input type="text" id="jev-label-input" placeholder="e.g. prod-primary, team-backup">
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label for="jev-keys-input">API Keys or Session Cookies (one per line, or comma separated)</label>
+        <textarea id="jev-keys-input" rows="3" placeholder="jev_key_primary&#10;jev_key_secondary"></textarea>
+      </div>
+
+      <div class="btns">
+        <button id="add-accounts-btn" type="submit" class="btn-primary">Add to Account Pool</button>
+      </div>
+      <div class="ok-box" id="accounts-ok-msg"></div>
+      <div class="err-box" id="accounts-err-msg"></div>
+    </form>
+  </div>
+
+  <!-- Jev and OpenRouter Settings Section -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Jev &amp; OpenRouter Settings</h2>
+      <span class="tag idle" id="jev-storage-badge">Active</span>
+    </div>
+    <p class="card-sub">
+      Configure Jev decision endpoints and OpenRouter credit limit automatic failover parameters.
     </p>
 
     <form id="jev-config-form">
       <div class="grid-2">
         <div class="field-group">
-          <label for="cfg-jev-base">Direct Jev Base URL</label>
-          <input type="text" id="cfg-jev-base" name="jev_base_url" placeholder="https://jev-ai.org">
+          <label for="cfg-jev-base">Jev Native Base URL</label>
+          <input type="text" id="cfg-jev-base" placeholder="https://api.jev.ai">
         </div>
         <div class="field-group">
           <label for="cfg-jev-or-base">OpenRouter Base URL</label>
-          <input type="text" id="cfg-jev-or-base" name="jev_openrouter_base_url" placeholder="https://openrouter.ai">
+          <input type="text" id="cfg-jev-or-base" placeholder="https://openrouter.ai/api/v1">
         </div>
       </div>
 
       <div class="grid-2">
         <div class="field-group">
-          <label for="cfg-jev-or-model">OpenRouter Decision Model</label>
-          <input type="text" id="cfg-jev-or-model" name="jev_openrouter_model" placeholder="typesafe/jev-1.13">
-          <div class="hint">Model identifier used for OpenRouter decisions endpoint (e.g. typesafe/jev-1.13).</div>
+          <label for="cfg-jev-or-model">OpenRouter Default Model</label>
+          <input type="text" id="cfg-jev-or-model" placeholder="anthropic/claude-3.5-sonnet">
         </div>
         <div class="field-group">
-          <label for="cfg-jev-or-fallback-models">Step 3 Alternate Decision Models</label>
-          <input type="text" id="cfg-jev-or-fallback-models" name="jev_openrouter_fallback_models" placeholder="baseten/mammoth-1:free, nace-ai/drex-max">
-          <div class="hint">Comma-separated list of alternate models round-robined in Step 3 when primary fails.</div>
+          <label for="cfg-jev-or-fallbacks">OpenRouter Fallback Models (comma separated)</label>
+          <input type="text" id="cfg-jev-or-fallbacks" placeholder="google/gemini-2.0-flash-001, openai/gpt-4o">
         </div>
       </div>
 
-      <div class="field-group">
-        <label for="cfg-jev-or-enabled">Failover to OpenRouter on Credit Limit</label>
-        <select id="cfg-jev-or-enabled" name="jev_openrouter_enabled">
-          <option value="true" selected>Enabled (Auto-failover on HTTP 402/429)</option>
-          <option value="false">Disabled (Direct accounts only)</option>
-        </select>
-        <div class="hint">Automatically rotate to OpenRouter browser candidate when direct accounts run out of credit.</div>
-      </div>
-
-      <div class="field-group">
-        <label for="cfg-jev-or-api-key">OpenRouter API Key (sk-or-...)</label>
-        <input type="password" id="cfg-jev-or-api-key" name="jev_openrouter_api_key" placeholder="Leave blank to retain current OpenRouter API key...">
-        <div class="hint" id="hint-jev-api-key">Current: not set</div>
-      </div>
-
-      <div class="field-group">
-        <label for="cfg-jev-or-cookie">OpenRouter Browser Session Cookie</label>
-        <textarea id="cfg-jev-or-cookie" name="jev_openrouter_cookie" rows="2" placeholder="Leave blank to retain current OpenRouter cookie..."></textarea>
-        <div class="hint" id="hint-jev-cookie">Current: not set</div>
-      </div>
-
-      <div class="field-group">
-        <label for="cfg-jev-cooldown">Credit Limit Cooldown (Seconds)</label>
-        <input type="number" id="cfg-jev-cooldown" name="jev_credit_cooldown_secs" placeholder="300" min="10" max="86400">
-        <div class="hint">How long an account returning HTTP 402 is demoted before retrying direct account (default: 300s).</div>
+      <div class="grid-2">
+        <div class="field-group">
+          <label for="cfg-jev-cooldown">Credit Limit Cooldown (seconds)</label>
+          <input type="number" id="cfg-jev-cooldown" placeholder="3600" min="60">
+        </div>
+        <div class="field-group">
+          <label for="cfg-jev-or-enabled">OpenRouter Failover Enabled</label>
+          <select id="cfg-jev-or-enabled">
+            <option value="true">Enabled (Failover on 402/Limit)</option>
+            <option value="false">Disabled</option>
+          </select>
+        </div>
       </div>
 
       <div class="btns">
-        <button id="save-jev-btn" type="submit">Save Jev &amp; OpenRouter Settings</button>
+        <button id="save-jev-btn" type="submit" class="btn-primary">Save Jev &amp; OpenRouter Settings</button>
       </div>
       <div class="ok-box" id="jev-ok-msg"></div>
       <div class="err-box" id="jev-err-msg"></div>
     </form>
   </div>
 
-  <div class="card">
-    <h2>
-      <span>Jev AI Provider Multi-Account Pool</span>
-      <span class="tag ok" id="jev-count-badge">0 accounts</span>
-    </h2>
-    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
-      Keys rotate round-robin across requests and automatically fail over when account quota or limits are reached (HTTP 401, 402, 403, 429).
-    </p>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Provider</th>
-            <th>Label</th>
-            <th>Masked Credential</th>
-            <th>Rotation Status</th>
-          </tr>
-        </thead>
-        <tbody id="jev-accounts-table">
-          <tr><td colspan="4" class="empty-hint">Loading configured accounts...</td></tr>
-        </tbody>
-      </table>
+  <footer class="site-footer">
+    <div>Toolcase Gateway &bull; Fail Closed Clean Architecture Monolith</div>
+    <div class="footer-links">
+      <a href="/video-template">Video Studio</a>
+      <a href="/muse-config">Muse Config</a>
+      <a href="#mcp-section">MCP Tools</a>
+      <a href="/api/v1/dashboard/overview">JSON API</a>
     </div>
-  </div>
-
-  <div class="card">
-    <h2>Add Multi API Keys / Accounts</h2>
-    <form id="add-form">
-      <div class="field-group">
-        <label for="provider-select">Provider / Account Type</label>
-        <select id="provider-select" name="provider">
-          <option value="jev" selected>Direct Jev AI API Keys (sk-glm...)</option>
-          <option value="openrouter-key">OpenRouter Decision API Keys (Bearer Tokens sk-or-...)</option>
-          <option value="openrouter-cookie">OpenRouter Browser Session Cookies</option>
-        </select>
-      </div>
-
-      <div class="field-group">
-        <label for="label-input">Account Label (Optional)</label>
-        <input type="text" id="label-input" name="label" placeholder="e.g. prod-primary, team-east, or leave blank for auto-labeling">
-        <div class="hint">Optional label applied to the key(s). You can also prefix individual lines as <code>label:api_key</code> or <code>label=api_key</code> below.</div>
-      </div>
-
-      <div class="field-group">
-        <label for="keys-input">API Key(s) / Session Cookie(s)</label>
-        <textarea id="keys-input" name="keys" rows="3" placeholder="Enter one or more API keys or session cookies (comma-separated or one per line), e.g.&#10;sk-or-v1-00bc9802bf5fd3545cbd00745429569fa4e871adb0c1d74b&#10;prod-backup:sk-or-v1-anotheraccounttoken...&#10;worker-session:or_statsig_stable_id=...; __session=..."></textarea>
-        <div class="hint">Newly added keys will immediately join the live candidate pool and persist to dedicated JSON storage.</div>
-      </div>
-
-      <div class="btns">
-        <button id="submit-btn" type="submit">Add to Account Pool</button>
-      </div>
-      <div class="ok-box" id="ok-msg"></div>
-      <div class="err-box" id="err-msg"></div>
-    </form>
-  </div>
+  </footer>
 </div>
 
 <script>
-(function(){
-  const tableBody = document.getElementById('jev-accounts-table');
-  const countBadge = document.getElementById('jev-count-badge');
-  const storageBadge = document.getElementById('storage-badge');
-  const omniTarget = document.getElementById('omni-target');
-  const omniDesc = document.getElementById('omni-desc');
-  const jevStatus = document.getElementById('jev-status');
-  const jevDesc = document.getElementById('jev-desc');
-  const museStatus = document.getElementById('muse-status');
-  const museDesc = document.getElementById('muse-desc');
-  const museBadge = document.getElementById('muse-badge');
-  const openrouterStatus = document.getElementById('openrouter-status');
-  const openrouterDesc = document.getElementById('openrouter-desc');
+(function() {
+  function byId(id) { return document.getElementById(id); }
 
-  const cfgForm = document.getElementById('config-form');
-  const cfgHost = document.getElementById('cfg-host');
-  const cfgPort = document.getElementById('cfg-port');
-  const cfgDefaultModel = document.getElementById('cfg-default-model');
-  const cfgTimeout = document.getElementById('cfg-timeout');
-  const cfgFallbacks = document.getElementById('cfg-fallbacks');
-  const saveCfgBtn = document.getElementById('save-cfg-btn');
-  const cfgOkMsg = document.getElementById('cfg-ok-msg');
-  const cfgErrMsg = document.getElementById('cfg-err-msg');
+  const omniTarget = byId('omni-target');
+  const omniDesc = byId('omni-desc');
+  const jevStatus = byId('jev-status');
+  const jevDesc = byId('jev-desc');
+  const openrouterStatus = byId('openrouter-status');
+  const openrouterDesc = byId('openrouter-desc');
+  const museStatus = byId('muse-status');
+  const museDesc = byId('muse-desc');
 
-  const museForm = document.getElementById('muse-form');
-  const cfgMuseBase = document.getElementById('cfg-muse-base');
-  const cfgMuseWs = document.getElementById('cfg-muse-ws');
-  const cfgMuseVmid = document.getElementById('cfg-muse-vmid');
-  const cfgMuseToken = document.getElementById('cfg-muse-token');
-  const cfgMuseNotary = document.getElementById('cfg-muse-notary');
-  const cfgMuseCookie = document.getElementById('cfg-muse-cookie');
-  const saveMuseBtn = document.getElementById('save-muse-btn');
-  const museOkMsg = document.getElementById('muse-ok-msg');
-  const museErrMsg = document.getElementById('muse-err-msg');
-  const hintToken = document.getElementById('hint-token');
-  const hintNotary = document.getElementById('hint-notary');
-  const hintCookie = document.getElementById('hint-cookie');
-  const cfgMuseVideoPrompt = document.getElementById('cfg-muse-video-prompt');
-  const cfgMuseApprovalMode = document.getElementById('cfg-muse-approval-mode');
-  const cfgMuseApprovalDestinations = document.getElementById('cfg-muse-approval-destinations');
-  const cfgMuseApprovalTypes = document.getElementById('cfg-muse-approval-types');
-  const cfgMuseApprovalTimeout = document.getElementById('cfg-muse-approval-timeout');
+  const cfgForm = byId('config-form');
+  const cfgHost = byId('cfg-host');
+  const cfgPort = byId('cfg-port');
+  const cfgDefaultModel = byId('cfg-default-model');
+  const cfgTimeout = byId('cfg-timeout');
+  const cfgFallbacks = byId('cfg-fallbacks');
+  const saveCfgBtn = byId('save-cfg-btn');
+  const cfgOkMsg = byId('cfg-ok-msg');
+  const cfgErrMsg = byId('cfg-err-msg');
 
-  const jevConfigForm = document.getElementById('jev-config-form');
-  const cfgJevBase = document.getElementById('cfg-jev-base');
-  const cfgJevOrBase = document.getElementById('cfg-jev-or-base');
-  const cfgJevOrModel = document.getElementById('cfg-jev-or-model');
-  const cfgJevOrFallbackModels = document.getElementById('cfg-jev-or-fallback-models');
-  const cfgJevOrEnabled = document.getElementById('cfg-jev-or-enabled');
-  const cfgJevOrApiKey = document.getElementById('cfg-jev-or-api-key');
-  const cfgJevOrCookie = document.getElementById('cfg-jev-or-cookie');
-  const cfgJevCooldown = document.getElementById('cfg-jev-cooldown');
-  const hintJevApiKey = document.getElementById('hint-jev-api-key');
-  const hintJevCookie = document.getElementById('hint-jev-cookie');
-  const saveJevBtn = document.getElementById('save-jev-btn');
-  const jevOkMsg = document.getElementById('jev-ok-msg');
-  const jevErrMsg = document.getElementById('jev-err-msg');
-  const jevModeBadge = document.getElementById('jev-mode-badge');
+  const museForm = byId('muse-form');
+  const cfgMuseBase = byId('cfg-muse-base');
+  const cfgMuseWs = byId('cfg-muse-ws');
+  const cfgMuseVmid = byId('cfg-muse-vmid');
+  const cfgMuseToken = byId('cfg-muse-token');
+  const cfgMuseNotary = byId('cfg-muse-notary');
+  const cfgMuseCookie = byId('cfg-muse-cookie');
+  const hintToken = byId('hint-token');
+  const hintNotary = byId('hint-notary');
+  const hintCookie = byId('hint-cookie');
+  const cfgMuseVideoPrompt = byId('cfg-muse-video-prompt');
+  const cfgMuseApprovalMode = byId('cfg-muse-approval-mode');
+  const cfgMuseApprovalDestinations = byId('cfg-muse-approval-destinations');
+  const cfgMuseApprovalTypes = byId('cfg-muse-approval-types');
+  const cfgMuseApprovalTimeout = byId('cfg-muse-approval-timeout');
+  const saveMuseBtn = byId('save-muse-btn');
+  const museOkMsg = byId('muse-ok-msg');
+  const museErrMsg = byId('muse-err-msg');
+  const museBadge = byId('muse-badge');
 
-  const addForm = document.getElementById('add-form');
-  const providerSelect = document.getElementById('provider-select');
-  const labelInput = document.getElementById('label-input');
-  const keysInput = document.getElementById('keys-input');
-  const submitBtn = document.getElementById('submit-btn');
-  const okMsg = document.getElementById('ok-msg');
-  const errMsg = document.getElementById('err-msg');
+  const tableBody = byId('accounts-tbody');
+  const countBadge = byId('accounts-count-badge');
+  const addForm = byId('accounts-form');
+  const keysInput = byId('jev-keys-input');
+  const labelInput = byId('jev-label-input');
+  const providerSelect = byId('provider-select');
+  const submitBtn = byId('add-accounts-btn');
+  const okMsg = byId('accounts-ok-msg');
+  const errMsg = byId('accounts-err-msg');
+
+  const jevConfigForm = byId('jev-config-form');
+  const cfgJevBase = byId('cfg-jev-base');
+  const cfgJevOrBase = byId('cfg-jev-or-base');
+  const cfgJevOrModel = byId('cfg-jev-or-model');
+  const cfgJevOrFallbackModels = byId('cfg-jev-or-fallbacks');
+  const cfgJevOrEnabled = byId('cfg-jev-or-enabled');
+  const cfgJevCooldown = byId('cfg-jev-cooldown');
+  const saveJevBtn = byId('save-jev-btn');
+  const jevOkMsg = byId('jev-ok-msg');
+  const jevErrMsg = byId('jev-err-msg');
+
+  const modulesTbody = byId('modules-tbody');
+  const catalogGrid = byId('catalog-grid');
+  if (catalogGrid) {
+    catalogGrid.addEventListener('click', function(ev) {
+      const btn = ev.target.closest('.catalog-install-btn');
+      if (!btn) return;
+      const id = btn.dataset.catalogId;
+      if (!id) return;
+      btn.disabled = true;
+      btn.textContent = 'Installing...';
+      executeModuleInstall({ id: id });
+    });
+  }
+  if (modulesTbody) {
+    modulesTbody.addEventListener('click', function(e) {
+      const toggleBtn = e.target.closest('.module-toggle');
+      if (toggleBtn) {
+        window.toggleModule(toggleBtn.dataset.moduleId, toggleBtn.dataset.enable === 'true');
+        return;
+      }
+      const remBtn = e.target.closest('.module-remove');
+      if (remBtn && confirm('Uninstall personal module ' + remBtn.dataset.moduleId + '?')) {
+        window.removeModule(remBtn.dataset.moduleId);
+      }
+    });
+  }
+  const modulesCountBadge = byId('modules-count-badge');
+  const installForm = byId('install-module-form');
+  const modSource = byId('mod-source');
+  const modZipFile = byId('mod-zip-file');
+  const modId = byId('mod-id');
+  const modName = byId('mod-name');
+  const modNamespace = byId('mod-namespace');
+  const modEntrypoint = byId('mod-entrypoint');
+  const modCaps = byId('mod-caps');
+  const installBtn = byId('install-module-btn');
+  const modOkMsg = byId('mod-ok-msg');
+  const modErrMsg = byId('mod-err-msg');
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function parseJsonSafely(text) {
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return {};
+    }
+  }
 
   function setFieldIfNotFocused(el, val) {
     if (el && !el.matches(':focus')) {
@@ -420,83 +1024,314 @@ button:disabled{opacity:.5;cursor:not-allowed}
     }
   }
 
-  function renderConfigSection(c) {
-    if (cfgHost) cfgHost.value = c.target_host || '127.0.0.1';
-    if (cfgPort) cfgPort.value = c.target_port || 20128;
-    if (cfgDefaultModel) cfgDefaultModel.value = c.default_model || '';
-    if (cfgTimeout) cfgTimeout.value = c.io_timeout_secs != null ? c.io_timeout_secs : 120;
-    if (cfgFallbacks) cfgFallbacks.value = c.fallbacks ? c.fallbacks.join(', ') : '';
-    if (storageBadge && c.config_storage) storageBadge.textContent = c.config_storage;
+  function renderModules(modules) {
+    if (!modulesTbody) return;
+    if (!modules || modules.length === 0) {
+      modulesTbody.innerHTML = '<tr><td colspan="7" class="empty-hint">No modules registered</td></tr>';
+      return;
+    }
+    const count = modules.filter(function(m){ return m.status === 'enabled'; }).length;
+    if (modulesCountBadge) {
+      modulesCountBadge.textContent = count + ' active (' + modules.length + ' total)';
+    }
+
+    const rows = modules.map(function(m) {
+      const isEnabled = m.status === 'enabled';
+      const kindBadge = m.kind === 'builtin'
+        ? '<span class="tag idle">Built in</span>'
+        : '<span class="tag" style="background:rgba(129,140,248,0.15);color:#818cf8;border:1px solid rgba(129,140,248,0.3);">Personal</span>';
+      const statusBadge = isEnabled
+        ? '<span class="tag ok">Enabled</span>'
+        : '<span class="tag idle">Disabled</span>';
+      const toggleAction = '<button type="button" class="btn-secondary module-toggle" style="padding:4px 8px;font-size:12px;" data-module-id="'
+        + escapeHtml(m.id)
+        + '" data-enable="'
+        + (!isEnabled)
+        + '">'
+        + (isEnabled ? 'Disable' : 'Enable')
+        + '</button>';
+      let removeAction = '';
+      if (m.kind === 'personal') {
+        removeAction = ' <button type="button" class="btn-secondary module-remove" style="padding:4px 8px;font-size:12px;color:var(--danger,#f43f5e);border-color:rgba(244,63,94,0.3);" data-module-id="'
+          + escapeHtml(m.id)
+          + '">Remove</button>';
+      }
+
+      const nsCell = m.id === 'omniroute'
+        ? '<a href="' + escapeHtml(m.namespace) + '/dashboard" style="color:var(--primary);text-decoration:underline;">' + escapeHtml(m.namespace) + '</a>'
+        : escapeHtml(m.namespace);
+
+      return '<tr>'
+        + '<td class="mono"><strong>' + escapeHtml(m.id) + '</strong></td>'
+        + '<td>' + escapeHtml(m.name) + '</td>'
+        + '<td>' + kindBadge + '</td>'
+        + '<td class="mono">' + nsCell + '</td>'
+        + '<td style="font-size:12px;color:var(--text-muted);">' + escapeHtml((m.capabilities || []).join(', ')) + '</td>'
+        + '<td>' + statusBadge + '</td>'
+        + '<td>' + toggleAction + removeAction + '</td>'
+        + '</tr>';
+    });
+    modulesTbody.innerHTML = rows.join('');
+  }
+
+  function isModuleInstalled(id, installedModules) {
+    if (!installedModules) return false;
+    return installedModules.some(function(m) { return m.id === id; });
+  }
+
+  function renderCatalogItem(item, isInstalled) {
+    const actionHtml = isInstalled
+      ? '<span class="tag ok" style="padding:4px 8px; font-size:11px;">Installed</span>'
+      : '<button type="button" class="btn-primary btn-sm catalog-install-btn" style="padding:4px 10px; font-size:12px;" data-catalog-id="'
+        + escapeHtml(item.id)
+        + '">Install</button>';
+
+    const capsHtml = (item.capabilities || []).map(function(c) {
+      return '<span class="tag" style="padding:2px 6px; font-size:10px;">' + escapeHtml(c) + '</span>';
+    }).join(' ');
+
+    return '<div class="card" style="margin:0; padding:12px; background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; justify-content:space-between; gap:8px;">'
+      + '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">'
+      + '<div>'
+      + '<strong style="font-size:13px; color:var(--text-primary);">' + escapeHtml(item.name) + '</strong>'
+      + '<div class="mono" style="font-size:11px; color:var(--text-muted); margin-top:2px;">' + escapeHtml(item.namespace) + '</div>'
+      + '</div>'
+      + actionHtml
+      + '</div>'
+      + '<p style="font-size:12px; color:var(--text-secondary); margin:0;">' + escapeHtml(item.description) + '</p>'
+      + '<div style="display:flex; gap:6px; flex-wrap:wrap;">'
+      + capsHtml
+      + '</div>'
+      + '</div>';
+  }
+
+  function renderCatalog(catalog, installedModules) {
+    if (!catalogGrid) return;
+    if (!catalog || catalog.length === 0) {
+      catalogGrid.innerHTML = '<div class="empty-hint" style="grid-column: 1/-1;">No catalog modules available</div>';
+      return;
+    }
+    catalogGrid.innerHTML = catalog.map(function(item) {
+      return renderCatalogItem(item, isModuleInstalled(item.id, installedModules));
+    }).join('');
+  }
+
+  function formatAccountCount(count) {
+    if (count === 1) return '1 account';
+    return count + ' accounts';
+  }
+
+  window.toggleModule = function(id, enable) {
+    let responseOk = false;
+    let responseStatus = 0;
+    fetch('/api/v1/dashboard/modules/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, enabled: enable })
+    })
+    .then(function(res) {
+      responseOk = res.ok;
+      responseStatus = res.status;
+      return res.text();
+    })
+    .then(function(text) {
+      const data = parseJsonSafely(text);
+      if (!responseOk) {
+        const msg = (data && data.error && data.error.message) || (data && data.message) || ('HTTP ' + responseStatus);
+        throw new Error(msg);
+      }
+      loadOverview();
+    })
+    .catch(function(err) { alert('Failed to update module state: ' + err.message); });
+  };
+
+  window.removeModule = function(id) {
+    let responseOk = false;
+    fetch('/api/v1/dashboard/modules/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    })
+    .then(function(res) {
+      responseOk = res.ok;
+      return res.text();
+    })
+    .then(function(text) {
+      const data = parseJsonSafely(text);
+      if (!responseOk) {
+        const msg = (data && data.error && data.error.message) || (data && data.message) || 'Failed to remove module';
+        throw new Error(msg);
+      }
+      loadOverview();
+    })
+    .catch(function(err) { alert('Failed to remove module: ' + err.message); });
+  };
+
+  function executeModuleInstall(payload) {
+    let installOk = false;
+    let installStatus = 200;
+    fetch('/api/v1/dashboard/modules/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(function(res) {
+      installOk = res.ok;
+      installStatus = res.status;
+      return res.text();
+    })
+    .then(function(text) {
+      const data = parseJsonSafely(text);
+      installBtn.disabled = false;
+      if (!installOk) {
+        const errorDetail = (data && data.error && data.error.message)
+          || (data && data.message)
+          || (text && text.trim() ? text.trim() : ('HTTP ' + installStatus + ' error installing module'));
+        modErrMsg.textContent = errorDetail;
+        modErrMsg.style.display = 'block';
+      } else {
+        const installedId = (data && data.id) || payload.id || 'module';
+        modOkMsg.textContent = 'Module ' + installedId + ' successfully installed and registered.';
+        modOkMsg.style.display = 'block';
+        installForm.reset();
+        loadOverview();
+      }
+    })
+    .catch(function(err) {
+      installBtn.disabled = false;
+      modErrMsg.textContent = 'Network error: ' + err.message;
+      modErrMsg.style.display = 'block';
+    });
+  }
+
+  function getTrimmedInput(elem) {
+    return elem && elem.value ? elem.value.trim() : '';
+  }
+
+  function extractCapabilities(elem) {
+    const raw = getTrimmedInput(elem);
+    if (!raw) return [];
+    return raw.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; });
+  }
+
+  function sanitizeNamespaceToId(ns) {
+    return ns.replace(/^\/+/, '').replaceAll('/', '-').replace(/[^a-zA-Z0-9_-]/g, '');
+  }
+
+  function hasZipFile(zipInput) {
+    return Boolean(zipInput && zipInput.files && zipInput.files.length);
+  }
+
+  function applyDefaultModuleMetadata(payload) {
+    payload.version = payload.version || '0.1.0';
+    if (!payload.id && payload.namespace) {
+      payload.id = sanitizeNamespaceToId(payload.namespace);
+    }
+    payload.name = payload.name || payload.id || 'Custom Module';
+    if (!payload.entrypoint) {
+      payload.entrypoint = '/bin/echo';
+    }
+  }
+
+  function collectInstallPayload() {
+    const payload = { capabilities: extractCapabilities(modCaps) };
+    const source = getTrimmedInput(modSource);
+    const id = getTrimmedInput(modId);
+    const name = getTrimmedInput(modName);
+    const namespace = getTrimmedInput(modNamespace);
+    const entrypoint = getTrimmedInput(modEntrypoint);
+
+    if (source) payload.source = source;
+    if (id) payload.id = id;
+    if (name) payload.name = name;
+    if (namespace) payload.namespace = namespace;
+    if (entrypoint) payload.entrypoint = entrypoint;
+
+    if (!payload.source && !hasZipFile(modZipFile)) {
+      applyDefaultModuleMetadata(payload);
+    }
+    return payload;
+  }
+
+  function uploadZipAndInstall(file, payload) {
+    const reader = new FileReader();
+    reader.onload = function() {
+      const parts = (reader.result || '').split(',');
+      payload.zip_base64 = parts[1] || parts[0];
+      executeModuleInstall(payload);
+    };
+    reader.onerror = function() {
+      installBtn.disabled = false;
+      modErrMsg.textContent = 'Failed to read uploaded ZIP file';
+      modErrMsg.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  if (installForm) {
+    installForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      modOkMsg.style.display = 'none';
+      modErrMsg.style.display = 'none';
+
+      const payload = collectInstallPayload();
+      if (!payload.namespace) {
+        modErrMsg.textContent = 'Route Path URL Prefix (Namespace) is required (e.g. /custom/my-tool)';
+        modErrMsg.style.display = 'block';
+        return;
+      }
+
+      installBtn.disabled = true;
+      if (modZipFile && modZipFile.files && modZipFile.files.length > 0) {
+        uploadZipAndInstall(modZipFile.files[0], payload);
+      } else {
+        executeModuleInstall(payload);
+      }
+    });
+  }
+
+  function renderConfigSection(cfg) {
+    setFieldIfNotFocused(cfgHost, cfg.target_host || '127.0.0.1');
+    setFieldIfNotFocused(cfgPort, cfg.target_port || 20128);
+    setFieldIfNotFocused(cfgDefaultModel, cfg.default_model || '');
+    setFieldIfNotFocused(cfgTimeout, cfg.io_timeout_secs != null ? cfg.io_timeout_secs : 120);
+    setFieldIfNotFocused(cfgFallbacks, (cfg.fallbacks || []).join(', '));
   }
 
   function renderOmnirouteSection(omni) {
     omniTarget.textContent = (omni.target_host || '127.0.0.1') + ':' + (omni.target_port || 20128);
-    omniDesc.textContent = 'Fallbacks: ' + (omni.fallbacks && omni.fallbacks.length ? omni.fallbacks.join(', ') : 'none');
-  }
-
-  function formatCurrentHint(val) {
-    return val ? ('Current: ' + val) : 'Current: not set';
-  }
-
-  function updateOpenrouterStatus(orJev, en) {
-    const cnt = orJev.total_accounts || 0;
-    const sessionLabel = cnt === 1 ? 'Session' : 'Sessions';
-    const stateLabel = en ? 'Enabled' : 'Disabled';
-    openrouterStatus.textContent = stateLabel + ' (' + cnt + ' ' + sessionLabel + ')';
-    const base = orJev.base_url || 'https://openrouter.ai';
-    const model = orJev.model || 'typesafe/jev-1.13';
-    openrouterDesc.textContent = base + ' • Model: ' + model;
-
-    if (jevModeBadge) {
-      jevModeBadge.textContent = en ? 'Active (Failover On)' : 'Direct Only';
-      jevModeBadge.className = 'tag ' + (en ? 'ok' : 'idle');
-    }
-  }
-
-  function updateOpenrouterFields(orJev, en) {
-    setFieldIfNotFocused(cfgJevOrBase, orJev.base_url || 'https://openrouter.ai');
-    setFieldIfNotFocused(cfgJevOrModel, orJev.model || 'typesafe/jev-1.13');
-    if (cfgJevOrFallbackModels && !cfgJevOrFallbackModels.matches(':focus')) {
-      const fms = orJev.fallback_models;
-      cfgJevOrFallbackModels.value = Array.isArray(fms) ? fms.join(', ') : (fms || '');
-    }
-    if (cfgJevOrEnabled) {
-      cfgJevOrEnabled.value = en ? 'true' : 'false';
-    }
-    setFieldIfNotFocused(cfgJevCooldown, orJev.credit_cooldown_secs || 300);
-    if (hintJevApiKey) hintJevApiKey.textContent = formatCurrentHint(orJev.masked_api_key);
-    if (hintJevCookie) hintJevCookie.textContent = formatCurrentHint(orJev.masked_cookie);
-  }
-
-  function renderOpenrouterSection(orJev) {
-    if (!openrouterStatus) return;
-    const en = orJev.enabled !== false;
-    updateOpenrouterStatus(orJev, en);
-    updateOpenrouterFields(orJev, en);
+    omniDesc.textContent = (omni.default_model ? ('Default: ' + omni.default_model) : 'No default model')
+      + (omni.fallbacks && omni.fallbacks.length ? (' • ' + omni.fallbacks.length + ' fallback(s)') : '');
   }
 
   function renderJevSection(jev, orJev) {
     const cnt = jev.total_accounts || 0;
-    const exCnt = jev.exhausted_accounts || 0;
-    const exHint = exCnt > 0 ? (' (' + exCnt + ' credit-exhausted)') : '';
-    jevStatus.textContent = cnt + (cnt === 1 ? ' Account' : ' Accounts') + exHint;
-    jevDesc.textContent = jev.base_url || 'https://jev-ai.org';
-    setFieldIfNotFocused(cfgJevBase, jev.base_url || 'https://jev-ai.org');
+    const base = jev.base_url || 'https://api.jev.ai';
+    if (cnt > 0) {
+      jevStatus.textContent = formatAccountCount(cnt);
+    } else {
+      jevStatus.textContent = 'Default key';
+    }
+    jevDesc.textContent = base;
+
+    setFieldIfNotFocused(cfgJevBase, jev.base_url || 'https://api.jev.ai');
+    setFieldIfNotFocused(cfgJevCooldown, jev.credit_cooldown_secs || 3600);
 
     const rows = [];
     if (jev.accounts) {
       jev.accounts.forEach(function(acc) {
         rows.push('<tr>' +
-          '<td><span class="tag ok">Direct Jev</span></td>' +
+          '<td><span class="tag ok">Jev Native</span></td>' +
           '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
           '<td class="mono">' + escapeHtml(acc.masked_key) + '</td>' +
-          '<td><span class="tag ok">Active in Pool</span></td>' +
+          '<td><span class="tag idle">API Key</span></td>' +
           '</tr>');
       });
     }
+
     if (orJev && orJev.accounts) {
       orJev.accounts.forEach(function(acc) {
-        const isKey = acc.masked_api_key || (acc.label && acc.label.includes('key'));
+        const isKey = acc.account_type === 'api_key' || !acc.is_cookie;
         rows.push('<tr>' +
           '<td><span class="tag" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);">OpenRouter / JEV</span></td>' +
           '<td class="mono"><strong>' + escapeHtml(acc.label) + '</strong></td>' +
@@ -507,7 +1342,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     }
 
     const totalCnt = cnt + ((orJev && orJev.total_accounts) || 0);
-    countBadge.textContent = totalCnt + (totalCnt === 1 ? ' account' : ' accounts');
+    countBadge.textContent = formatAccountCount(totalCnt);
 
     if (rows.length > 0) {
       tableBody.innerHTML = rows.join('');
@@ -516,50 +1351,68 @@ button:disabled{opacity:.5;cursor:not-allowed}
     }
   }
 
-  function renderMuseaiApproval(app) {
-    if (!app) return;
-    if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = app.mode || 'off';
-    if (cfgMuseApprovalDestinations && !cfgMuseApprovalDestinations.matches(':focus')) {
-      cfgMuseApprovalDestinations.value = app.allowed_destinations ? app.allowed_destinations.join(', ') : '';
+  function renderOpenrouterSection(orJev) {
+    if (!orJev) return;
+    const cnt = orJev.total_accounts || 0;
+    if (cnt > 0) {
+      openrouterStatus.textContent = formatAccountCount(cnt);
+    } else if (orJev.enabled) {
+      openrouterStatus.textContent = 'Ready';
+    } else {
+      openrouterStatus.textContent = 'Disabled';
     }
-    if (cfgMuseApprovalTypes && !cfgMuseApprovalTypes.matches(':focus')) {
-      cfgMuseApprovalTypes.value = app.allowed_types ? app.allowed_types.join(', ') : '';
-    }
-    setFieldIfNotFocused(cfgMuseApprovalTimeout, app.timeout_secs != null ? app.timeout_secs : 30);
+    const orModel = orJev.model || orJev.default_model || '';
+    openrouterDesc.textContent = (orModel || 'No default model') + (orJev.masked_cookie ? ' (Browser active)' : '');
+
+    setFieldIfNotFocused(cfgJevOrBase, orJev.base_url || 'https://openrouter.ai/api/v1');
+    setFieldIfNotFocused(cfgJevOrModel, orModel);
+    setFieldIfNotFocused(cfgJevOrFallbackModels, (orJev.fallback_models || []).join(', '));
+    if (cfgJevOrEnabled) cfgJevOrEnabled.value = orJev.enabled ? 'true' : 'false';
   }
 
-  function renderMuseaiSection(muse) {
-    museStatus.textContent = muse.configured ? 'Configured' : 'Defaults';
+  function formatCredentialHint(hasCredential, maskedValue) {
+    if (!hasCredential) return 'Current: not set';
+    return 'Current: ' + (maskedValue || 'configured');
+  }
+
+  function renderMuseaiStatus(muse) {
+    const statusText = muse.configured ? 'Configured' : 'Defaults';
+    museStatus.textContent = statusText;
     museDesc.textContent = muse.base_url || 'https://muse.ai';
     if (museBadge) {
-      museBadge.textContent = muse.configured ? 'Configured' : 'Defaults';
+      museBadge.textContent = statusText;
       museBadge.className = 'tag ' + (muse.configured ? 'ok' : 'idle');
     }
     setFieldIfNotFocused(cfgMuseBase, muse.base_url || 'https://muse.ai');
     setFieldIfNotFocused(cfgMuseWs, muse.ws_url || '');
     setFieldIfNotFocused(cfgMuseVmid, muse.vm_id || '');
-    if (hintToken) hintToken.textContent = muse.has_access_token ? ('Current: ' + (muse.masked_access_token || 'configured')) : 'Current: not set';
-    if (hintNotary) hintNotary.textContent = muse.has_notary_token ? ('Current: ' + (muse.masked_notary_token || 'configured')) : 'Current: not set';
-    if (hintCookie) hintCookie.textContent = muse.has_cookie ? ('Current: ' + (muse.masked_cookie || 'configured')) : 'Current: not set';
     setFieldIfNotFocused(cfgMuseVideoPrompt, muse.default_video_prompt || '');
+  }
+
+  function renderMuseaiHints(muse) {
+    if (hintToken) hintToken.textContent = formatCredentialHint(muse.has_access_token, muse.masked_access_token);
+    if (hintNotary) hintNotary.textContent = formatCredentialHint(muse.has_notary_token, muse.masked_notary_token);
+    if (hintCookie) hintCookie.textContent = formatCredentialHint(muse.has_cookie, muse.masked_cookie);
+  }
+
+  function renderMuseaiApproval(approval) {
+    if (!approval) return;
+    if (cfgMuseApprovalMode) {
+      cfgMuseApprovalMode.value = approval.mode || 'off';
+    }
+    if (cfgMuseApprovalDestinations && !cfgMuseApprovalDestinations.matches(':focus')) {
+      cfgMuseApprovalDestinations.value = (approval.allowed_destinations || []).join(', ');
+    }
+    if (cfgMuseApprovalTypes && !cfgMuseApprovalTypes.matches(':focus')) {
+      cfgMuseApprovalTypes.value = (approval.allowed_types || []).join(', ');
+    }
+    setFieldIfNotFocused(cfgMuseApprovalTimeout, approval.timeout_secs != null ? approval.timeout_secs : 30);
+  }
+
+  function renderMuseaiSection(muse) {
+    renderMuseaiStatus(muse);
+    renderMuseaiHints(muse);
     renderMuseaiApproval(muse.approval);
-  }
-
-  function renderOverview(data) {
-    if (!data) return;
-    if (data.config) renderConfigSection(data.config);
-
-    const p = data.providers;
-    if (!p) return;
-    if (p.omniroute) renderOmnirouteSection(p.omniroute);
-    if (p.openrouter_jev) renderOpenrouterSection(p.openrouter_jev);
-    if (p.jev) renderJevSection(p.jev, p.openrouter_jev);
-    if (p.museai) renderMuseaiSection(p.museai);
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
   }
 
   function loadOverview() {
@@ -569,10 +1422,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
         return res.json();
       })
       .then(function(data) {
-        renderOverview(data);
+        if (data.config) renderConfigSection(data.config);
+        if (data.modules) renderModules(data.modules);
+        if (data.catalog) renderCatalog(data.catalog, data.modules);
+        const p = data.providers;
+        if (p) {
+          if (p.omniroute) renderOmnirouteSection(p.omniroute);
+          if (p.openrouter_jev) renderOpenrouterSection(p.openrouter_jev);
+          if (p.jev) renderJevSection(p.jev, p.openrouter_jev);
+          if (p.museai) renderMuseaiSection(p.museai);
+        }
       })
       .catch(function(err) {
-        tableBody.innerHTML = '<tr><td colspan="3" class="empty-hint" style="color:var(--err)">Failed to load overview: ' + escapeHtml(err.message) + '</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="4" class="empty-hint" style="color:var(--err)">Failed to load overview: ' + escapeHtml(err.message) + '</td></tr>';
       });
   }
 
@@ -603,6 +1465,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
       saveCfgBtn.disabled = true;
       saveCfgBtn.textContent = 'Saving...';
 
+      let cfgOk = false;
+      let cfgStatus = 0;
       fetch('/api/v1/dashboard/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -615,19 +1479,20 @@ button:disabled{opacity:.5;cursor:not-allowed}
         })
       })
       .then(function(res) {
-        return res.json().then(function(json) {
-          return { ok: res.ok, status: res.status, data: json };
-        });
+        cfgOk = res.ok;
+        cfgStatus = res.status;
+        return res.text();
       })
-      .then(function(res) {
+      .then(function(text) {
+        const json = parseJsonSafely(text);
         saveCfgBtn.disabled = false;
         saveCfgBtn.textContent = 'Save Gateway Settings';
 
-        if (!res.ok) {
-          cfgErrMsg.textContent = res.data && res.data.message ? res.data.message : 'Error saving settings (HTTP ' + res.status + ')';
+        if (!cfgOk) {
+          cfgErrMsg.textContent = json && json.message ? json.message : ('Error saving settings (HTTP ' + cfgStatus + ')');
           cfgErrMsg.style.display = 'block';
         } else {
-          cfgOkMsg.textContent = res.data.message || 'Settings successfully saved to persistent JSON storage.';
+          cfgOkMsg.textContent = json.message || 'Settings successfully saved to persistent JSON storage.';
           cfgOkMsg.style.display = 'block';
           loadOverview();
         }
@@ -670,28 +1535,31 @@ button:disabled{opacity:.5;cursor:not-allowed}
       saveMuseBtn.disabled = true;
       saveMuseBtn.textContent = 'Saving...';
 
+      let museOk = false;
+      let museStatusVal = 0;
       fetch('/api/v1/dashboard/muse-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       .then(function(res) {
-        return res.json().then(function(json) {
-          return { ok: res.ok, status: res.status, data: json };
-        });
+        museOk = res.ok;
+        museStatusVal = res.status;
+        return res.text();
       })
-      .then(function(res) {
+      .then(function(text) {
+        const json = parseJsonSafely(text);
         saveMuseBtn.disabled = false;
         saveMuseBtn.textContent = 'Save Muse AI Settings';
 
-        if (!res.ok) {
-          museErrMsg.textContent = res.data && res.data.message ? res.data.message : ('Error updating Muse AI config (HTTP ' + res.status + ')');
+        if (!museOk) {
+          museErrMsg.textContent = json && json.message ? json.message : ('Error updating Muse AI config (HTTP ' + museStatusVal + ')');
           museErrMsg.style.display = 'block';
         } else {
           cfgMuseToken.value = '';
           cfgMuseNotary.value = '';
           cfgMuseCookie.value = '';
-          museOkMsg.textContent = res.data.message || 'Muse AI configuration updated and saved.';
+          museOkMsg.textContent = json.message || 'Muse AI configuration updated and saved.';
           museOkMsg.style.display = 'block';
           loadOverview();
         }
@@ -724,39 +1592,30 @@ button:disabled{opacity:.5;cursor:not-allowed}
         jev_credit_cooldown_secs: cfgJevCooldown && cfgJevCooldown.value ? Number.parseInt(cfgJevCooldown.value, 10) : undefined,
       };
 
-      const apiKeyVal = cfgJevOrApiKey ? cfgJevOrApiKey.value.trim() : '';
-      if (apiKeyVal) {
-        payload.jev_openrouter_api_key = apiKeyVal;
-      }
-
-      const cookieVal = cfgJevOrCookie ? cfgJevOrCookie.value.trim() : '';
-      if (cookieVal) {
-        payload.jev_openrouter_cookie = cookieVal;
-      }
-
+      let jevSaveOk = false;
+      let jevSaveStatus = 0;
       fetch('/api/v1/dashboard/jev-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       .then(function(res) {
-        return res.json().then(function(json) {
-          return { ok: res.ok, status: res.status, data: json };
-        });
+        jevSaveOk = res.ok;
+        jevSaveStatus = res.status;
+        return res.text();
       })
-      .then(function(res) {
+      .then(function(text) {
+        const json = parseJsonSafely(text);
         if (saveJevBtn) {
           saveJevBtn.disabled = false;
           saveJevBtn.textContent = 'Save Jev & OpenRouter Settings';
         }
-        if (!res.ok) {
-          jevErrMsg.textContent = res.data && res.data.message ? res.data.message : 'Error saving settings (HTTP ' + res.status + ')';
+        if (!jevSaveOk) {
+          jevErrMsg.textContent = json && json.message ? json.message : ('Error saving settings (HTTP ' + jevSaveStatus + ')');
           jevErrMsg.style.display = 'block';
         } else {
           jevOkMsg.textContent = 'Success! Jev & OpenRouter configuration persisted.';
           jevOkMsg.style.display = 'block';
-          if (cfgJevOrCookie) cfgJevOrCookie.value = '';
-          if (cfgJevOrApiKey) cfgJevOrApiKey.value = '';
           loadOverview();
         }
       })
@@ -803,27 +1662,30 @@ button:disabled{opacity:.5;cursor:not-allowed}
       payload.label = labelVal;
     }
 
+    let accountsSaveOk = false;
+    let accountsSaveStatus = 0;
     fetch('/api/v1/dashboard/accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
     .then(function(res) {
-      return res.json().then(function(json) {
-        return { ok: res.ok, status: res.status, data: json };
-      });
+      accountsSaveOk = res.ok;
+      accountsSaveStatus = res.status;
+      return res.text();
     })
-    .then(function(res) {
+    .then(function(text) {
+      const json = parseJsonSafely(text);
       submitBtn.disabled = false;
       submitBtn.textContent = 'Add to Account Pool';
 
-      if (!res.ok) {
-        errMsg.textContent = res.data && res.data.message ? res.data.message : 'Error adding accounts (HTTP ' + res.status + ')';
+      if (!accountsSaveOk) {
+        errMsg.textContent = json && json.message ? json.message : ('Error adding accounts (HTTP ' + accountsSaveStatus + ')');
         errMsg.style.display = 'block';
       } else {
         keysInput.value = '';
         if (labelInput) labelInput.value = '';
-        okMsg.textContent = 'Success! Added ' + res.data.added_count + ' new key(s). Total accounts in pool: ' + res.data.total_accounts + '.';
+        okMsg.textContent = 'Success! Added ' + json.added_count + ' new key(s). Total accounts in pool: ' + json.total_accounts + '.';
         okMsg.style.display = 'block';
         loadOverview();
       }

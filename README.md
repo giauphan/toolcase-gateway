@@ -37,7 +37,7 @@ Zero heavy async runtimes (`tokio` forbidden; standard library blocking networki
 
 ```mermaid
 graph TD
-    Client["Client / IDE / Agent"] --> Gateway["toolcase-gateway (127.0.0.1:20129)"]
+    Client["Client / IDE / Agent"] --> Gateway["toolcase-gateway (127.0.0.1:20130)"]
     Gateway --> Dispatcher{"Canonical Dispatcher<br>(src/routes.rs)"}
     
     Dispatcher -->|"/gateway-config/dashboard"| Dashboard["Dashboard UI & REST API"]
@@ -72,7 +72,7 @@ The binary lands at `target/release/toolcase-gateway` (~350 KB, stripped, LTO).
 ## Quick start
 
 ```sh
-# Start gateway on default port 127.0.0.1:20129 proxying to 127.0.0.1:20128
+# Start gateway on default port 127.0.0.1:20130 proxying to 127.0.0.1:20128
 ./target/release/toolcase-gateway
 ```
 
@@ -84,7 +84,7 @@ GW_FALLBACK_MODELS="gpt-4o-mini,claude-3-5-sonnet" \
 ./target/release/toolcase-gateway
 ```
 
-Point your client at `http://127.0.0.1:20129` instead of the direct upstream address.
+Point your client at `http://127.0.0.1:20130` instead of the direct upstream address.
 
 ---
 
@@ -93,7 +93,7 @@ Point your client at `http://127.0.0.1:20129` instead of the direct upstream add
 The gateway includes an embedded, real-time web dashboard accessible at:
 
 ```
-http://127.0.0.1:20129/gateway-config/dashboard
+http://127.0.0.1:20130/gateway-config/dashboard
 ```
 
 From the dashboard, operators can:
@@ -139,7 +139,7 @@ GW_JEV_OPENROUTER_FALLBACK_MODELS="baseten/mammoth-1:free,nace-ai/drex-max"
 
 Submit decision requests (evaluating multiple concurrent questions via the **Parallel Sampler**):
 ```sh
-curl -X POST "http://127.0.0.1:20129/jev/v1/systemone" \
+curl -X POST "http://127.0.0.1:20130/jev/v1/systemone" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: ticket-8814-20261010" \
   -d '{
@@ -183,12 +183,12 @@ Send a chat completion and continue in the same thread using `reply_thread_id`:
 
 ```sh
 # Turn 1: Start conversation
-curl -X POST http://127.0.0.1:20129/muse-ai/v1/chat/completions \
+curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"muse","messages":[{"role":"user","content":"My favorite city is Tokyo."}]}'
 
 # Turn 2: Continue in existing thread
-curl -X POST http://127.0.0.1:20129/muse-ai/v1/chat/completions \
+curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"muse",
@@ -206,7 +206,7 @@ Submit video generation tasks:
 curl --no-buffer --max-time 930 -X POST \
   -H "Content-Type: application/json" \
   --data-raw '{"prompt":"A small orange fox rides a skateboard through a park, bouncy animation.","model":"muse-video","aspect_ratio":"16:9","duration":5}' \
-  http://127.0.0.1:20129/muse-ai/v1/create-video
+  http://127.0.0.1:20130/muse-ai/v1/create-video
 ```
 
 See [`docs/muse-video-generation.md`](docs/muse-video-generation.md) for details.
@@ -215,7 +215,7 @@ See [`docs/muse-video-generation.md`](docs/muse-video-generation.md) for details
 
 Create images with customizable aspect ratios (`1:1`, `16:9`, `9:16`, `4:3`, `3:2`):
 ```sh
-curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-image?wait=true \
+curl -X POST http://127.0.0.1:20130/muse-ai/v1/create-image?wait=true \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "A serene mountain lake at sunrise, misty pine trees, warm golden hour reflections",
@@ -223,7 +223,7 @@ curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-image?wait=true \
   }'
 ```
 
-Or open the interactive Image Studio UI in a browser at `http://127.0.0.1:20129/image-template`.
+Or open the interactive Image Studio UI in a browser at `http://127.0.0.1:20130/image-template`.
 
 See [`docs/muse-image-generation.md`](docs/muse-image-generation.md) for full image generation documentation.
 
@@ -240,7 +240,7 @@ The gateway uses a two-layer configuration model:
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `GW_LISTEN_HOST` | `127.0.0.1` | Bind address. Non-loopback values log a security warning. |
-| `GW_LISTEN_PORT` | `20129` | Listen port. |
+| `GW_LISTEN_PORT` | `20130` | Listen port. |
 | `GW_TARGET_HOST` | `127.0.0.1` | Default upstream host. |
 | `GW_TARGET_PORT` | `20128` | Default upstream port. |
 | `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated fallback models, rotated across requests. |
@@ -280,6 +280,7 @@ See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for full threat modeling.
 
 ## Documentation
 
+- [`docs/MODULES.md`](docs/MODULES.md) — Platform modules and plugins (WordPress/Odoo paradigm), manifest schema, dynamic installation (GitHub/ZIP), and auto-discovery
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Architectural overview, canonical route inventory, and lifecycle
 - [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) — Subsystem components, code ownership, concurrency, and data flow
 - [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) — Live source code organization, file responsibilities, and DDD rules
