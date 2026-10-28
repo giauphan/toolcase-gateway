@@ -97,8 +97,11 @@ fn read_module_manifest(mpath: &Path, base_dir: &Path) -> Option<PersonalManifes
     } else {
         base_dir.to_path_buf()
     };
+    let is_url_entrypoint = manifest.protocol == "local-http"
+        || manifest.entrypoint.starts_with("http://")
+        || manifest.entrypoint.starts_with("https://");
     let ep = Path::new(&manifest.entrypoint);
-    if ep.is_relative() {
+    if !is_url_entrypoint && ep.is_relative() {
         manifest.entrypoint = abs_base.join(ep).to_string_lossy().to_string();
     }
     Some(manifest)
@@ -181,14 +184,10 @@ pub fn install_module(
     }
 
     if let Err(e) = fs::rename(&staging_dir, &target_dir) {
-        // Fallback: try copy + remove if cross-device link error occurs
-        if let Err(copy_err) = copy_dir_all(&staging_dir, &target_dir) {
-            let _ = fs::remove_dir_all(&staging_dir);
-            return Err(ModuleError::InvalidManifest(format!(
-                "Failed to finalize module directory: {e} / {copy_err}"
-            )));
-        }
         let _ = fs::remove_dir_all(&staging_dir);
+        return Err(ModuleError::InvalidManifest(format!(
+            "Failed to finalize module directory: {e}"
+        )));
     }
 
     let abs_target_dir = if target_dir.is_relative() {
@@ -200,27 +199,32 @@ pub fn install_module(
         target_dir.clone()
     };
 
-    // Resolve entrypoint to absolute path inside target_dir
-    let ep_path = Path::new(&manifest.entrypoint);
-    let resolved_ep = if ep_path.is_relative() {
-        abs_target_dir.join(ep_path)
-    } else {
-        ep_path.to_path_buf()
-    };
+    // Resolve entrypoint to absolute path inside target_dir for local executables
+    let is_url_entrypoint = manifest.protocol == "local-http"
+        || manifest.entrypoint.starts_with("http://")
+        || manifest.entrypoint.starts_with("https://");
+    if !is_url_entrypoint {
+        let ep_path = Path::new(&manifest.entrypoint);
+        let resolved_ep = if ep_path.is_relative() {
+            abs_target_dir.join(ep_path)
+        } else {
+            ep_path.to_path_buf()
+        };
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let (Ok(can_ep), Ok(can_target)) =
-            (resolved_ep.canonicalize(), abs_target_dir.canonicalize())
+        #[cfg(unix)]
         {
-            if can_ep.starts_with(&can_target) && can_ep.is_file() {
-                let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
+            use std::os::unix::fs::PermissionsExt;
+            if let (Ok(can_ep), Ok(can_target)) =
+                (resolved_ep.canonicalize(), abs_target_dir.canonicalize())
+            {
+                if can_ep.starts_with(&can_target) && can_ep.is_file() {
+                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
+                }
             }
         }
-    }
 
-    manifest.entrypoint = resolved_ep.to_string_lossy().to_string();
+        manifest.entrypoint = resolved_ep.to_string_lossy().to_string();
+    }
 
     // Persist finalized manifest.json into the module directory
     let manifest_path = target_dir.join("module.json");
@@ -656,6 +660,42 @@ mod tests {
         cleanup_module_files("test-py-module", &temp_state);
         assert!(!temp_state.join("modules").join("test-py-module").exists());
 
+        let _ = fs::remove_dir_all(&source_dir);
+        let _ = fs::remove_dir_all(&temp_state);
+    }
+
+    #[test]
+    fn test_install_module_local_http_preserves_url_entrypoint() {
+        let temp_state = std::env::temp_dir().join(format!("gw_state_{}", uuid::Uuid::new_v4()));
+        let source_dir = std::env::temp_dir().join(format!("src_mod_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&source_dir).unwrap();
+
+        let options = InstallOptions {
+            id: Some("test-http-module".to_string()),
+            name: Some("Test HTTP Module".to_string()),
+            namespace: Some("/custom/http".to_string()),
+            entrypoint: Some("http://127.0.0.1:8080".to_string()),
+            protocol: Some("local-http".to_string()),
+            ..Default::default()
+        };
+
+        let manifest = install_module(
+            InstallSource::LocalDir(source_dir.clone()),
+            options,
+            &temp_state,
+        )
+        .expect("install succeeds");
+
+        assert_eq!(manifest.id, "test-http-module");
+        assert_eq!(manifest.entrypoint, "http://127.0.0.1:8080");
+        assert_eq!(manifest.protocol, "local-http");
+
+        let mod_dir = temp_state.join("modules").join("test-http-module");
+        let loaded =
+            read_module_manifest(&mod_dir.join("module.json"), &mod_dir).expect("reads manifest");
+        assert_eq!(loaded.entrypoint, "http://127.0.0.1:8080");
+
+        cleanup_module_files("test-http-module", &temp_state);
         let _ = fs::remove_dir_all(&source_dir);
         let _ = fs::remove_dir_all(&temp_state);
     }

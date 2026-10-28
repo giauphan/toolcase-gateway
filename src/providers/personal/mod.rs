@@ -109,8 +109,8 @@ fn dispatch_stdio(
         Err(_) => {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = writer_handle.join();
-            let _ = reader_handle.join();
+            drop(writer_handle);
+            drop(reader_handle);
             return write_personal_error(
                 client,
                 504,
