@@ -271,6 +271,72 @@ fn test_default_listen_port_separation() {
     assert_eq!(fallback, "20130");
 }
 
+#[test]
+fn test_self_healing_legacy_cat_heredoc_adapter() {
+    let temp_dir = std::env::temp_dir().join(format!("heal_test_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let temp_script = temp_dir.join("run.sh");
+
+    let legacy_script = r#"#!/bin/sh
+cat << 'EOF' | python3 - "$@"
+import os, sys, json
+for line in sys.stdin:
+    if not line.strip(): continue
+    out = {"status": 200, "headers": {"content-type": "application/json"}, "body": json.dumps({"healed": True})}
+    sys.stdout.write(json.dumps(out) + "\n")
+    sys.stdout.flush()
+EOF
+"#;
+    fs::write(&temp_script, legacy_script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&temp_script).unwrap().permissions();
+        perms.set_mode(0o700);
+        let _ = fs::set_permissions(&temp_script, perms);
+    }
+
+    let manifest = PersonalManifest {
+        id: "test-healer".to_string(),
+        name: "Test Healer".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: "/custom/heal".to_string(),
+        entrypoint: temp_script.to_string_lossy().to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+        group: None,
+    };
+
+    let (mut client, mut server) = match create_stream_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+
+    let req = Request {
+        method: "POST".to_string(),
+        path: "/custom/heal/v1/chat/completions".to_string(),
+        headers: vec![],
+        body: b"{}".to_vec(),
+    };
+
+    let server_handle = thread::spawn(move || {
+        handle_personal_module_request(&mut server, &req, &manifest, "/v1/chat/completions")
+    });
+
+    let head = read_response_head(&mut client).expect("read head");
+    assert_eq!(head.status, 200);
+
+    let mut body = head.buffered_body;
+    let _ = client.read_to_end(&mut body);
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(val["healed"], true);
+
+    let _ = server_handle.join().unwrap();
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
 fn create_stream_pair() -> Option<(TcpStream, TcpStream)> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
     let addr = listener.local_addr().ok()?;

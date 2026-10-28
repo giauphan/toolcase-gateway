@@ -41,9 +41,43 @@ fn is_sensitive_env_var(var: &str) -> bool {
         || var.contains("API_KEY")
 }
 
+fn heal_legacy_adapter_script(path: &std::path::Path) {
+    if let Ok(content) = std::fs::read_to_string(path) {
+        if content.contains("cat << 'EOF' | python3") {
+            if let Some(parent) = path.parent() {
+                let adapter_py = parent.join("adapter.py");
+                if let Some(py_code) = content
+                    .split("cat << 'EOF' | python3")
+                    .nth(1)
+                    .and_then(|s| s.split_once('\n'))
+                    .and_then(|(_, rest)| rest.split("\nEOF").next())
+                {
+                    let _ = std::fs::write(&adapter_py, py_code);
+                    let fixed_run_sh = r#"#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec python3 "$SCRIPT_DIR/adapter.py" "$@"
+"#;
+                    let _ = std::fs::write(path, fixed_run_sh);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ =
+                            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+                        let _ = std::fs::set_permissions(
+                            &adapter_py,
+                            std::fs::Permissions::from_mode(0o700),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn build_command(manifest: &PersonalManifest, sub_provider_id: Option<&str>) -> Command {
     let entry_path = std::path::Path::new(&manifest.entrypoint);
     let resolved_entrypoint = if entry_path.is_file() {
+        heal_legacy_adapter_script(entry_path);
         entry_path
             .canonicalize()
             .unwrap_or_else(|_| entry_path.to_path_buf())

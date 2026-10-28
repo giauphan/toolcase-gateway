@@ -680,6 +680,39 @@ fn test_system_catalog_and_one_click_installation() {
     );
     drop(guard);
 
+    // 2.5 Dispatch live request to the installed cohere module
+    use std::io::Write;
+    let listener_exec = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port_exec = listener_exec.local_addr().unwrap().port();
+    let store_clone_exec = store.clone();
+    let handle_exec = thread::spawn(move || {
+        let (client, _) = listener_exec.accept().unwrap();
+        let _ = toolcase_gateway::routes::route_request(client, &store_clone_exec);
+    });
+
+    let mut client_exec = TcpStream::connect(("127.0.0.1", port_exec)).unwrap();
+    let body_req = br#"{"messages":[{"role":"user","content":"Hello Cohere"}]}"#;
+    client_exec
+        .write_all(
+            format!(
+                "POST /custom/cohere/v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n",
+                body_req.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    client_exec.write_all(body_req).unwrap();
+    let head_exec = read_response_head(&mut client_exec).unwrap();
+    if head_exec.status != 200 {
+        panic!(
+            "Cohere dispatch failed: status={}, body={:?}",
+            head_exec.status,
+            String::from_utf8_lossy(&head_exec.buffered_body)
+        );
+    }
+    assert_eq!(head_exec.status, 200);
+    handle_exec.join().unwrap();
+
     // 3. Namespace collision returns 400 Bad Request
     let listener2 = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port2 = listener2.local_addr().unwrap().port();
