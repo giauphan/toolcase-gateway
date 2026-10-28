@@ -3,7 +3,10 @@ use std::path::Path;
 use toolcase_gateway::gateway::installer::{
     cleanup_module_files, install_module, scan_and_register_modules, InstallOptions, InstallSource,
 };
-use toolcase_gateway::gateway::modules::ModuleRegistry;
+use toolcase_gateway::gateway::modules::{ModuleError, ModuleRegistry, PersonalManifest};
+use toolcase_gateway::storage::{
+    parse_database_url, DatabaseEngine, SqliteStorage, StorageRepository, StoredAccount,
+};
 
 #[test]
 fn test_scan_and_auto_discover_odoo_style_module() {
@@ -198,4 +201,304 @@ fn test_install_from_zip_bytes() {
     cleanup_module_files("zipped-plugin", &temp_state);
     assert!(!temp_state.join("modules").join("zipped-plugin").exists());
     let _ = fs::remove_dir_all(&temp_state);
+}
+
+#[test]
+fn test_module_id_validation_rejects_traversal_and_invalid_chars() {
+    let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
+    let src_dir = std::env::temp_dir().join(format!("test_src_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("main.py"), "print('hi')").unwrap();
+
+    let invalid_ids = [
+        "../../bad-id",
+        "/absolute/path",
+        "id with spaces",
+        "id@special!",
+        "..",
+        "",
+    ];
+
+    for bad_id in invalid_ids {
+        let opts = InstallOptions {
+            id: Some(bad_id.to_string()),
+            namespace: Some("/custom/test".to_string()),
+            ..Default::default()
+        };
+        let res = install_module(InstallSource::LocalDir(src_dir.clone()), opts, &temp_state);
+        assert!(res.is_err(), "Should reject invalid id: {bad_id}");
+    }
+
+    let _ = fs::remove_dir_all(&src_dir);
+    let _ = fs::remove_dir_all(&temp_state);
+}
+
+#[test]
+fn test_module_namespace_uniqueness_and_collision_prevention() {
+    let mut reg = ModuleRegistry::new();
+
+    // 1. Missing or invalid namespace fails
+    let bad_ns = PersonalManifest {
+        id: "tool-1".into(),
+        name: "Tool 1".into(),
+        version: "1.0.0".into(),
+        namespace: "invalid-no-slash".into(),
+        entrypoint: "/bin/echo".into(),
+        protocol: "stdio-stream".into(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+    };
+    assert!(matches!(
+        reg.register_personal_module(bad_ns),
+        Err(ModuleError::InvalidNamespace(_))
+    ));
+
+    // 2. Reserved prefix fails
+    let reserved_ns = PersonalManifest {
+        id: "tool-2".into(),
+        name: "Tool 2".into(),
+        version: "1.0.0".into(),
+        namespace: "/api/v1/custom".into(),
+        entrypoint: "/bin/echo".into(),
+        protocol: "stdio-stream".into(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+    };
+    assert!(matches!(
+        reg.register_personal_module(reserved_ns),
+        Err(ModuleError::ReservedNamespace(_))
+    ));
+
+    // 3. Valid registration succeeds
+    let valid_1 = PersonalManifest {
+        id: "tool-valid-1".into(),
+        name: "Tool 1".into(),
+        version: "1.0.0".into(),
+        namespace: "/custom/search".into(),
+        entrypoint: "/bin/echo".into(),
+        protocol: "stdio-stream".into(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+    };
+    assert!(reg.register_personal_module(valid_1).is_ok());
+
+    // 4. Duplicate namespace fails
+    let dup_ns = PersonalManifest {
+        id: "tool-valid-2".into(),
+        name: "Tool 2".into(),
+        version: "1.0.0".into(),
+        namespace: "/custom/search".into(),
+        entrypoint: "/bin/echo".into(),
+        protocol: "stdio-stream".into(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+    };
+    assert!(matches!(
+        reg.register_personal_module(dup_ns),
+        Err(ModuleError::NamespaceCollision(_))
+    ));
+
+    // 5. Overlapping sub-path collision fails
+    let overlap_ns = PersonalManifest {
+        id: "tool-valid-3".into(),
+        name: "Tool 3".into(),
+        version: "1.0.0".into(),
+        namespace: "/custom/search/extra".into(),
+        entrypoint: "/bin/echo".into(),
+        protocol: "stdio-stream".into(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+    };
+    assert!(matches!(
+        reg.register_personal_module(overlap_ns),
+        Err(ModuleError::NamespaceCollision(_))
+    ));
+}
+
+#[test]
+fn test_relative_entrypoint_resolution_and_canonicalization() {
+    let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
+    let src_dir = std::env::temp_dir().join(format!("test_src_rel_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("main.py"), "print('hello from relative')").unwrap();
+
+    let opts = InstallOptions {
+        id: Some("relative-test-module".to_string()),
+        namespace: Some("/custom/relative".to_string()),
+        entrypoint: Some("main.py".to_string()),
+        ..Default::default()
+    };
+
+    let manifest = install_module(InstallSource::LocalDir(src_dir.clone()), opts, &temp_state)
+        .expect("install succeeds with relative entrypoint");
+
+    assert!(std::path::Path::new(&manifest.entrypoint).is_absolute());
+    assert!(manifest.entrypoint.ends_with("main.py"));
+
+    let mut reg = ModuleRegistry::new();
+    assert!(reg.register_personal_module(manifest).is_ok());
+
+    cleanup_module_files("relative-test-module", &temp_state);
+    let _ = fs::remove_dir_all(&temp_state);
+    let _ = fs::remove_dir_all(&src_dir);
+}
+
+#[test]
+fn test_database_storage_url_parsing_and_sqlite_operations() {
+    let temp_dir = std::env::temp_dir().join(format!("test_db_repo_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // 1. Test parse_database_url schemes
+    let sqlite_engine = parse_database_url(Some("sqlite://custom.db"), &temp_dir).unwrap();
+    assert_eq!(
+        sqlite_engine,
+        DatabaseEngine::Sqlite(std::path::PathBuf::from("custom.db"))
+    );
+
+    let pg_engine =
+        parse_database_url(Some("postgres://user:pass@localhost:5432/db"), &temp_dir).unwrap();
+    assert_eq!(
+        pg_engine,
+        DatabaseEngine::Postgres("postgres://user:pass@localhost:5432/db".into())
+    );
+
+    let my_engine =
+        parse_database_url(Some("mysql://user:pass@localhost:3306/db"), &temp_dir).unwrap();
+    assert_eq!(
+        my_engine,
+        DatabaseEngine::Mysql("mysql://user:pass@localhost:3306/db".into())
+    );
+
+    let default_engine = parse_database_url(None, &temp_dir).unwrap();
+    assert_eq!(
+        default_engine,
+        DatabaseEngine::Sqlite(temp_dir.join("gateway.db"))
+    );
+
+    let invalid = parse_database_url(Some("redis://localhost:6379"), &temp_dir);
+    assert!(invalid.is_err());
+
+    // 2. Test SqliteStorage operations
+    let storage = SqliteStorage::open(
+        DatabaseEngine::Sqlite(std::path::PathBuf::from(":memory:")),
+        &temp_dir,
+    )
+    .unwrap();
+
+    let accounts = vec![
+        StoredAccount {
+            id: "acc_1".into(),
+            provider: "openrouter".into(),
+            key: "sk-or-v1-key1".into(),
+            label: Some("Primary".into()),
+            is_active: true,
+        },
+        StoredAccount {
+            id: "acc_2".into(),
+            provider: "jev".into(),
+            key: "jev_key_2".into(),
+            label: None,
+            is_active: false,
+        },
+    ];
+    storage.save_accounts(&accounts).unwrap();
+    let retrieved = storage.get_accounts().unwrap();
+    assert_eq!(retrieved.len(), 2);
+    assert_eq!(retrieved[0].id, "acc_1");
+    assert_eq!(retrieved[1].key, "jev_key_2");
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_dashboard_module_api_lifecycle() {
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use toolcase_gateway::config::ConfigStore;
+    use toolcase_gateway::http::read_response_head;
+    use toolcase_gateway::routes::route_request;
+
+    let temp_env = std::env::temp_dir().join(format!("test_store_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(
+        toolcase_gateway::config::Config::default(),
+        temp_env.clone(),
+    );
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let store_clone = store.clone();
+    let handle = thread::spawn(move || {
+        for _ in 0..4 {
+            let (client, _) = listener.accept().unwrap();
+            let _ = route_request(client, &store_clone);
+        }
+    });
+
+    // 1. GET /api/v1/dashboard/overview (initially includes personal & built-in modules)
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "GET /api/v1/dashboard/overview HTTP/1.1\r\nHost: localhost\r\n\r\n"
+    )
+    .unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+
+    // 2. POST /api/v1/dashboard/modules/install with raw manifest
+    let install_body = serde_json::json!({
+        "id": "http-test-mod",
+        "name": "HTTP Test Module",
+        "version": "1.0.0",
+        "namespace": "/custom/http-test",
+        "entrypoint": "/bin/echo",
+        "protocol": "stdio-stream",
+        "capabilities": ["models"]
+    })
+    .to_string();
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "POST /api/v1/dashboard/modules/install HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        install_body.len(),
+        install_body
+    )
+    .unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+
+    // 3. POST /api/v1/dashboard/modules/state
+    let toggle_body = serde_json::json!({"id": "http-test-mod", "enabled": false}).to_string();
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "POST /api/v1/dashboard/modules/state HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        toggle_body.len(),
+        toggle_body
+    )
+    .unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+
+    // 4. POST /api/v1/dashboard/modules/remove
+    let remove_body = serde_json::json!({"id": "http-test-mod"}).to_string();
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "POST /api/v1/dashboard/modules/remove HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        remove_body.len(),
+        remove_body
+    )
+    .unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+
+    handle.join().unwrap();
+    let _ = fs::remove_file(temp_env);
 }
