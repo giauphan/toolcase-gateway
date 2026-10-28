@@ -182,8 +182,77 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
             }))
         }
         "gateway_install_personal_module" => {
-            let manifest: PersonalManifest = serde_json::from_value(params.clone())
-                .map_err(|e| format!("Invalid personal module manifest parameters: {e}"))?;
+            let manifest = if let Some(src) = params.get("source").and_then(|v| v.as_str()) {
+                let source = crate::gateway::installer::resolve_source(src);
+                let opts = crate::gateway::installer::InstallOptions {
+                    id: params
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    name: params
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    namespace: params
+                        .get("namespace")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    entrypoint: params
+                        .get("entrypoint")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    protocol: params
+                        .get("protocol")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    branch: params
+                        .get("branch")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                };
+                let state_dir = crate::gateway::installer::get_state_dir();
+                crate::gateway::installer::install_module(source, opts, &state_dir)
+                    .map_err(|e| format!("Module installation failed: {e}"))?
+            } else if let Some(b64) = params.get("zip_base64").and_then(|v| v.as_str()) {
+                let bytes = crate::gateway::installer::decode_base64(b64)
+                    .map_err(|e| format!("Invalid zip_base64: {e}"))?;
+                let opts = crate::gateway::installer::InstallOptions {
+                    id: params
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    name: params
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    namespace: params
+                        .get("namespace")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    entrypoint: params
+                        .get("entrypoint")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    protocol: params
+                        .get("protocol")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    branch: params
+                        .get("branch")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                };
+                let state_dir = crate::gateway::installer::get_state_dir();
+                crate::gateway::installer::install_module(
+                    crate::gateway::installer::InstallSource::ZipBytes(bytes),
+                    opts,
+                    &state_dir,
+                )
+                .map_err(|e| format!("Module installation failed: {e}"))?
+            } else {
+                serde_json::from_value::<PersonalManifest>(params.clone())
+                    .map_err(|e| format!("Invalid personal module manifest parameters: {e}"))?
+            };
 
             let id = manifest.id.clone();
             {
@@ -216,6 +285,8 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
                     .unregister_personal_module(id)
                     .map_err(|e| e.to_string())?;
             }
+            let state_dir = crate::gateway::installer::get_state_dir();
+            crate::gateway::installer::cleanup_module_files(id, &state_dir);
             store
                 .save_to_persistent_file()
                 .map_err(|e| format!("Module state updated but persistence failed: {e}"))?;

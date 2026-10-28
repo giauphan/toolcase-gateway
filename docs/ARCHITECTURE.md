@@ -118,9 +118,11 @@ The codebase follows strict Domain-Driven Design (DDD) with clear boundaries:
 | `src/providers/jev/route.rs` | Jev route resolution and mapping | <60 lines |
 | `src/providers/jev/business.rs` | Jev retryable status classifier | <30 lines |
 | `src/museai/` | Muse AI subsystem: transport, noise, chat, video, approval, session | Decomposed <450/module |
-| `src/gateway/` | Candidate planning, retry classification, policy rules | Decomposed <450/module |
+| `src/gateway/` | Candidate planning, retry classification, policy rules, archive extractor, module installer | Decomposed <450/module |
 | `src/runtime/` | Admission controller, byte guard, connection limits | Decomposed <450/module |
 | `src/codecs/` | SSE and chunked streaming decoders | Decomposed <450/module |
+
+For details on authoring, installing, and auto-discovering external provider modules (modeled after WordPress plugins and Odoo addons), consult [`docs/MODULES.md`](MODULES.md).
 
 ---
 

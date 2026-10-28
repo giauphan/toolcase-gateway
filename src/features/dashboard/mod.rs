@@ -6,6 +6,6 @@ pub use jev::handle_update_jev_config;
 pub use muse::handle_update_muse_config;
 pub use service::{
     handle_add_provider_accounts, handle_dashboard_overview, handle_dashboard_page,
-    handle_install_personal_module, handle_save_provider_settings, handle_set_module_state,
-    handle_update_gateway_config, mask_key, persist_jev_keys,
+    handle_install_personal_module, handle_remove_personal_module, handle_save_provider_settings,
+    handle_set_module_state, handle_update_gateway_config, mask_key, persist_jev_keys,
 };

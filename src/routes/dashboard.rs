@@ -158,6 +158,27 @@ pub fn dispatch_dashboard_route(
                 Ok(Some(405))
             }
         }
+        "/api/v1/dashboard/modules/remove" | "/api/v1/dashboard/modules/uninstall" => {
+            if request.method.eq_ignore_ascii_case("post") {
+                if !validate_dashboard_mutation_request(client, request)? {
+                    return Ok(Some(403));
+                }
+                crate::features::dashboard::handle_remove_personal_module(
+                    client,
+                    &request.body,
+                    store,
+                )?;
+                Ok(Some(200))
+            } else {
+                write_error(
+                    client,
+                    405,
+                    "Method Not Allowed",
+                    "dashboard modules/remove only supports POST",
+                )?;
+                Ok(Some(405))
+            }
+        }
         _ => Ok(None),
     }
 }

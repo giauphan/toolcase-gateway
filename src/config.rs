@@ -634,9 +634,14 @@ impl ConfigStore {
                     }
                 }
             }
+            let state_dir = crate::gateway::installer::get_state_dir();
+            crate::gateway::installer::scan_and_register_modules(&mut reg, &state_dir);
             if let Some(ref enabled_map) = persistent.enabled_modules {
                 reg.apply_enablement_map(enabled_map);
             }
+        } else {
+            let state_dir = crate::gateway::installer::get_state_dir();
+            crate::gateway::installer::scan_and_register_modules(&mut reg, &state_dir);
         }
         let module_registry = Arc::new(RwLock::new(reg));
 

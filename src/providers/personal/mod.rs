@@ -29,6 +29,11 @@ fn dispatch_stdio(
     subpath: &str,
 ) -> io::Result<u16> {
     let mut cmd = Command::new(&manifest.entrypoint);
+    if let Some(parent) = std::path::Path::new(&manifest.entrypoint).parent() {
+        if parent.is_dir() {
+            cmd.current_dir(parent);
+        }
+    }
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

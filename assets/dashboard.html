@@ -527,35 +527,45 @@ footer.site-footer {
     <!-- Personal Module Installation -->
     <details style="margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; background: var(--surface-2);">
       <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary); outline: none;">
-        Install Out of Tree Personal Module
+        Install Self-Contained Module (GitHub, ZIP Archive, or Local Script)
       </summary>
       <form id="install-module-form" style="margin-top: 16px;">
+        <div class="field-group" style="margin-bottom: 14px;">
+          <label for="mod-source">Source (GitHub Repository URL or ZIP Archive URL/Path)</label>
+          <input type="text" id="mod-source" placeholder="https://github.com/owner/my-module or https://example.com/mod.zip">
+          <div class="hint">Leave empty if specifying a local script or uploading a ZIP file below.</div>
+        </div>
+        <div class="field-group" style="margin-bottom: 14px;">
+          <label for="mod-zip-file">Upload ZIP Archive</label>
+          <input type="file" id="mod-zip-file" accept=".zip">
+          <div class="hint">Upload a self-contained module zip package with code and optional module.json.</div>
+        </div>
         <div class="grid-2">
           <div class="field-group">
-            <label for="mod-id">Module Identifier</label>
-            <input type="text" id="mod-id" placeholder="custom-cohere" required>
-            <div class="hint">Alphanumeric identifier without spaces.</div>
+            <label for="mod-id">Module Identifier (optional)</label>
+            <input type="text" id="mod-id" placeholder="custom-cohere">
+            <div class="hint">Alphanumeric identifier without spaces (auto-inferred if omitted).</div>
           </div>
           <div class="field-group">
-            <label for="mod-name">Display Name</label>
-            <input type="text" id="mod-name" placeholder="Custom Cohere Adapter" required>
+            <label for="mod-name">Display Name (optional)</label>
+            <input type="text" id="mod-name" placeholder="Custom Cohere Adapter">
           </div>
         </div>
         <div class="grid-2">
           <div class="field-group">
-            <label for="mod-namespace">Route Namespace</label>
-            <input type="text" id="mod-namespace" placeholder="/personal/cohere" required>
-            <div class="hint">Must start with a forward slash and not collide with built in routes.</div>
+            <label for="mod-namespace">Route Namespace (optional)</label>
+            <input type="text" id="mod-namespace" placeholder="/custom/cohere">
+            <div class="hint">Must start with a forward slash (inferred as /custom/&lt;id&gt; if omitted).</div>
           </div>
           <div class="field-group">
-            <label for="mod-entrypoint">Entrypoint Command or Script</label>
-            <input type="text" id="mod-entrypoint" placeholder="/usr/local/bin/cohere-adapter" required>
-            <div class="hint">Absolute path to executable or local script.</div>
+            <label for="mod-entrypoint">Entrypoint Command or Script (optional)</label>
+            <input type="text" id="mod-entrypoint" placeholder="run.sh or /usr/local/bin/cohere-adapter">
+            <div class="hint">Auto-detected from run.sh, main.py, or index.js if omitted.</div>
           </div>
         </div>
         <div class="field-group">
           <label for="mod-caps">Capabilities (comma separated)</label>
-          <input type="text" id="mod-caps" placeholder="chat_completions, embeddings">
+          <input type="text" id="mod-caps" placeholder="chat_completions, models">
         </div>
         <div class="btns">
           <button type="submit" id="install-module-btn" class="btn-primary">Install Module</button>
@@ -932,13 +942,21 @@ footer.site-footer {
   const modulesTbody = byId('modules-tbody');
   if (modulesTbody) {
     modulesTbody.addEventListener('click', function(e) {
-      const btn = e.target.closest('.module-toggle');
-      if (!btn) return;
-      window.toggleModule(btn.dataset.moduleId, btn.dataset.enable === 'true');
+      const toggleBtn = e.target.closest('.module-toggle');
+      if (toggleBtn) {
+        window.toggleModule(toggleBtn.dataset.moduleId, toggleBtn.dataset.enable === 'true');
+        return;
+      }
+      const remBtn = e.target.closest('.module-remove');
+      if (remBtn && confirm('Uninstall personal module ' + remBtn.dataset.moduleId + '?')) {
+        window.removeModule(remBtn.dataset.moduleId);
+      }
     });
   }
   const modulesCountBadge = byId('modules-count-badge');
   const installForm = byId('install-module-form');
+  const modSource = byId('mod-source');
+  const modZipFile = byId('mod-zip-file');
   const modId = byId('mod-id');
   const modName = byId('mod-name');
   const modNamespace = byId('mod-namespace');
@@ -990,6 +1008,12 @@ footer.site-footer {
         + '">'
         + (isEnabled ? 'Disable' : 'Enable')
         + '</button>';
+      let removeAction = '';
+      if (m.kind === 'personal') {
+        removeAction = ' <button type="button" class="btn-secondary module-remove" style="padding:4px 8px;font-size:12px;color:var(--danger,#f43f5e);border-color:rgba(244,63,94,0.3);" data-module-id="'
+          + escapeHtml(m.id)
+          + '">Remove</button>';
+      }
 
       return '<tr>'
         + '<td class="mono"><strong>' + escapeHtml(m.id) + '</strong></td>'
@@ -998,7 +1022,7 @@ footer.site-footer {
         + '<td class="mono">' + escapeHtml(m.namespace) + '</td>'
         + '<td style="font-size:12px;color:var(--text-muted);">' + escapeHtml((m.capabilities || []).join(', ')) + '</td>'
         + '<td>' + statusBadge + '</td>'
-        + '<td>' + toggleAction + '</td>'
+        + '<td>' + toggleAction + removeAction + '</td>'
         + '</tr>';
     });
     modulesTbody.innerHTML = rows.join('');
@@ -1031,6 +1055,57 @@ footer.site-footer {
     .catch(function(err) { alert('Failed to update module state: ' + err.message); });
   };
 
+  window.removeModule = function(id) {
+    let responseOk = false;
+    fetch('/api/v1/dashboard/modules/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    })
+    .then(function(res) {
+      responseOk = res.ok;
+      return res.json().catch(function() { return {}; });
+    })
+    .then(function(data) {
+      if (!responseOk) {
+        throw new Error((data && data.message) || 'Failed to remove module');
+      }
+      loadOverview();
+    })
+    .catch(function(err) { alert('Failed to remove module: ' + err.message); });
+  };
+
+  function executeModuleInstall(payload) {
+    let installOk = false;
+    fetch('/api/v1/dashboard/modules/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(function(res) {
+      installOk = res.ok;
+      return res.json().catch(function() { return {}; });
+    })
+    .then(function(data) {
+      installBtn.disabled = false;
+      if (!installOk) {
+        modErrMsg.textContent = (data && data.message) || 'Error installing module';
+        modErrMsg.style.display = 'block';
+      } else {
+        const installedId = (data && data.id) || payload.id || 'module';
+        modOkMsg.textContent = 'Module ' + installedId + ' successfully installed and registered.';
+        modOkMsg.style.display = 'block';
+        installForm.reset();
+        loadOverview();
+      }
+    })
+    .catch(function(err) {
+      installBtn.disabled = false;
+      modErrMsg.textContent = 'Network error: ' + err.message;
+      modErrMsg.style.display = 'block';
+    });
+  }
+
   if (installForm) {
     installForm.addEventListener('submit', function(e) {
       e.preventDefault();
@@ -1040,42 +1115,31 @@ footer.site-footer {
 
       const caps = modCaps.value ? modCaps.value.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; }) : [];
       const payload = {
-        id: modId.value.trim(),
-        name: modName.value.trim(),
-        version: '1.0.0',
-        namespace: modNamespace.value.trim(),
-        entrypoint: modEntrypoint.value.trim(),
-        protocol: 'stdio-stream',
         capabilities: caps
       };
+      if (modSource && modSource.value.trim()) payload.source = modSource.value.trim();
+      if (modId && modId.value.trim()) payload.id = modId.value.trim();
+      if (modName && modName.value.trim()) payload.name = modName.value.trim();
+      if (modNamespace && modNamespace.value.trim()) payload.namespace = modNamespace.value.trim();
+      if (modEntrypoint && modEntrypoint.value.trim()) payload.entrypoint = modEntrypoint.value.trim();
 
-      let installOk = false;
-      fetch('/api/v1/dashboard/modules/install', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      .then(function(res) {
-        installOk = res.ok;
-        return res.json().catch(function() { return {}; });
-      })
-      .then(function(data) {
-        installBtn.disabled = false;
-        if (!installOk) {
-          modErrMsg.textContent = (data && data.message) || 'Error installing module';
+      if (modZipFile && modZipFile.files && modZipFile.files.length > 0) {
+        const file = modZipFile.files[0];
+        const reader = new FileReader();
+        reader.onload = function() {
+          const parts = (reader.result || '').split(',');
+          payload.zip_base64 = parts[1] || parts[0];
+          executeModuleInstall(payload);
+        };
+        reader.onerror = function() {
+          installBtn.disabled = false;
+          modErrMsg.textContent = 'Failed to read uploaded ZIP file';
           modErrMsg.style.display = 'block';
-        } else {
-          modOkMsg.textContent = 'Module ' + payload.id + ' successfully installed and registered.';
-          modOkMsg.style.display = 'block';
-          installForm.reset();
-          loadOverview();
-        }
-      })
-      .catch(function(err) {
-        installBtn.disabled = false;
-        modErrMsg.textContent = 'Network error: ' + err.message;
-        modErrMsg.style.display = 'block';
-      });
+        };
+        reader.readAsDataURL(file);
+      } else {
+        executeModuleInstall(payload);
+      }
     });
   }
 

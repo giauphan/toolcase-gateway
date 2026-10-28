@@ -280,6 +280,7 @@ See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for full threat modeling.
 
 ## Documentation
 
+- [`docs/MODULES.md`](docs/MODULES.md) — Platform modules and plugins (WordPress/Odoo paradigm), manifest schema, dynamic installation (GitHub/ZIP), and auto-discovery
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Architectural overview, canonical route inventory, and lifecycle
 - [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) — Subsystem components, code ownership, concurrency, and data flow
 - [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) — Live source code organization, file responsibilities, and DDD rules
