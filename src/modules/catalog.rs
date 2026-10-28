@@ -28,7 +28,7 @@ fn catalog_item(
         namespace: namespace.to_string(),
         version: "1.0.0".to_string(),
         protocol: "stdio-stream".to_string(),
-        capabilities: capabilities.iter().map(|s| s.to_string()).collect(),
+        capabilities: capabilities.iter().map(ToString::to_string).collect(),
     }
 }
 

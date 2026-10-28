@@ -21,7 +21,7 @@ fn sub_provider(id: &str, name: &str, subpath: &str, caps: &[&str]) -> SubProvid
         id: id.to_string(),
         name: name.to_string(),
         subpath: subpath.to_string(),
-        capabilities: caps.iter().map(|s| s.to_string()).collect(),
+        capabilities: caps.iter().map(ToString::to_string).collect(),
         status: ModuleStatus::Enabled,
     }
 }
