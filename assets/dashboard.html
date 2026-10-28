@@ -966,7 +966,7 @@ footer.site-footer {
     catalogGrid.addEventListener('click', function(ev) {
       const btn = ev.target.closest('.catalog-install-btn');
       if (!btn) return;
-      const id = btn.getAttribute('data-catalog-id');
+      const id = btn.dataset.catalogId;
       if (!id) return;
       btn.disabled = true;
       btn.textContent = 'Installing...';
