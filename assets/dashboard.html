@@ -1126,25 +1126,51 @@ footer.site-footer {
     });
   }
 
-  function collectInstallPayload() {
-    const rawCaps = modCaps && modCaps.value ? modCaps.value : '';
-    const caps = rawCaps.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; });
-    const payload = { capabilities: caps };
-    if (modSource && modSource.value.trim()) payload.source = modSource.value.trim();
-    if (modId && modId.value.trim()) payload.id = modId.value.trim();
-    if (modName && modName.value.trim()) payload.name = modName.value.trim();
-    if (modNamespace && modNamespace.value.trim()) payload.namespace = modNamespace.value.trim();
-    if (modEntrypoint && modEntrypoint.value.trim()) payload.entrypoint = modEntrypoint.value.trim();
+  function getTrimmedInput(elem) {
+    return elem && elem.value ? elem.value.trim() : '';
+  }
 
-    if (!payload.source && !(modZipFile && modZipFile.files && modZipFile.files.length)) {
-      payload.version = payload.version || '0.1.0';
-      if (!payload.id && payload.namespace) {
-        payload.id = payload.namespace.replace(/^\/+/, '').replace(/\//g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
-      }
-      payload.name = payload.name || payload.id || 'Custom Module';
-      if (!payload.entrypoint) {
-        payload.entrypoint = '/bin/echo';
-      }
+  function extractCapabilities(elem) {
+    const raw = getTrimmedInput(elem);
+    if (!raw) return [];
+    return raw.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; });
+  }
+
+  function sanitizeNamespaceToId(ns) {
+    return ns.replace(/^\/+/, '').replaceAll('/', '-').replace(/[^a-zA-Z0-9_-]/g, '');
+  }
+
+  function hasZipFile(zipInput) {
+    return Boolean(zipInput && zipInput.files && zipInput.files.length);
+  }
+
+  function applyDefaultModuleMetadata(payload) {
+    payload.version = payload.version || '0.1.0';
+    if (!payload.id && payload.namespace) {
+      payload.id = sanitizeNamespaceToId(payload.namespace);
+    }
+    payload.name = payload.name || payload.id || 'Custom Module';
+    if (!payload.entrypoint) {
+      payload.entrypoint = '/bin/echo';
+    }
+  }
+
+  function collectInstallPayload() {
+    const payload = { capabilities: extractCapabilities(modCaps) };
+    const source = getTrimmedInput(modSource);
+    const id = getTrimmedInput(modId);
+    const name = getTrimmedInput(modName);
+    const namespace = getTrimmedInput(modNamespace);
+    const entrypoint = getTrimmedInput(modEntrypoint);
+
+    if (source) payload.source = source;
+    if (id) payload.id = id;
+    if (name) payload.name = name;
+    if (namespace) payload.namespace = namespace;
+    if (entrypoint) payload.entrypoint = entrypoint;
+
+    if (!payload.source && !hasZipFile(modZipFile)) {
+      applyDefaultModuleMetadata(payload);
     }
     return payload;
   }
