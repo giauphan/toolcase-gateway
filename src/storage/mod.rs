@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+pub mod crypto;
 pub mod sqlite;
 
 pub use sqlite::SqliteStorage;

@@ -12,11 +12,22 @@ use crate::gateway::modules::PersonalManifest;
 pub struct SqliteStorage {
     conn: Mutex<Connection>,
     db_path: PathBuf,
+    encryption_key: String,
 }
 
 impl SqliteStorage {
     /// Opens or creates an embedded SQLite database, initializing schema and migrating legacy files.
     pub fn open(engine: DatabaseEngine, state_dir: &Path) -> Result<Self, StorageError> {
+        let key = std::env::var("GW_ENCRYPTION_KEY").unwrap_or_default();
+        Self::open_with_key(engine, state_dir, key)
+    }
+
+    /// Opens or creates an embedded SQLite database with an explicit master encryption key.
+    pub fn open_with_key(
+        engine: DatabaseEngine,
+        state_dir: &Path,
+        encryption_key: String,
+    ) -> Result<Self, StorageError> {
         let db_path = match engine {
             DatabaseEngine::Sqlite(path) => {
                 if path.to_string_lossy() == ":memory:" {
@@ -51,6 +62,7 @@ impl SqliteStorage {
         let storage = Self {
             conn: Mutex::new(conn),
             db_path,
+            encryption_key,
         };
 
         storage.init_schema()?;
@@ -216,10 +228,13 @@ impl StorageRepository for SqliteStorage {
         )?;
         let rows = stmt.query_map([], |row| {
             let is_active_int: i32 = row.get(4)?;
+            let raw_key: String = row.get(2)?;
+            let decrypted_key =
+                crate::storage::crypto::unprotect_secret(&raw_key, &self.encryption_key);
             Ok(StoredAccount {
                 id: row.get(0)?,
                 provider: row.get(1)?,
-                key: row.get(2)?,
+                key: decrypted_key,
                 label: row.get(3)?,
                 is_active: is_active_int != 0,
             })
@@ -245,10 +260,12 @@ impl StorageRepository for SqliteStorage {
                  VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)",
             )?;
             for acc in accounts {
+                let stored_key =
+                    crate::storage::crypto::protect_secret(&acc.key, &self.encryption_key);
                 stmt.execute(params![
                     acc.id,
                     acc.provider,
-                    acc.key,
+                    stored_key,
                     acc.label,
                     if acc.is_active { 1 } else { 0 }
                 ])?;
@@ -362,6 +379,65 @@ mod tests {
         // 5. Test module removal
         storage.remove_module("my-tool").unwrap();
         assert!(storage.get_modules().unwrap().is_empty());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_sqlite_account_credential_encryption_and_decryption() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_sqlite_enc_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let master_key = "test-master-encryption-key-999".to_string();
+        let storage = SqliteStorage::open_with_key(
+            DatabaseEngine::Sqlite(PathBuf::from(":memory:")),
+            &temp_dir,
+            master_key,
+        )
+        .unwrap();
+
+        let acc = StoredAccount {
+            id: "acc_enc_1".into(),
+            provider: "openrouter".into(),
+            key: "sk-or-v1-my-secret-credential".into(),
+            label: Some("Encrypted Account".into()),
+            is_active: true,
+        };
+
+        storage.save_accounts(&[acc]).unwrap();
+
+        // Verify stored in DB as enc:v1:
+        {
+            let conn = storage.conn.lock().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT key FROM accounts WHERE id = 'acc_enc_1'")
+                .unwrap();
+            let raw_key: String = stmt.query_row([], |row| row.get(0)).unwrap();
+            assert!(raw_key.starts_with("enc:v1:"));
+            assert!(!raw_key.contains("sk-or-v1-my-secret-credential"));
+        }
+
+        // Verify decrypted in memory via get_accounts()
+        let retrieved = storage.get_accounts().unwrap();
+        assert_eq!(retrieved.len(), 1);
+        assert_eq!(retrieved[0].key, "sk-or-v1-my-secret-credential");
+
+        // Verify legacy unencrypted row compatibility
+        {
+            let conn = storage.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO accounts (id, provider, key, label, is_active)
+                 VALUES ('legacy_acc', 'jev', 'sk-jev-legacy-plain', 'Legacy Plain', 1)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let all_accs = storage.get_accounts().unwrap();
+        assert_eq!(all_accs.len(), 2);
+        let legacy = all_accs.iter().find(|a| a.id == "legacy_acc").unwrap();
+        assert_eq!(legacy.key, "sk-jev-legacy-plain");
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

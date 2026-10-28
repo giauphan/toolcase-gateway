@@ -1085,11 +1085,14 @@ dependencies = [
 name = "toolcase-gateway"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
+ "base64",
  "dotenvy",
  "flate2",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "snow",
  "tungstenite",
  "ureq",
