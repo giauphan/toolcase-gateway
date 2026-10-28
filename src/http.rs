@@ -16,6 +16,7 @@ const HOP_BY_HOP: [&str; 8] = [
 ];
 use std::net::TcpStream;
 
+#[derive(Clone, Debug)]
 pub struct Request {
     pub method: String,
     pub path: String,

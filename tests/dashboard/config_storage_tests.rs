@@ -100,6 +100,8 @@ fn test_persistent_config_save_load_round_trip() {
         muse_approval_allow_always: Some(false),
         muse_approval_max_decisions: Some(5),
         muse_approval_timeout_secs: Some(60),
+        enabled_modules: None,
+        personal_modules: None,
     };
 
     save_persistent_config(&tmp_file, &original).unwrap();

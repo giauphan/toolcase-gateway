@@ -128,7 +128,7 @@ fn exhausted_models_report_final_model_and_status() {
     let request = b"{\"model\":\"primary-model\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         request.len(),
         std::str::from_utf8(request).unwrap()
     )
@@ -202,7 +202,7 @@ fn unauthorized_upstream_fails_over_to_next_model() {
     let request = b"{\"model\":\"primary-model\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         request.len(),
         std::str::from_utf8(request).unwrap()
     )
@@ -360,7 +360,7 @@ fn unknown_model_no_longer_exhausts_fallbacks() {
     let request = b"{\"model\":\"model-medium-hight\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         request.len(),
         std::str::from_utf8(request).unwrap()
     )
@@ -416,7 +416,7 @@ fn live_codex_model_repair_smoke() {
     );
     write!(
         socket,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     )
@@ -470,7 +470,7 @@ fn museai_fails_over_to_fallback() {
     let req = b"{\"model\":\"muse\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: loc\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: loc\r\nContent-Length: {}\r\n\r\n{}",
         req.len(),
         std::str::from_utf8(req).unwrap()
     )

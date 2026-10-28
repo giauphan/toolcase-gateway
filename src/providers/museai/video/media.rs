@@ -8,7 +8,9 @@ use std::path::PathBuf;
 pub const DEFAULT_MEDIA_DIR: &str = ".gw_state/media";
 
 pub fn media_dir() -> PathBuf {
-    PathBuf::from(DEFAULT_MEDIA_DIR)
+    std::env::var("GW_STATE_DIR")
+        .map(|s| PathBuf::from(s).join("media"))
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_MEDIA_DIR))
 }
 
 pub fn video_media_path(job_id: &str) -> PathBuf {

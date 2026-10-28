@@ -115,6 +115,17 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
                     "timeout_secs": config.muse_approval.approval_timeout_secs,
                 },
             }
+        },
+        "modules": store.module_registry().read().map(|r| r.list_modules()).unwrap_or_default(),
+        "mcp": {
+            "status": "enabled",
+            "transports": ["stdio", "http-sse"],
+            "endpoints": {
+                "jsonrpc": "/mcp",
+                "sse": "/mcp/sse"
+            },
+            "tools": crate::features::mcp::list_tools(),
+            "resources": crate::features::mcp::list_resources(),
         }
     });
 
@@ -567,6 +578,107 @@ pub fn persist_jev_keys(path: &Path, keys: &[String]) -> io::Result<()> {
     }
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+pub fn handle_set_module_state(
+    client: &mut TcpStream,
+    body: &[u8],
+    store: &ConfigStore,
+) -> io::Result<()> {
+    #[derive(serde::Deserialize)]
+    struct StatePayload {
+        id: String,
+        enabled: bool,
+    }
+    let payload: StatePayload = match serde_json::from_slice(body) {
+        Ok(p) => p,
+        Err(e) => {
+            return write_error(client, 400, "Bad Request", &format!("Invalid JSON: {e}"));
+        }
+    };
+    let status = if payload.enabled {
+        crate::gateway::modules::ModuleStatus::Enabled
+    } else {
+        crate::gateway::modules::ModuleStatus::Disabled
+    };
+
+    let reg = store.module_registry();
+    let mut guard = match reg.write() {
+        Ok(g) => g,
+        Err(e) => return write_error(client, 500, "Internal Error", &e.to_string()),
+    };
+    if let Err(e) = guard.set_module_status(&payload.id, status) {
+        return write_error(client, 400, "Bad Request", &e.to_string());
+    }
+    drop(guard);
+    if let Err(e) = store.save_to_persistent_file() {
+        return write_error(
+            client,
+            500,
+            "Internal Error",
+            &format!("Module state changed but persistence failed: {e}"),
+        );
+    }
+
+    let resp = serde_json::json!({
+        "ok": true,
+        "id": payload.id,
+        "status": status
+    });
+    let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        resp_bytes.len()
+    )?;
+    client.write_all(&resp_bytes)?;
+    client.flush()
+}
+
+pub fn handle_install_personal_module(
+    client: &mut TcpStream,
+    body: &[u8],
+    store: &ConfigStore,
+) -> io::Result<()> {
+    let manifest: crate::gateway::modules::PersonalManifest = match serde_json::from_slice(body) {
+        Ok(m) => m,
+        Err(e) => {
+            return write_error(client, 400, "Bad Request", &format!("Invalid JSON: {e}"));
+        }
+    };
+
+    let id = manifest.id.clone();
+    let reg = store.module_registry();
+    let mut guard = match reg.write() {
+        Ok(g) => g,
+        Err(e) => return write_error(client, 500, "Internal Error", &e.to_string()),
+    };
+    if let Err(e) = guard.register_personal_module(manifest) {
+        return write_error(client, 400, "Bad Request", &e.to_string());
+    }
+    drop(guard);
+    if let Err(e) = store.save_to_persistent_file() {
+        return write_error(
+            client,
+            500,
+            "Internal Error",
+            &format!("Module state changed but persistence failed: {e}"),
+        );
+    }
+
+    let resp = serde_json::json!({
+        "ok": true,
+        "id": id,
+        "message": "Personal module installed successfully"
+    });
+    let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        resp_bytes.len()
+    )?;
+    client.write_all(&resp_bytes)?;
+    client.flush()
 }
 
 pub use handle_save_provider_settings as handle_add_provider_accounts;

@@ -26,7 +26,9 @@ pub struct PersistedThreadRecord {
 }
 
 pub fn thread_state_dir() -> PathBuf {
-    PathBuf::from(".gw_state").join("threads")
+    std::env::var("GW_STATE_DIR")
+        .map(|s| PathBuf::from(s).join("threads"))
+        .unwrap_or_else(|_| PathBuf::from(".gw_state").join("threads"))
 }
 
 pub fn sanitize_thread_filename(id: &str) -> String {

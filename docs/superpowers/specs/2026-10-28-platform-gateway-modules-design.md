@@ -1,132 +1,220 @@
-# Platform Gateway Modules Design
+# Platform Gateway Modules and MCP Control Plane Design
 
 ## Purpose
 
-Turn the gateway into a modular platform where every provider is an explicit,
-runtime-enabled module with a unique public namespace.  OmniRoute becomes a
-module served only at `/ominroute/...`; it is no longer the fallback target for
-unowned URLs.
+Turn the gateway into an extensible modular platform where:
+1. Every provider is an explicit, runtime-enabled module with a unique public
+   namespace (OmniRoute is served only at `/ominroute/...` and is no longer an
+   implicit fallback).
+2. Users can author and install personal provider modules without needing the
+   gateway codebase to exist or recompiling the gateway binary.
+3. AI agents can connect to the gateway via an official Model Context Protocol
+   (MCP) control plane to discover installed modules, inspect configurations,
+   and safely invoke authorized management tools.
 
-## Scope and decisions
+## Scope and Decisions
 
-- A module is a statically compiled integration with runtime enablement.  This
-  change does not introduce dynamic native-code or script loading.
-- The canonical OmniRoute namespace is `/ominroute/...` (the requested
-  spelling).  Its upstream request path is the portion after that prefix.
-- Muse and Jev remain provider modules and retain their established public
-  namespaces as compatibility contracts: `/muse-ai/...` and `/jev/...`.
-- Dashboard, configuration, templates, and other gateway-owned pages are
-  system endpoints, not provider modules.
-- The former implicit proxy route is removed.  URLs that do not belong to a
-  system endpoint or an enabled module fail locally without upstream traffic.
-- Existing provider protocol, authentication, retry, streaming, and lifecycle
-  behavior remains provider-owned.  The migration changes ownership and
-  admission, not those provider semantics.
+- **Built-in provider modules**: Statically compiled integrations (OmniRoute,
+  Muse, Jev) with dynamic runtime enablement.
+- **Personal / out-of-tree provider modules**: Authored independently in
+  external repositories with no dependency on gateway source code.  Installed
+  and managed dynamically via declarative manifests and out-of-process
+  sandboxing (subprocess stdio/IPC or local HTTP/socket adapter) to preserve
+  zero-async and `#![forbid(unsafe_code)]`.
+- **MCP control-plane interface**: Implements the official Model Context
+  Protocol specification using JSON-RPC 2.0 over standard transports (`stdio`
+  and Streamable HTTP/SSE), exposing typed tools and resources for gateway
+  administration.
+- **Namespaces**:
+  - OmniRoute: canonical namespace `/ominroute/...` (upstream path is the suffix).
+  - Muse: `/muse-ai/...`.
+  - Jev: `/jev/...`.
+  - Personal modules: Unique declared namespace (e.g. `/personal/<name>/...` or
+    validated custom root prefix), validated against collisions with system
+    routes and built-in modules.
+- **Fail-closed routing**: Implicit fallbacks are removed.  Requests to
+  unregistered, disabled, or malformed namespaces fail locally without upstream
+  traffic.
+- **Security & Secret Redaction**: All MCP tools, resources, logs, and dashboard
+  surfaces redact or omit API keys, tokens, and session cookies.
 
-## Architecture
+## Architecture & Dependency Layers
 
-The platform has four dependency layers:
+Enforcing Clean Architecture and Domain-Driven Design (DDD) with inward-only
+dependencies:
 
-1. **Gateway kernel** defines provider-neutral module identity, namespace
-   ownership, and enablement policy.  It has no HTTP, socket, credential, or
-   concrete-provider dependency.
-2. **Configuration/runtime** stores validated module enablement alongside the
-   current immutable request snapshot and wires built-in modules at process
-   startup.
-3. **Application/provider modules** implement a module's use cases and own
-   provider-specific payloads, credentials, account state, and upstream
-   protocols.  They may use gateway-kernel policy but do not own public URL
-   matching.
-4. **Inbound HTTP adapters** normalize a request path, enforce method and
-   namespace boundaries, ask the kernel for its owner, and delegate to the
-   appropriate use case.  They own HTTP errors and response commitment only.
+```
++-----------------------------------------------------------------------+
+|                         Interface Adapters                            |
+|  +--------------------+  +---------------------+  +----------------+  |
+|  | Inbound HTTP (8080)|  | MCP Server (stdio)  |  | MCP (HTTP/SSE) |  |
+|  +--------------------+  +---------------------+  +----------------+  |
+|  +-----------------------------------------------------------------+  |
+|  |            Out-of-Process Adapter (Subprocess / IPC)            |  |
+|  +-----------------------------------------------------------------+  |
++-----------------------------------------------------------------------+
+                                  │ (calls inward)
+                                  ▼
++-----------------------------------------------------------------------+
+|                      Application Services & Use Cases                 |
+|  - Module Registry Service (Built-in + Personal Modules)               |
+|  - Module Lifecycle Manager (Install, Enable, Disable, Remove)        |
+|  - MCP Tool Dispatcher & Access Controller                             |
+|  - Request Orchestrator & Proxy Service                               |
++-----------------------------------------------------------------------+
+                                  │ (calls inward)
+                                  ▼
++-----------------------------------------------------------------------+
+|                            Domain Kernel                              |
+|  - Module Identity, Manifest, and Capability Models                   |
+|  - Namespace Ownership and Collision Policy                           |
+|  - Model Candidate Selection, Retry Classification, and Error Domain  |
++-----------------------------------------------------------------------+
+```
 
-The dependency direction is inward: HTTP adapters depend on application and
-kernel contracts; provider modules depend on their application contracts and
-the kernel; the kernel depends on neither.  Runtime composition is the only
-place permitted to bind a concrete provider to a module contract.
+1. **Domain Kernel**: Defines provider-neutral entities (`ModuleId`,
+   `Namespace`, `ModuleManifest`, `Capability`, `PolicyDecision`).  Has zero
+   dependencies on HTTP, JSON-RPC, sockets, subprocesses, or credentials.
+2. **Application Services**: Coordinates use cases (`RegisterModule`,
+   `EnableModule`, `ExecuteProviderRequest`, `ExecuteMcpTool`).  Enforces
+   authorization and configuration snapshots.
+3. **Interface Adapters**:
+   - `InboundHttpAdapter`: Parses HTTP requests, matches registered namespaces,
+     and translates responses.
+   - `McpAdapter`: Parses JSON-RPC 2.0 framing over `stdio` or HTTP/SSE,
+     handles standard MCP lifecycle handshakes, and maps MCP tool calls to
+     application services.
+   - `ExternalProcessAdapter`: Spawns and manages external module worker
+     subprocesses, serializing request/response frames over standard IPC
+     without unsafe native linking.
+4. **Configuration & Persistence**: Atomically persists module enablement and
+   registered personal module manifests in `gateway_config.json`.
 
-## Module registry and lifecycle
+## Personal / Out-of-Tree Module System
 
-The registry is an authoritative, finite catalog of shipped modules.  For each
-module it provides:
+To allow external developers to write and install modules without the gateway
+codebase:
 
-- a stable identifier for configuration and observability;
-- its canonical namespace boundary;
-- whether it is enabled in the current validated configuration; and
-- enough route classification information for the inbound adapter to reject
-  disabled, incomplete, and lookalike namespaces before provider execution.
+1. **Manifest Contract (`module.json` / `manifest.json`)**:
+   - `id`: Unique identifier (e.g., `"custom-cohere-adapter"`).
+   - `name`: Human-readable display name.
+   - `version`: SemVer string.
+   - `namespace`: Canonical public URL prefix (e.g., `"/custom/cohere"`).
+   - `entrypoint`: Executable command or script to spawn.
+   - `protocol`: Communication protocol (e.g., `"stdio-stream"` or `"local-http"`).
+   - `capabilities`: Array of supported capabilities (`["chat_completions", "models"]`).
+   - `config_schema`: JSON schema of required/optional runtime settings.
+2. **Isolation & Sandboxing**:
+   - External modules run out-of-process.
+   - The gateway manages child process lifecycle or communicates over loopback/stdio.
+   - Fault containment: If an external module panics or exits, the gateway
+     returns `502 Bad Gateway` locally; the core gateway remains unaffected.
+3. **Lifecycle Management**:
+   - Modules can be installed, validated, enabled, disabled, and removed via
+     the MCP control plane, CLI commands, or dashboard.
+   - Duplicate namespaces or attempts to shadow `/ominroute`, `/muse-ai`, or
+     system endpoints are rejected on registration.
 
-The registry does not carry provider secrets, live sockets, or provider client
-instances.  It is deterministic and testable from paths plus configuration.
-Runtime enablement is persisted using the existing protected configuration
-store and exposed by the existing administration surface with no secret values.
-Built-in modules are enabled by default to maintain availability after upgrade,
-but OmniRoute's old unprefixed access is intentionally not retained because it
-violates the requested ownership rule.
+## Model Context Protocol (MCP) Control Plane
 
-## Routing behavior
+The MCP server acts as an administrative control plane for AI agents:
 
-The inbound adapter first handles gateway-owned system endpoints.  It then
-classifies the remaining normalized path against module boundaries.
+### Protocol Conformance
+- Implements JSON-RPC 2.0 framing and standard MCP schemas.
+- Supports two official transports:
+  - `stdio`: Newline-delimited JSON-RPC over stdin/stdout. `stdout` is strictly
+    reserved for protocol messages; application logs are directed to `stderr`.
+  - `Streamable HTTP` / `SSE`: An HTTP endpoint (e.g., `/mcp`) supporting POST
+    for JSON-RPC requests and GET for SSE streaming notifications.
+- Protocol Lifecycle:
+  - `initialize`: Returns server details (`toolcase-gateway`), protocol version,
+    and advertised capabilities (`tools`, `resources`).
+  - `notifications/initialized`: Handshake completion.
+  - `ping`: Standard keepalive response.
 
-- An enabled module receives only a path below its exact namespace.
-- A disabled but known module returns a local unavailable/not-found gateway
-  error according to the existing route error convention, without upstream
-  contact.
-- An unknown, incomplete, malformed, or lookalike module namespace returns a
-  local `404`.
-- A recognized module with an unsupported method returns local `405`.
-- The OmniRoute adapter receives the route beneath `/ominroute`; for example,
-  `/ominroute/v1/chat/completions` maps to its existing OpenAI-compatible
-  proxy operation for `/v1/chat/completions`.
-- No path falls through to a generic upstream proxy.
+### Exposed MCP Tools
+1. `gateway_list_modules`:
+   - Returns all registered modules (built-in and personal), namespaces,
+     enablement status, and declared capabilities.
+2. `gateway_get_module_info`:
+   - Returns detailed manifest, runtime health, and sanitized configuration for
+     a given module ID.
+3. `gateway_set_module_state`:
+   - Enables or disables a specified module dynamically.
+4. `gateway_install_personal_module`:
+   - Validates and registers an out-of-tree personal module from a package path
+     or manifest definition.
+5. `gateway_remove_personal_module`:
+   - Unregisters and cleans up an installed personal module.
+6. `gateway_update_provider_config`:
+   - Safely updates non-secret provider options or candidate models.
+7. `gateway_get_system_metrics`:
+   - Returns sanitized system statistics (uptime, active connections, request
+     counts, error rates).
 
-The existing large dispatcher is split by ownership into small inbound-adapter
-modules.  Shared path normalization and module admission live at the adapter /
-kernel boundary, while each provider's existing request semantics stay in its
-provider/application module.
+### Exposed MCP Resources
+- `gateway://modules`: Read-only list of installed modules and namespaces.
+- `gateway://routes`: Read-only map of active route bindings.
+- `gateway://health`: Read-only view of gateway admission and subsystem health.
 
-## Configuration and administration
+### Authorization & Safety
+- Management tools enforce capability permissions.
+- Secret Sanitization: Under no circumstances do MCP tool results, resources,
+  or errors contain unmasked API tokens, private keys, or passwords.
 
-Module enablement is a typed, validated part of the configuration snapshot and
-persistent representation.  Configuration changes use the current atomic file
-replacement and owner-only permissions.  Dashboard data presents module state
-and accepts only known module identifiers; invalid names or malformed state are
-rejected before persistence.  Neither the dashboard nor registry responses
-include provider credentials.
+## Routing Behavior
 
-## Compatibility and error handling
+The inbound HTTP adapter routes incoming requests through the following steps:
+1. **System Routes**: Gateway dashboard, assets, and health checks.
+2. **MCP Control Plane**: `/mcp` endpoints when HTTP/SSE transport is enabled.
+3. **Module Namespaces**:
+   - Normalized request path is matched against active module boundaries in the
+     registry.
+   - Built-in modules: `/ominroute/...`, `/muse-ai/...`, `/jev/...`.
+   - Personal modules: Matched against their declared and validated namespaces.
+   - The stripped sub-path is forwarded to the corresponding provider adapter.
+4. **Fail-Closed Fallback**:
+   - Disabled module -> Local `503 Service Unavailable` or `404 Not Found`.
+   - Unknown/unregistered path -> Local `404 Not Found`.
+   - Unsupported HTTP method -> Local `405 Method Not Allowed`.
+   - No path ever falls through to an unowned generic upstream proxy.
 
-Muse and Jev retain their documented provider paths while being admitted by the
-same module policy.  Existing internal façade re-exports remain until callers
-are migrated; facades do not bypass registry admission.  Configuration created
-before this migration acquires default built-in module enablement when loaded.
+## Configuration & Persistence
 
-All existing framing checks, request-size admission, CORS handling, response
-stream commitment, secret masking, and upstream retry rules continue to apply.
-Once an upstream response has been committed, no routing or module failover is
-attempted.
+- Module enablement and personal module registry metadata are stored in
+  `gateway_config.json`.
+- Changes made via MCP tools or the dashboard trigger atomic file replacement
+  with owner-only permissions (`0600`).
+- Credentials remain encrypted or stored in secure environment stores; only
+  redacted representations are returned via management interfaces.
 
-## Testing and verification
+## Testing & Verification
 
-The migration is test-first.  Unit tests cover pure module identity,
-enablement, and path classification.  Route contract tests cover every
-shipped namespace, disabled modules, path-boundary lookalikes, method errors,
-and rejection of former unowned paths.  Integration tests use a synthetic
-upstream to prove that `/ominroute/v1/chat/completions` forwards the stripped
-path and that `/v1/chat/completions` produces no upstream request.
+1. **Module Registry Unit Tests**:
+   - Verification of built-in and external module registration.
+   - Namespace collision detection and path prefix validation.
+2. **MCP Protocol Conformance Tests**:
+   - JSON-RPC 2.0 message envelope parsing and formatting.
+   - Lifecycle handshake (`initialize`, `initialized`, `ping`).
+   - Standard error handling (-32700, -32600, -32601, -32602, -32603).
+   - `tools/list` and `tools/call` execution and validation.
+   - Verification of credential masking in all MCP outputs.
+3. **Personal Module Isolation Tests**:
+   - Subprocess spawning, communication, and crash containment.
+   - Rejection of malicious or malformed manifests.
+4. **Route Contract & Regression Tests**:
+   - OmniRoute prefixing at `/ominroute/...` with synthetic upstream.
+   - Fail-closed rejection of former unprefixed proxy routes.
+   - Muse and Jev backwards compatibility.
+5. **Quality Gates**:
+   - `cargo fmt --check`
+   - `cargo clippy --all-targets`
+   - `cargo test`
+   - `cargo build --release`
 
-Existing OmniRoute retry/candidate/stream tests and existing Muse/Jev contract
-tests remain required.  Configuration persistence tests prove enablement
-survives reload without exposing secrets.  Final validation runs `cargo fmt
---check`, `cargo clippy --all-targets`, `cargo test`, and `cargo build
---release`, plus the synthetic-upstream smoke check.
+## Non-Goals
 
-## Non-goals
-
-- Runtime installation of arbitrary third-party executable plugins.
-- A new asynchronous runtime or dependency framework.
-- Changing provider wire protocols, credentials, retry classifications, or
-  account-pool rules unless directly required by module admission.
-- Retaining the generic OmniRoute catch-all as a hidden compatibility path.
+- Loading untrusted shared libraries (`.so` / `.dylib`) in-process via `unsafe`.
+- Introducing third-party asynchronous runtimes (`tokio`, `async-std`).
+- Allowing arbitrary shell execution from unvalidated manifests.
+- Exposing secrets or credentials over MCP tools or resources.

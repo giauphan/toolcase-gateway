@@ -313,6 +313,10 @@ pub struct PersistentConfig {
     pub muse_approval_max_decisions: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub muse_approval_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled_modules: Option<std::collections::HashMap<String, bool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal_modules: Option<Vec<crate::gateway::modules::PersonalManifest>>,
 }
 
 impl PersistentConfig {
@@ -359,6 +363,8 @@ impl PersistentConfig {
             muse_approval_allow_always: Some(config.muse_approval.allow_always),
             muse_approval_max_decisions: Some(config.muse_approval.max_decisions_per_job),
             muse_approval_timeout_secs: Some(config.muse_approval.approval_timeout_secs),
+            enabled_modules: None,
+            personal_modules: None,
         }
     }
 
@@ -521,6 +527,7 @@ pub struct ConfigStore {
     pub config_file: PathBuf,
     pub jev_pool: Arc<crate::providers::jev::accounts::JevAccountPool>,
     admission: Arc<crate::runtime::admission::AdmissionController>,
+    pub module_registry: Arc<RwLock<crate::gateway::modules::ModuleRegistry>>,
 }
 
 impl ConfigStore {
@@ -614,6 +621,20 @@ impl ConfigStore {
             ),
         );
         pool.add_keys(&config.jev_api_keys);
+
+        let mut reg = crate::gateway::modules::ModuleRegistry::new();
+        if let Some(persistent) = load_persistent_config(&config_file) {
+            if let Some(ref personal) = persistent.personal_modules {
+                for manifest in personal {
+                    let _ = reg.register_personal_module(manifest.clone());
+                }
+            }
+            if let Some(ref enabled_map) = persistent.enabled_modules {
+                reg.apply_enablement_map(enabled_map);
+            }
+        }
+        let module_registry = Arc::new(RwLock::new(reg));
+
         Self {
             inner: Arc::new(RwLock::new(config)),
             env_file,
@@ -623,7 +644,12 @@ impl ConfigStore {
                 max_connections,
                 max_in_flight_bytes,
             )),
+            module_registry,
         }
+    }
+
+    pub fn module_registry(&self) -> Arc<RwLock<crate::gateway::modules::ModuleRegistry>> {
+        self.module_registry.clone()
     }
 
     pub fn snapshot(&self) -> Config {
@@ -683,6 +709,17 @@ impl ConfigStore {
         let mut persistent = PersistentConfig::from_config(&self.snapshot());
         persistent.jev_accounts = Some(self.jev_pool.accounts());
         persistent.jev_openrouter_accounts = Some(self.jev_pool.openrouter_accounts());
+        if let Ok(reg) = self.module_registry.read() {
+            let mut map = std::collections::HashMap::new();
+            for m in reg.list_modules() {
+                map.insert(
+                    m.id,
+                    m.status == crate::gateway::modules::ModuleStatus::Enabled,
+                );
+            }
+            persistent.enabled_modules = Some(map);
+            persistent.personal_modules = Some(reg.export_personal_manifests());
+        }
         save_persistent_config(&self.config_file, &persistent)
     }
 }

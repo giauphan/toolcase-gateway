@@ -6,6 +6,7 @@ use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
+pub mod api;
 pub mod codecs;
 pub mod config;
 pub mod features;

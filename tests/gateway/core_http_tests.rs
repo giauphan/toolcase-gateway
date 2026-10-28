@@ -595,7 +595,11 @@ fn assert_main_catalog_proxies_to_upstream(path: &str) {
     let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     upstream_listener.set_nonblocking(true).unwrap();
     let upstream_port = upstream_listener.local_addr().unwrap().port();
-    let expected_path = path.to_string();
+    let expected_path = if let Some(stripped) = path.strip_prefix("/ominroute") {
+        stripped.to_string()
+    } else {
+        path.to_string()
+    };
 
     let upstream = thread::spawn(move || {
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -670,7 +674,7 @@ fn assert_main_catalog_proxies_to_upstream(path: &str) {
 
 #[test]
 fn main_model_catalog_routes_proxy_to_upstream() {
-    for path in ["/models", "/v1/models"] {
+    for path in ["/ominroute/models", "/ominroute/v1/models"] {
         assert_main_catalog_proxies_to_upstream(path);
     }
 }
@@ -865,7 +869,7 @@ fn status_400_does_not_retry_or_fail_over() {
     let req = b"{\"model\":\"primary-model\",\"messages\":[]}";
     write!(
         client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST /ominroute/v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         req.len(),
         std::str::from_utf8(req).unwrap()
     )
@@ -970,4 +974,37 @@ fn route_namespace_fail_closed_behavior_offline() {
     let head = read_response_head(&mut client).unwrap();
     assert_eq!(head.status, 405); // Method not allowed / route gating
     handle.join().unwrap();
+}
+
+#[test]
+fn unowned_route_fails_closed_without_upstream_contact() {
+    let upstream_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    upstream_listener.set_nonblocking(true).unwrap();
+    let upstream_port = upstream_listener.local_addr().unwrap().port();
+
+    let client_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let client_port = client_listener.local_addr().unwrap().port();
+    let mut config = test_config();
+    config.target_port = upstream_port;
+    let store =
+        toolcase_gateway::config::ConfigStore::new(config, std::path::PathBuf::from(".env"));
+    let gateway = thread::spawn(move || {
+        let (client, _) = client_listener.accept().unwrap();
+        toolcase_gateway::routes::route_request(client, &store).unwrap();
+    });
+
+    let mut client = TcpStream::connect(("127.0.0.1", client_port)).unwrap();
+    write!(
+        client,
+        "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+    )
+    .unwrap();
+    client.flush().unwrap();
+
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 404);
+    assert_eq!(head.reason, "Not Found");
+    gateway.join().unwrap();
+    // Upstream should have received zero connections
+    assert!(upstream_listener.accept().is_err());
 }
