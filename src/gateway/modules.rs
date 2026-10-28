@@ -49,7 +49,9 @@ impl std::error::Error for ModuleError {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonalManifest {
     pub id: String,
+    #[serde(default = "default_module_name")]
     pub name: String,
+    #[serde(default = "default_module_version")]
     pub version: String,
     pub namespace: String,
     pub entrypoint: String,
@@ -61,6 +63,14 @@ pub struct PersonalManifest {
     pub config_schema: Option<serde_json::Value>,
     #[serde(default)]
     pub permissions: Vec<String>,
+}
+
+fn default_module_name() -> String {
+    "Custom Module".to_string()
+}
+
+fn default_module_version() -> String {
+    "0.1.0".to_string()
 }
 
 fn default_protocol() -> String {

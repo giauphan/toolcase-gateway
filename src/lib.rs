@@ -21,12 +21,14 @@ pub mod providers;
 pub mod rewrite;
 pub mod routes;
 pub mod runtime;
+pub mod storage;
 pub mod test_helpers;
 pub mod video_template;
 
 pub use config::*;
 pub use http::*;
 pub use routes::*;
+pub use storage::*;
 
 pub fn run() -> io::Result<()> {
     let _ = dotenvy::dotenv();

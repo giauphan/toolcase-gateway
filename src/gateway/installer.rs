@@ -89,9 +89,17 @@ fn read_module_manifest(mpath: &Path, base_dir: &Path) -> Option<PersonalManifes
     }
     let content = fs::read_to_string(mpath).ok()?;
     let mut manifest = serde_json::from_str::<PersonalManifest>(&content).ok()?;
+    let abs_base = if base_dir.is_relative() {
+        std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join(base_dir))
+            .unwrap_or_else(|| base_dir.to_path_buf())
+    } else {
+        base_dir.to_path_buf()
+    };
     let ep = Path::new(&manifest.entrypoint);
     if ep.is_relative() {
-        manifest.entrypoint = base_dir.join(ep).to_string_lossy().to_string();
+        manifest.entrypoint = abs_base.join(ep).to_string_lossy().to_string();
     }
     Some(manifest)
 }
@@ -141,6 +149,25 @@ pub fn install_module(
         }
     };
 
+    // Validate ID strictly to prevent path traversal or malformed paths
+    let id_valid = !manifest.id.is_empty()
+        && manifest
+            .id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !id_valid {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(ModuleError::InvalidId(manifest.id.clone()));
+    }
+
+    // Validate Namespace (path URL prefix is required and must start with /)
+    let ns_trimmed = manifest.namespace.trim().trim_end_matches('/');
+    if !ns_trimmed.starts_with('/') || ns_trimmed.len() < 2 {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(ModuleError::InvalidNamespace(manifest.namespace.clone()));
+    }
+    manifest.namespace = ns_trimmed.to_string();
+
     // Determine final module directory
     let target_dir = modules_root.join(&manifest.id);
     if target_dir.exists() {
@@ -158,10 +185,19 @@ pub fn install_module(
         let _ = fs::remove_dir_all(&staging_dir);
     }
 
+    let abs_target_dir = if target_dir.is_relative() {
+        std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join(&target_dir))
+            .unwrap_or_else(|| target_dir.clone())
+    } else {
+        target_dir.clone()
+    };
+
     // Resolve entrypoint to absolute path inside target_dir
     let ep_path = Path::new(&manifest.entrypoint);
     let resolved_ep = if ep_path.is_relative() {
-        target_dir.join(ep_path)
+        abs_target_dir.join(ep_path)
     } else {
         ep_path.to_path_buf()
     };
@@ -169,8 +205,12 @@ pub fn install_module(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if resolved_ep.exists() {
-            let _ = fs::set_permissions(&resolved_ep, fs::Permissions::from_mode(0o700));
+        if let (Ok(can_ep), Ok(can_target)) =
+            (resolved_ep.canonicalize(), abs_target_dir.canonicalize())
+        {
+            if can_ep.starts_with(&can_target) && can_ep.is_file() {
+                let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
+            }
         }
     }
 
@@ -261,16 +301,29 @@ fn ingest_zip_file(path: &Path, target_dir: &Path) -> Result<(), ModuleError> {
     Ok(())
 }
 
+const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
+
 fn fetch_url_bytes(url: &str) -> Result<Vec<u8>, String> {
-    let resp = ureq::get(url)
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(15)))
+        .build()
+        .new_agent();
+
+    let resp = agent
+        .get(url)
         .header("User-Agent", "toolcase-gateway/0.1.0")
         .call()
         .map_err(|e| format!("HTTP request error: {e}"))?;
 
     let mut bytes = Vec::new();
-    let mut reader = resp.into_body().into_reader();
-    std::io::Read::read_to_end(&mut reader, &mut bytes)
+    let reader = resp.into_body().into_reader();
+    let mut limited = std::io::Read::take(reader, MAX_ARCHIVE_BYTES + 1);
+    std::io::Read::read_to_end(&mut limited, &mut bytes)
         .map_err(|e| format!("Failed to read response body: {e}"))?;
+
+    if bytes.len() as u64 > MAX_ARCHIVE_BYTES {
+        return Err("Downloaded archive exceeds maximum permitted size (64MB)".into());
+    }
     Ok(bytes)
 }
 
@@ -278,7 +331,12 @@ fn discover_or_synthesize_manifest(
     dir: &Path,
     options: &InstallOptions,
 ) -> Result<PersonalManifest, ModuleError> {
-    let candidate_manifests = ["module.json", "manifest.json", "toolcase-module.json"];
+    let candidate_manifests = [
+        "module.json",
+        "manifest.json",
+        "__manifest__.json",
+        "toolcase-module.json",
+    ];
 
     for name in candidate_manifests {
         let manifest_file = dir.join(name);

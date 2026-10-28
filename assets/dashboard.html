@@ -554,9 +554,9 @@ footer.site-footer {
         </div>
         <div class="grid-2">
           <div class="field-group">
-            <label for="mod-namespace">Route Namespace (optional)</label>
-            <input type="text" id="mod-namespace" placeholder="/custom/cohere">
-            <div class="hint">Must start with a forward slash (inferred as /custom/&lt;id&gt; if omitted).</div>
+            <label for="mod-namespace">Route Path URL Prefix (Required)</label>
+            <input type="text" id="mod-namespace" placeholder="/custom/cohere" required>
+            <div class="hint">Unique routing path prefix starting with a forward slash (e.g. /custom/my-tool).</div>
           </div>
           <div class="field-group">
             <label for="mod-entrypoint">Entrypoint Command or Script (optional)</label>
@@ -1136,6 +1136,18 @@ footer.site-footer {
       if (modNamespace && modNamespace.value.trim()) payload.namespace = modNamespace.value.trim();
       if (modEntrypoint && modEntrypoint.value.trim()) payload.entrypoint = modEntrypoint.value.trim();
 
+      if (!payload.source && !(modZipFile && modZipFile.files && modZipFile.files.length)) {
+        payload.version = payload.version || '0.1.0';
+        payload.name = payload.name || payload.id || 'Custom Module';
+      }
+
+      if (!payload.namespace) {
+        installBtn.disabled = false;
+        modErrMsg.textContent = 'Route Path URL Prefix (Namespace) is required (e.g. /custom/my-tool)';
+        modErrMsg.style.display = 'block';
+        return;
+      }
+
       if (modZipFile && modZipFile.files && modZipFile.files.length > 0) {
         const file = modZipFile.files[0];
         const reader = new FileReader();
@@ -1227,10 +1239,11 @@ footer.site-footer {
     } else {
       openrouterStatus.textContent = 'Disabled';
     }
-    openrouterDesc.textContent = (orJev.default_model || 'anthropic/claude-3.5-sonnet') + (orJev.active_cookie ? ' (Browser active)' : '');
+    const orModel = orJev.model || orJev.default_model || '';
+    openrouterDesc.textContent = (orModel || 'No default model') + (orJev.masked_cookie ? ' (Browser active)' : '');
 
     setFieldIfNotFocused(cfgJevOrBase, orJev.base_url || 'https://openrouter.ai/api/v1');
-    setFieldIfNotFocused(cfgJevOrModel, orJev.default_model || 'anthropic/claude-3.5-sonnet');
+    setFieldIfNotFocused(cfgJevOrModel, orModel);
     setFieldIfNotFocused(cfgJevOrFallbackModels, (orJev.fallback_models || []).join(', '));
     if (cfgJevOrEnabled) cfgJevOrEnabled.value = orJev.enabled ? 'true' : 'false';
   }

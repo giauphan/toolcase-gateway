@@ -4,6 +4,9 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+pub const MAX_ENTRY_UNCOMPRESSED: u64 = 64 * 1024 * 1024;
+pub const MAX_TOTAL_UNCOMPRESSED: u64 = 256 * 1024 * 1024;
+
 /// Error types occurring during zip archive decoding or extraction.
 #[derive(Debug)]
 pub enum ArchiveError {
@@ -62,6 +65,7 @@ pub fn extract_zip(zip_data: &[u8], target_dir: &Path) -> Result<Vec<PathBuf>, A
 
     let common_prefix = find_common_root_prefix(&entries);
     let mut extracted = Vec::new();
+    let mut total_uncompressed: u64 = 0;
 
     for entry in entries {
         let relative_str = if let Some(prefix) = &common_prefix {
@@ -92,6 +96,14 @@ pub fn extract_zip(zip_data: &[u8], target_dir: &Path) -> Result<Vec<PathBuf>, A
         }
 
         let file_data = read_entry_data(zip_data, &entry)?;
+        total_uncompressed = total_uncompressed
+            .checked_add(file_data.len() as u64)
+            .ok_or_else(|| ArchiveError::InvalidZip("Total uncompressed size overflow".into()))?;
+        if total_uncompressed > MAX_TOTAL_UNCOMPRESSED {
+            return Err(ArchiveError::InvalidZip(
+                "Archive exceeds maximum uncompressed size".into(),
+            ));
+        }
         let mut file = File::create(&out_path)?;
         file.write_all(&file_data)?;
 
@@ -210,13 +222,26 @@ fn read_entry_data(zip_data: &[u8], entry: &CentralEntry) -> Result<Vec<u8>, Arc
     let raw_slice = &zip_data[data_start..data_end];
 
     match entry.compression_method {
-        0 => Ok(raw_slice.to_vec()),
+        0 => {
+            if raw_slice.len() as u64 > MAX_ENTRY_UNCOMPRESSED {
+                return Err(ArchiveError::InvalidZip(
+                    "Entry exceeds maximum size".into(),
+                ));
+            }
+            Ok(raw_slice.to_vec())
+        }
         8 => {
-            let mut decoder = flate2::read::DeflateDecoder::new(raw_slice);
+            let mut decoder =
+                flate2::read::DeflateDecoder::new(raw_slice).take(MAX_ENTRY_UNCOMPRESSED + 1);
             let mut decompressed = Vec::new();
             decoder.read_to_end(&mut decompressed).map_err(|e| {
                 ArchiveError::InvalidZip(format!("Deflate decompression failed: {e}"))
             })?;
+            if decompressed.len() as u64 > MAX_ENTRY_UNCOMPRESSED {
+                return Err(ArchiveError::InvalidZip(
+                    "Entry exceeds maximum uncompressed size".into(),
+                ));
+            }
             Ok(decompressed)
         }
         m => Err(ArchiveError::UnsupportedCompression(m)),
