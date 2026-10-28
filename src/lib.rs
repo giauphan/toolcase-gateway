@@ -34,7 +34,7 @@ pub fn run() -> io::Result<()> {
     let _ = dotenvy::dotenv();
 
     let listen_host = env_or("GW_LISTEN_HOST", "127.0.0.1");
-    let listen_port = env_or("GW_LISTEN_PORT", "20129").parse().unwrap_or(20129);
+    let listen_port = env_or("GW_LISTEN_PORT", "20130").parse().unwrap_or(20130);
     let max_connections: usize = env_or("GW_MAX_CONNECTIONS", "256").parse().unwrap_or(256);
     let timeout_secs: u64 = env_or("GW_IO_TIMEOUT_SECS", "120").parse().unwrap_or(120);
     let config = Config {

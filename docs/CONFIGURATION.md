@@ -34,7 +34,7 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_CONFIG_FILE` | `gateway_config.json` | path | Core | Path to the dedicated persistent JSON configuration file. |
 | `GW_ENV_FILE` | `.env` | path | Core | Path to the environment bootstrap file. |
 | `GW_LISTEN_HOST` | `127.0.0.1` | host | Core | Bind IP address. Non-loopback addresses emit a security warning. |
-| `GW_LISTEN_PORT` | `20129` | u16 | Core | TCP listen port. |
+| `GW_LISTEN_PORT` | `20130` | u16 | Core | TCP listen port. |
 | `GW_TARGET_HOST` | `127.0.0.1` | host | OmniRoute | Upstream OpenAI-compatible host to proxy requests to. |
 | `GW_TARGET_PORT` | `20128` | u16 | OmniRoute | Upstream OpenAI-compatible target port. |
 | `GW_DEFAULT_MODEL` | *(empty)* | string | OmniRoute | Default model substituted when client request specifies an unknown model. |
@@ -171,7 +171,7 @@ These limits are defined in `src/http.rs` and `src/runtime/` to prevent memory e
 
 Access the interactive dashboard at:
 ```
-http://127.0.0.1:20129/gateway-config/dashboard
+http://127.0.0.1:20130/gateway-config/dashboard
 ```
 
 - **Gateway Configuration**: Adjust upstream OmniRoute host, port, default model, I/O timeout, and fallback model chains.

@@ -29,6 +29,108 @@ struct InstallPayload {
     branch: Option<String>,
 }
 
+fn generate_module_adapter_script(
+    target_dir: &std::path::Path,
+    id: &str,
+    name: &str,
+) -> io::Result<String> {
+    std::fs::create_dir_all(target_dir)?;
+    let run_sh = target_dir.join("run.sh");
+    let script = format!(
+        r#"#!/bin/sh
+cat << 'EOF' | python3 - "$@"
+import sys, json, time, uuid
+
+M_ID = "{id}"
+M_NAME = "{name}"
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        req = json.loads(line)
+        path = req.get("path", "")
+        raw_body = req.get("body", "")
+        try:
+            body = json.loads(raw_body) if raw_body else {{}}
+        except Exception:
+            body = {{}}
+
+        if path.endswith("/models"):
+            resp = {{
+                "object": "list",
+                "data": [{{"id": M_ID, "object": "model", "created": int(time.time()), "owned_by": M_ID}}],
+            }}
+        else:
+            messages = body.get("messages", [])
+            last_msg = ""
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    last_msg = m.get("content", "")
+                    break
+            reply = f"[{{M_NAME}}] Echo: {{last_msg}}" if last_msg else f"[{{M_NAME}}] Ready."
+            resp = {{
+                "id": f"chatcmpl-{{uuid.uuid4().hex[:8]}}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": M_ID,
+                "choices": [{{
+                    "index": 0,
+                    "message": {{"role": "assistant", "content": reply}},
+                    "finish_reason": "stop",
+                }}],
+                "usage": {{"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10}},
+            }}
+        out = {{
+            "status": 200,
+            "headers": {{"content-type": "application/json"}},
+            "body": json.dumps(resp),
+        }}
+    except Exception as e:
+        out = {{
+            "status": 500,
+            "headers": {{"content-type": "application/json"}},
+            "body": json.dumps({{"error": str(e)}}),
+        }}
+    sys.stdout.write(json.dumps(out) + "\n")
+    sys.stdout.flush()
+EOF
+"#
+    );
+    std::fs::write(&run_sh, script)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&run_sh) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(&run_sh, perms);
+        }
+    }
+    let can = run_sh.canonicalize().unwrap_or(run_sh);
+    Ok(can.to_string_lossy().to_string())
+}
+
+fn resolve_entrypoint(payload_entrypoint: Option<String>, id: &str, name: &str) -> String {
+    if let Some(ep) = payload_entrypoint {
+        let p = std::path::Path::new(&ep);
+        if p.is_file() {
+            return p
+                .canonicalize()
+                .unwrap_or_else(|_| p.to_path_buf())
+                .to_string_lossy()
+                .to_string();
+        }
+        if !ep.trim().is_empty() {
+            return ep;
+        }
+    }
+    let target_dir = get_state_dir().join("modules").join(id);
+    generate_module_adapter_script(&target_dir, id, name)
+        .unwrap_or_else(|_| "/bin/echo".to_string())
+}
+
 fn parse_or_synthesize_manifest(
     body: &[u8],
     payload: &InstallPayload,
@@ -41,20 +143,24 @@ fn parse_or_synthesize_manifest(
             .into_iter()
             .find(|c| c.id == target_id || c.namespace == target_id)
         {
-            return Ok(PersonalManifest {
+            let ep = resolve_entrypoint(payload.entrypoint.clone(), &cat.id, &cat.name);
+            let manifest = PersonalManifest {
                 id: cat.id,
                 name: cat.name,
                 version: cat.version,
                 namespace: cat.namespace,
-                entrypoint: payload
-                    .entrypoint
-                    .clone()
-                    .unwrap_or_else(|| "/bin/echo".to_string()),
+                entrypoint: ep,
                 protocol: cat.protocol,
                 capabilities: cat.capabilities,
                 config_schema: None,
                 permissions: Vec::new(),
-            });
+            };
+            let target_dir = get_state_dir().join("modules").join(&manifest.id);
+            let _ = std::fs::write(
+                target_dir.join("module.json"),
+                serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+            );
+            return Ok(manifest);
         }
     }
     let Some(ref ns) = payload.namespace else {
@@ -76,16 +182,13 @@ fn parse_or_synthesize_manifest(
         }
     });
     let name = payload.name.clone().unwrap_or_else(|| id.clone());
-    let entrypoint = payload
-        .entrypoint
-        .clone()
-        .unwrap_or_else(|| "/bin/echo".to_string());
+    let entrypoint = resolve_entrypoint(payload.entrypoint.clone(), &id, &name);
     let protocol = payload
         .protocol
         .clone()
         .unwrap_or_else(|| "stdio-stream".to_string());
-    Ok(PersonalManifest {
-        id,
+    let manifest = PersonalManifest {
+        id: id.clone(),
         name,
         version: "0.1.0".to_string(),
         namespace: ns.clone(),
@@ -94,7 +197,13 @@ fn parse_or_synthesize_manifest(
         capabilities: vec!["chat_completions".to_string(), "models".to_string()],
         config_schema: None,
         permissions: Vec::new(),
-    })
+    };
+    let target_dir = get_state_dir().join("modules").join(&id);
+    let _ = std::fs::write(
+        target_dir.join("module.json"),
+        serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+    );
+    Ok(manifest)
 }
 
 pub fn handle_set_module_state(

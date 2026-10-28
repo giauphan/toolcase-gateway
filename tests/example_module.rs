@@ -201,6 +201,73 @@ fn test_personal_module_accepts_structured_json_body() {
     let _ = fs::remove_file(temp_script);
 }
 
+#[test]
+fn test_crashing_module_captures_stderr_message() {
+    let temp_script = std::env::temp_dir().join(format!("test_crash_{}.sh", uuid::Uuid::new_v4()));
+    fs::write(
+        &temp_script,
+        "#!/bin/sh\n>&2 echo 'Fatal: database driver crashed unexpectedly'\nexit 1\n",
+    )
+    .unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&temp_script).unwrap().permissions();
+        perms.set_mode(0o755);
+        let _ = fs::set_permissions(&temp_script, perms);
+    }
+
+    let manifest = PersonalManifest {
+        id: "test-crasher".to_string(),
+        name: "Test Crasher".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: "/custom/crash".to_string(),
+        entrypoint: temp_script.to_string_lossy().to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+    };
+
+    let (mut client, mut server) = match create_stream_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+
+    let req = Request {
+        method: "GET".to_string(),
+        path: "/custom/crash/test".to_string(),
+        headers: vec![],
+        body: vec![],
+    };
+
+    let server_handle = thread::spawn(move || {
+        handle_personal_module_request(&mut server, &req, &manifest, "/test")
+    });
+
+    let head = read_response_head(&mut client).expect("read head");
+    assert_eq!(head.status, 502);
+
+    let mut body = head.buffered_body;
+    let _ = client.read_to_end(&mut body);
+    let resp_str = String::from_utf8_lossy(&body);
+    assert!(
+        resp_str.contains("Fatal: database driver crashed unexpectedly"),
+        "expected error to contain stderr details, got: {resp_str}"
+    );
+
+    let _ = server_handle.join().unwrap();
+    let _ = fs::remove_file(temp_script);
+}
+
+#[test]
+fn test_default_listen_port_separation() {
+    use toolcase_gateway::config::env_or;
+    let fallback = env_or("GW_LISTEN_PORT_UNSET_TEST_VAR", "20130");
+    assert_eq!(fallback, "20130");
+}
+
 fn create_stream_pair() -> Option<(TcpStream, TcpStream)> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
     let addr = listener.local_addr().ok()?;

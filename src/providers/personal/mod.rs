@@ -28,19 +28,39 @@ fn dispatch_stdio(
     manifest: &PersonalManifest,
     subpath: &str,
 ) -> io::Result<u16> {
-    let mut cmd = Command::new(&manifest.entrypoint);
-    if let Some(parent) = std::path::Path::new(&manifest.entrypoint).parent() {
+    let entry_path = std::path::Path::new(&manifest.entrypoint);
+    let resolved_entrypoint = if entry_path.is_file() {
+        entry_path
+            .canonicalize()
+            .unwrap_or_else(|_| entry_path.to_path_buf())
+    } else {
+        entry_path.to_path_buf()
+    };
+    let mut cmd = Command::new(&resolved_entrypoint);
+    if let Some(parent) = resolved_entrypoint.parent() {
         if parent.is_dir() {
             cmd.current_dir(parent);
         }
     }
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
-    // Filter environment variables to isolate secrets
+    // Filter environment variables to isolate secrets while retaining essential runtime environment
     cmd.env_clear();
-    cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
+    for (k, v) in std::env::vars() {
+        let upper = k.to_ascii_uppercase();
+        if upper.starts_with("GW_")
+            || upper.starts_with("DATABASE_")
+            || upper.contains("COOKIE")
+            || upper.contains("TOKEN")
+            || upper.contains("SECRET")
+            || upper.contains("API_KEY")
+        {
+            continue;
+        }
+        cmd.env(k, v);
+    }
     cmd.env("MODULE_ID", &manifest.id);
     cmd.env("MODULE_NAMESPACE", &manifest.namespace);
 
@@ -87,12 +107,32 @@ fn dispatch_stdio(
         let _ = tx.send(res);
     });
 
+    let stderr = child.stderr.take();
+    let (tx_err, rx_err) = std::sync::mpsc::channel();
+    let err_reader_handle = std::thread::spawn(move || {
+        if let Some(mut err_stream) = stderr {
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while let Ok(n) = std::io::Read::read(&mut err_stream, &mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > 4096 {
+                    break;
+                }
+            }
+            let _ = tx_err.send(String::from_utf8_lossy(&buf).to_string());
+        }
+    });
+
     let response_line = match rx.recv_timeout(DEFAULT_MODULE_TIMEOUT) {
         Ok(Ok(line)) => {
             let _ = child.kill();
             let _ = child.wait();
             let _ = writer_handle.join();
             let _ = reader_handle.join();
+            let _ = err_reader_handle.join();
             line
         }
         Ok(Err(e)) => {
@@ -100,6 +140,7 @@ fn dispatch_stdio(
             let _ = child.wait();
             let _ = writer_handle.join();
             let _ = reader_handle.join();
+            let _ = err_reader_handle.join();
             return write_personal_error(
                 client,
                 502,
@@ -111,6 +152,7 @@ fn dispatch_stdio(
             let _ = child.wait();
             drop(writer_handle);
             drop(reader_handle);
+            drop(err_reader_handle);
             return write_personal_error(
                 client,
                 504,
@@ -120,11 +162,23 @@ fn dispatch_stdio(
     };
 
     if response_line.trim().is_empty() {
-        return write_personal_error(
-            client,
-            502,
-            "Personal module returned empty response or crashed",
+        let err_detail = rx_err
+            .recv_timeout(Duration::from_millis(150))
+            .unwrap_or_default();
+        let error_msg = if !err_detail.trim().is_empty() {
+            format!(
+                "Personal module returned empty response or crashed: {}",
+                err_detail.trim()
+            )
+        } else {
+            "Personal module returned empty response or crashed".to_string()
+        };
+        crate::runtime::logger::log_message(
+            "ERROR",
+            "personal_module",
+            &format!("[{}] {error_msg}", manifest.id),
         );
+        return write_personal_error(client, 502, &error_msg);
     }
 
     let resp_val: serde_json::Value = match serde_json::from_str(&response_line) {
