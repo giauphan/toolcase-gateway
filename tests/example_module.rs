@@ -56,6 +56,7 @@ fn test_example_echo_provider_dispatch_stdio_flow() {
         capabilities: vec!["chat_completions".to_string(), "models".to_string()],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -170,6 +171,7 @@ fn test_personal_module_accepts_structured_json_body() {
         capabilities: vec![],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -228,6 +230,7 @@ fn test_crashing_module_captures_stderr_message() {
         capabilities: vec![],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {

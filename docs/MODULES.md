@@ -99,6 +99,52 @@ A module declares its identity and capabilities in `module.json` (also accepted:
 | `protocol` | `string` | Communication protocol: `"stdio-stream"` (default) or `"local-http"`. |
 | `capabilities` | `string[]` | Advertised capabilities (e.g. `["chat_completions", "models"]`). |
 | `config_schema`| `object` | Optional JSON schema for module configuration options. |
+| `group` | `object` | Optional Module Group configuration bundling multiple sub-providers. |
+
+### 3.1 Module Groups (Bundling Multiple Providers)
+
+Instead of authoring, installing, and maintaining dozens of distinct single-purpose modules, Toolcase Gateway supports **Module Groups**. A single module package can declare a `group` containing multiple sub-providers, all mounted under the parent module's URL namespace:
+
+```json
+{
+  "id": "office-ai-suite",
+  "name": "Office AI Multi-Provider Suite",
+  "version": "1.0.0",
+  "namespace": "/custom/office-ai",
+  "entrypoint": "run.sh",
+  "protocol": "stdio-stream",
+  "capabilities": ["chat_completions", "embeddings", "vision"],
+  "group": {
+    "enabled": true,
+    "providers": [
+      {
+        "id": "chat-fast",
+        "name": "Fast LLM Chat",
+        "subpath": "/chat",
+        "capabilities": ["chat_completions"]
+      },
+      {
+        "id": "embed-dense",
+        "name": "Dense Text Embeddings",
+        "subpath": "/embed",
+        "capabilities": ["embeddings"]
+      },
+      {
+        "id": "vision-ocr",
+        "name": "Document Vision OCR",
+        "subpath": "/vision",
+        "capabilities": ["vision"]
+      }
+    ]
+  }
+}
+```
+
+#### How Module Group Routing Works
+- Requests to `/custom/office-ai/chat/completions` automatically route to `run.sh` with environment variable `MODULE_SUB_PROVIDER_ID=chat-fast`.
+- Requests to `/custom/office-ai/embed` route with `MODULE_SUB_PROVIDER_ID=embed-dense`.
+- Disabling the module group (`office-ai-suite`) immediately disables all sub-providers with `503 Service Unavailable`.
+- Sub-providers can also be toggled individually (`set_sub_provider_status`).
 
 ---
 

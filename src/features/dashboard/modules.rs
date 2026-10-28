@@ -31,10 +31,8 @@ struct InstallPayload {
 
 fn generate_module_adapter_script(target_dir: &std::path::Path) -> io::Result<String> {
     std::fs::create_dir_all(target_dir)?;
-    let run_sh = target_dir.join("run.sh");
-    let script = r#"#!/bin/sh
-cat << 'EOF' | python3 - "$@"
-import os, sys, json, time, uuid
+    let adapter_py = target_dir.join("adapter.py");
+    let py_script = r#"import os, sys, json, time, uuid
 
 M_ID = os.environ.get("MODULE_ID", "custom-module")
 M_NAME = os.environ.get("MODULE_NAME", M_ID)
@@ -90,13 +88,20 @@ for line in sys.stdin:
         }
     sys.stdout.write(json.dumps(out) + "\n")
     sys.stdout.flush()
-EOF
 "#;
-    std::fs::write(&run_sh, script)?;
+    std::fs::write(&adapter_py, py_script)?;
+
+    let run_sh = target_dir.join("run.sh");
+    let sh_script = r#"#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec python3 "$SCRIPT_DIR/adapter.py" "$@"
+"#;
+    std::fs::write(&run_sh, sh_script)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&run_sh, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::set_permissions(&adapter_py, std::fs::Permissions::from_mode(0o700));
     }
     let can = run_sh.canonicalize().unwrap_or(run_sh);
     Ok(can.to_string_lossy().to_string())
@@ -148,6 +153,7 @@ fn parse_or_synthesize_manifest(
                 capabilities: cat.capabilities,
                 config_schema: None,
                 permissions: Vec::new(),
+                group: None,
             });
         }
     }
@@ -185,6 +191,7 @@ fn parse_or_synthesize_manifest(
         capabilities: vec!["chat_completions".to_string(), "models".to_string()],
         config_schema: None,
         permissions: Vec::new(),
+        group: None,
     })
 }
 

@@ -466,6 +466,7 @@ fn discover_or_synthesize_manifest(
         capabilities: vec!["chat_completions".to_string(), "models".to_string()],
         config_schema: None,
         permissions: Vec::new(),
+        group: None,
     })
 }
 

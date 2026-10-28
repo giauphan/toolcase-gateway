@@ -13,7 +13,6 @@ pub use muse::*;
 pub use templates::*;
 
 use crate::config::{Config, ConfigStore};
-use crate::gateway::modules::ModuleStatus;
 use crate::http::{read_request_with_admission, write_error};
 use crate::omniroute::handle_omniroute_proxy;
 use std::io::{self, Read, Write};
@@ -132,39 +131,6 @@ pub fn route_request_dispatch(
         return Ok(200);
     }
 
-    // Check module enablement for built-in providers
-    let (muse_enabled, jev_enabled) = {
-        let reg = store.module_registry();
-        let guard = reg.read().ok();
-        (
-            guard
-                .as_ref()
-                .and_then(|g| g.get_module("muse"))
-                .map(|m| m.status == ModuleStatus::Enabled)
-                .unwrap_or(true),
-            guard
-                .as_ref()
-                .and_then(|g| g.get_module("jev"))
-                .map(|m| m.status == ModuleStatus::Enabled)
-                .unwrap_or(true),
-        )
-    };
-
-    // Muse path enablement check (fail closed for disabled Muse module)
-    let is_muse_path = clean_path == "/muse-ai"
-        || clean_path.starts_with("/muse-ai/")
-        || clean_path == "/v1/images/generations"
-        || clean_path.starts_with("/video/v1/providers");
-    if is_muse_path && !muse_enabled {
-        write_error(
-            client,
-            503,
-            "Service Unavailable",
-            "Muse AI module is currently disabled",
-        )?;
-        return Ok(503);
-    }
-
     // 1. System Dashboard and configuration routes
     if let Some(code) = dispatch_dashboard_route(client, request, store, clean_path)? {
         return Ok(code);
@@ -185,50 +151,12 @@ pub fn route_request_dispatch(
 
     let snapshot = store.snapshot();
 
-    // 4. Platform Modules: OmniRoute (/ominroute/...) & out-of-tree personal modules
+    // 4. Unified Module & Provider Dispatcher (handles built-in providers, personal modules, and module groups)
     if let Some(code) = dispatch_module_route(client, request, store, &snapshot, clean_path)? {
         return Ok(code);
     }
 
-    // 5. Muse provider routes
-    if let Some(code) = dispatch_catalog_route(client, request, clean_path)? {
-        return Ok(code);
-    }
-    if let Some(code) = dispatch_muse_chat_route(client, request, &snapshot, clean_path)? {
-        return Ok(code);
-    }
-    if let Some(code) = dispatch_muse_image_route(client, request, &snapshot, clean_path)? {
-        return Ok(code);
-    }
-    if let Some(code) = dispatch_muse_video_route(client, request, &snapshot, clean_path)? {
-        return Ok(code);
-    }
-    if let Some(code) = dispatch_video_provider_route(client, request, clean_path)? {
-        return Ok(code);
-    }
-
-    // 6. Jev provider routes
-    let is_jev_path = clean_path == "/jev"
-        || clean_path.starts_with("/jev/")
-        || clean_path == "/jev-ai"
-        || clean_path.starts_with("/jev-ai/");
-    if is_jev_path && !jev_enabled {
-        write_error(
-            client,
-            503,
-            "Service Unavailable",
-            "Jev Decision module is currently disabled",
-        )?;
-        return Ok(503);
-    }
-
-    if let Some(code) =
-        dispatch_jev_route(client, request, &snapshot, &store.jev_pool(), clean_path)?
-    {
-        return Ok(code);
-    }
-
-    // 7. Fail-closed fallback: unowned paths outside enabled module namespaces return 404
+    // 5. Fail-closed fallback: unowned paths outside enabled module namespaces return 404
     write_error(
         client,
         404,

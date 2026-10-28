@@ -16,9 +16,19 @@ pub fn handle_personal_module_request(
     manifest: &PersonalManifest,
     subpath: &str,
 ) -> io::Result<u16> {
+    handle_personal_module_request_with_provider(client, request, manifest, subpath, None)
+}
+
+pub fn handle_personal_module_request_with_provider(
+    client: &mut TcpStream,
+    request: &Request,
+    manifest: &PersonalManifest,
+    subpath: &str,
+    sub_provider_id: Option<&str>,
+) -> io::Result<u16> {
     match manifest.protocol.as_str() {
         "local-http" => dispatch_local_http(client, request, manifest, subpath),
-        _ => dispatch_stdio(client, request, manifest, subpath),
+        _ => dispatch_stdio(client, request, manifest, subpath, sub_provider_id),
     }
 }
 
@@ -31,7 +41,7 @@ fn is_sensitive_env_var(var: &str) -> bool {
         || var.contains("API_KEY")
 }
 
-fn build_command(manifest: &PersonalManifest) -> Command {
+fn build_command(manifest: &PersonalManifest, sub_provider_id: Option<&str>) -> Command {
     let entry_path = std::path::Path::new(&manifest.entrypoint);
     let resolved_entrypoint = if entry_path.is_file() {
         entry_path
@@ -61,6 +71,9 @@ fn build_command(manifest: &PersonalManifest) -> Command {
     cmd.env("MODULE_ID", &manifest.id);
     cmd.env("MODULE_NAME", &manifest.name);
     cmd.env("MODULE_NAMESPACE", &manifest.namespace);
+    if let Some(sub_id) = sub_provider_id {
+        cmd.env("MODULE_SUB_PROVIDER_ID", sub_id);
+    }
     cmd
 }
 
@@ -150,8 +163,9 @@ fn dispatch_stdio(
     request: &Request,
     manifest: &PersonalManifest,
     subpath: &str,
+    sub_provider_id: Option<&str>,
 ) -> io::Result<u16> {
-    let mut cmd = build_command(manifest);
+    let mut cmd = build_command(manifest, sub_provider_id);
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,

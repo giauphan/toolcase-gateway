@@ -352,6 +352,7 @@ mod tests {
             capabilities: vec!["chat".into()],
             config_schema: None,
             permissions: vec![],
+            group: None,
         };
         storage.save_module(&manifest).unwrap();
         let modules = storage.get_modules().unwrap();

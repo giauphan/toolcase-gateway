@@ -342,6 +342,7 @@ fn test_module_namespace_uniqueness_and_collision_prevention() {
         capabilities: vec![],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
     assert!(matches!(
         reg.register_personal_module(bad_ns),
@@ -359,6 +360,7 @@ fn test_module_namespace_uniqueness_and_collision_prevention() {
         capabilities: vec![],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
     assert!(matches!(
         reg.register_personal_module(reserved_ns),
@@ -376,6 +378,7 @@ fn test_module_namespace_uniqueness_and_collision_prevention() {
         capabilities: vec![],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
     assert!(reg.register_personal_module(valid_1).is_ok());
 
@@ -390,6 +393,7 @@ fn test_module_namespace_uniqueness_and_collision_prevention() {
         capabilities: vec![],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
     assert!(matches!(
         reg.register_personal_module(dup_ns),
@@ -407,6 +411,7 @@ fn test_module_namespace_uniqueness_and_collision_prevention() {
         capabilities: vec![],
         config_schema: None,
         permissions: vec![],
+        group: None,
     };
     assert!(matches!(
         reg.register_personal_module(overlap_ns),
