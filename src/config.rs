@@ -722,7 +722,7 @@ impl ConfigStore {
         let reg = self
             .module_registry
             .read()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut map = std::collections::HashMap::new();
         for m in reg.list_modules() {
             map.insert(

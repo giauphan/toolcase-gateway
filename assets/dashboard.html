@@ -423,13 +423,14 @@ footer.site-footer {
   color: var(--text-primary);
 }
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+  html:root body,
+  html:root body *,
+  html:root body *::before,
+  html:root body *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }
 </style>
@@ -976,6 +977,15 @@ footer.site-footer {
       .replaceAll("'", '&#39;');
   }
 
+  function parseJsonSafely(text) {
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return {};
+    }
+  }
+
   function setFieldIfNotFocused(el, val) {
     if (el && !el.matches(':focus')) {
       el.value = val;
@@ -1044,9 +1054,10 @@ footer.site-footer {
     .then(function(res) {
       responseOk = res.ok;
       responseStatus = res.status;
-      return res.json().catch(function() { return {}; });
+      return res.text();
     })
-    .then(function(data) {
+    .then(function(text) {
+      const data = parseJsonSafely(text);
       if (!responseOk) {
         throw new Error((data && data.message) || ('HTTP ' + responseStatus));
       }
@@ -1064,9 +1075,10 @@ footer.site-footer {
     })
     .then(function(res) {
       responseOk = res.ok;
-      return res.json().catch(function() { return {}; });
+      return res.text();
     })
-    .then(function(data) {
+    .then(function(text) {
+      const data = parseJsonSafely(text);
       if (!responseOk) {
         throw new Error((data && data.message) || 'Failed to remove module');
       }
@@ -1084,9 +1096,10 @@ footer.site-footer {
     })
     .then(function(res) {
       installOk = res.ok;
-      return res.json().catch(function() { return {}; });
+      return res.text();
     })
-    .then(function(data) {
+    .then(function(text) {
+      const data = parseJsonSafely(text);
       installBtn.disabled = false;
       if (!installOk) {
         modErrMsg.textContent = (data && data.message) || 'Error installing module';
@@ -1332,9 +1345,10 @@ footer.site-footer {
       .then(function(res) {
         cfgOk = res.ok;
         cfgStatus = res.status;
-        return res.json().catch(function() { return {}; });
+        return res.text();
       })
-      .then(function(json) {
+      .then(function(text) {
+        const json = parseJsonSafely(text);
         saveCfgBtn.disabled = false;
         saveCfgBtn.textContent = 'Save Gateway Settings';
 
@@ -1395,9 +1409,10 @@ footer.site-footer {
       .then(function(res) {
         museOk = res.ok;
         museStatusVal = res.status;
-        return res.json().catch(function() { return {}; });
+        return res.text();
       })
-      .then(function(json) {
+      .then(function(text) {
+        const json = parseJsonSafely(text);
         saveMuseBtn.disabled = false;
         saveMuseBtn.textContent = 'Save Muse AI Settings';
 
@@ -1451,9 +1466,10 @@ footer.site-footer {
       .then(function(res) {
         jevSaveOk = res.ok;
         jevSaveStatus = res.status;
-        return res.json().catch(function() { return {}; });
+        return res.text();
       })
-      .then(function(json) {
+      .then(function(text) {
+        const json = parseJsonSafely(text);
         if (saveJevBtn) {
           saveJevBtn.disabled = false;
           saveJevBtn.textContent = 'Save Jev & OpenRouter Settings';
@@ -1520,9 +1536,10 @@ footer.site-footer {
     .then(function(res) {
       accountsSaveOk = res.ok;
       accountsSaveStatus = res.status;
-      return res.json().catch(function() { return {}; });
+      return res.text();
     })
-    .then(function(json) {
+    .then(function(text) {
+      const json = parseJsonSafely(text);
       submitBtn.disabled = false;
       submitBtn.textContent = 'Add to Account Pool';
 
