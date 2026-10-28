@@ -1059,7 +1059,8 @@ footer.site-footer {
     .then(function(text) {
       const data = parseJsonSafely(text);
       if (!responseOk) {
-        throw new Error((data && data.message) || ('HTTP ' + responseStatus));
+        const msg = (data && data.error && data.error.message) || (data && data.message) || ('HTTP ' + responseStatus);
+        throw new Error(msg);
       }
       loadOverview();
     })
@@ -1080,7 +1081,8 @@ footer.site-footer {
     .then(function(text) {
       const data = parseJsonSafely(text);
       if (!responseOk) {
-        throw new Error((data && data.message) || 'Failed to remove module');
+        const msg = (data && data.error && data.error.message) || (data && data.message) || 'Failed to remove module';
+        throw new Error(msg);
       }
       loadOverview();
     })
@@ -1089,6 +1091,7 @@ footer.site-footer {
 
   function executeModuleInstall(payload) {
     let installOk = false;
+    let installStatus = 200;
     fetch('/api/v1/dashboard/modules/install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1096,13 +1099,17 @@ footer.site-footer {
     })
     .then(function(res) {
       installOk = res.ok;
+      installStatus = res.status;
       return res.text();
     })
     .then(function(text) {
       const data = parseJsonSafely(text);
       installBtn.disabled = false;
       if (!installOk) {
-        modErrMsg.textContent = (data && data.message) || 'Error installing module';
+        const errorDetail = (data && data.error && data.error.message)
+          || (data && data.message)
+          || (text && text.trim() ? text.trim() : ('HTTP ' + installStatus + ' error installing module'));
+        modErrMsg.textContent = errorDetail;
         modErrMsg.style.display = 'block';
       } else {
         const installedId = (data && data.id) || payload.id || 'module';
@@ -1131,7 +1138,13 @@ footer.site-footer {
 
     if (!payload.source && !(modZipFile && modZipFile.files && modZipFile.files.length)) {
       payload.version = payload.version || '0.1.0';
+      if (!payload.id && payload.namespace) {
+        payload.id = payload.namespace.replace(/^\/+/, '').replace(/\//g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+      }
       payload.name = payload.name || payload.id || 'Custom Module';
+      if (!payload.entrypoint) {
+        payload.entrypoint = '/bin/echo';
+      }
     }
     return payload;
   }

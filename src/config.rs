@@ -733,6 +733,14 @@ impl ConfigStore {
         persistent.enabled_modules = Some(map);
         persistent.personal_modules = Some(reg.export_personal_manifests());
         drop(reg);
-        save_persistent_config(&self.config_file, &persistent)
+        let primary_err = match save_persistent_config(&self.config_file, &persistent) {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        };
+        let fallback = crate::gateway::installer::get_state_dir().join("gateway_config.json");
+        if fallback != self.config_file && save_persistent_config(&fallback, &persistent).is_ok() {
+            return Ok(());
+        }
+        Err(primary_err)
     }
 }

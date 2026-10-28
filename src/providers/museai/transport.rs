@@ -62,8 +62,20 @@ impl MuseWebSocket {
                     .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
             );
         }
-        let (mut socket, _) =
-            connect(request).map_err(|_| io::Error::other("Muse WebSocket connection failed"))?;
+        let (mut socket, _) = connect(request).map_err(|err| match err {
+            tungstenite::Error::Http(ref resp)
+                if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 =>
+            {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Muse WebSocket authentication failed (HTTP {}): cookie or session token expired",
+                        resp.status().as_u16()
+                    ),
+                )
+            }
+            other => io::Error::other(format!("Muse WebSocket connection failed: {other}")),
+        })?;
         match socket.get_mut() {
             tungstenite::stream::MaybeTlsStream::Plain(tcp) => {
                 tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
@@ -303,6 +315,14 @@ pub fn send_museai_request(
     match response_res {
         Ok(mut res) => {
             let status = u16::from(res.status());
+            if status == 401 || status == 403 {
+                let msg = "Muse.ai authentication failed: cookie is expired, invalid, or missing. Please configure a valid session cookie in settings.";
+                return Ok(UpstreamResponse {
+                    status: 401,
+                    body: format!("{{\"error\":{{\"message\":\"{msg}\"}},\"message\":\"{msg}\"}}"),
+                    content_type: "application/json".to_string(),
+                });
+            }
             let content_type = res
                 .headers()
                 .get("content-type")
@@ -327,14 +347,22 @@ pub fn send_museai_request(
         }
         Err(e) => {
             let (status, content_type, body) = match e {
+                ureq::Error::StatusCode(401 | 403) => {
+                    let msg = "Muse.ai authentication failed: cookie is expired, invalid, or missing. Please configure a valid session cookie in settings.";
+                    (
+                        401,
+                        "application/json".to_string(),
+                        format!("{{\"error\":{{\"message\":\"{msg}\"}},\"message\":\"{msg}\"}}"),
+                    )
+                }
                 ureq::Error::StatusCode(status) => {
-                    let text = format!("{{\"error\": \"{status}\"}}");
+                    let text = format!("{{\"error\":{{\"message\":\"Upstream returned HTTP {status}\"}},\"message\":\"Upstream returned HTTP {status}\"}}");
                     (status, "application/json".to_string(), text)
                 }
                 _ => (
                     502,
                     "application/json".to_string(),
-                    format!("{{\"error\": \"Upstream network error: {e}\"}}"),
+                    format!("{{\"error\":{{\"message\":\"Upstream network error: {e}\"}},\"message\":\"Upstream network error: {e}\"}}"),
                 ),
             };
 

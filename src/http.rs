@@ -407,10 +407,8 @@ pub fn write_error(
     reason: &str,
     message: &str,
 ) -> io::Result<()> {
-    let body = format!(
-        "{{\"error\":{{\"message\":\"{}\"}}}}",
-        escape_json_string(message)
-    );
+    let escaped = escape_json_string(message);
+    let body = format!("{{\"error\":{{\"message\":\"{escaped}\"}},\"message\":\"{escaped}\"}}");
     write!(client, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{body}", body.len())
 }
 

@@ -367,11 +367,34 @@ fn fetch_session_metadata(base_url: &str, cookie: &str) -> io::Result<serde_json
     if !cookie.is_empty() {
         request = request.header("Cookie", cookie);
     }
-    let response = request
-        .call()
-        .map_err(|error| io::Error::other(format!("Muse.ai session bootstrap failed: {error}")))?;
+    let mut response = match request.call() {
+        Ok(r) => r,
+        Err(ureq::Error::StatusCode(401 | 403)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Muse.ai session authentication failed: cookie expired or invalid (HTTP 401 Unauthorized). Please update your session cookie in settings.",
+            ));
+        }
+        Err(error) => {
+            return Err(io::Error::other(format!(
+                "Muse.ai session bootstrap failed: {error}"
+            )));
+        }
+    };
+    let status_code = response.status().as_u16();
+    if status_code == 401 || status_code == 403 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Muse.ai session authentication failed: cookie expired or invalid (HTTP 401 Unauthorized). Please update your session cookie in settings.",
+        ));
+    }
+    if !(200..300).contains(&status_code) {
+        return Err(io::Error::other(format!(
+            "Muse.ai session bootstrap returned unexpected status HTTP {status_code}"
+        )));
+    }
     response
-        .into_body()
+        .body_mut()
         .read_json()
         .map_err(|error| io::Error::other(format!("Muse.ai session response invalid: {error}")))
 }

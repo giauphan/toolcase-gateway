@@ -30,3 +30,6 @@ mod chat_continuation_tests;
 
 #[path = "muse/image_tests.rs"]
 mod image_tests;
+
+#[path = "muse/cookie_auth_tests.rs"]
+mod cookie_auth_tests;

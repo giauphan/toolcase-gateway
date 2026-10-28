@@ -41,6 +41,7 @@ pub use threads::{
     purge_remote_cvm_threads_older_than, register_thread, start_cleanup_worker,
     start_cleanup_worker_with_interval, start_cleanup_worker_with_store, unregister_thread,
 };
+pub use transport::send_museai_request;
 pub use video::build_video_prompt;
 
 #[derive(Debug)]

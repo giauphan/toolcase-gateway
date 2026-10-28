@@ -33,7 +33,20 @@ fn init_noise_session(
 
     session
         .perform_client_handshake(&mut socket, &config.museai_notary_token)
-        .map_err(|e| io::Error::other(format!("Noise handshake error: {e}")))?;
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("401")
+                || msg.contains("403")
+                || msg.to_ascii_lowercase().contains("unauthorized")
+            {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("Noise handshake authentication rejected: cookie or session token expired ({e})"),
+                )
+            } else {
+                io::Error::other(format!("Noise handshake error: {e}"))
+            }
+        })?;
 
     Ok((socket, session))
 }
@@ -64,6 +77,12 @@ fn drive_chat_stream(
             } => {
                 debug_log(&format!("Chat response HTTP status={status}"));
                 if !(200..300).contains(&status) {
+                    if status == 401 || status == 403 {
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            format!("Muse chat stream authentication failed (HTTP {status}): cookie or session token expired"),
+                        ));
+                    }
                     return Err(io::Error::other(format!(
                         "Muse chat returned HTTP {status}"
                     )));

@@ -140,6 +140,8 @@ pub fn install_module(
         return Err(e);
     }
 
+    unwrap_single_top_level_directory(&staging_dir);
+
     // Discover or synthesize the manifest
     let mut manifest = match discover_or_synthesize_manifest(&staging_dir, &options) {
         Ok(m) => m,
@@ -327,6 +329,41 @@ fn fetch_url_bytes(url: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn unwrap_single_top_level_directory(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut dirs = Vec::new();
+    let mut has_files = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name == "__MACOSX" {
+            if name == "__MACOSX" {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+            continue;
+        }
+        match entry.file_type() {
+            Ok(ft) if ft.is_dir() => dirs.push(entry.path()),
+            Ok(ft) if ft.is_file() => has_files = true,
+            _ => {}
+        }
+    }
+    if !has_files && dirs.len() == 1 {
+        let single_dir = &dirs[0];
+        let temp_stage = dir.join(format!(".tmp_unwrap_{}", uuid::Uuid::new_v4()));
+        if fs::rename(single_dir, &temp_stage).is_ok() {
+            if let Ok(re_read) = fs::read_dir(&temp_stage) {
+                for item in re_read.flatten() {
+                    let target = dir.join(item.file_name());
+                    let _ = fs::rename(item.path(), target);
+                }
+            }
+            let _ = fs::remove_dir_all(&temp_stage);
+        }
+    }
+}
+
 fn discover_or_synthesize_manifest(
     dir: &Path,
     options: &InstallOptions,
@@ -352,6 +389,16 @@ fn discover_or_synthesize_manifest(
 
     // Auto-synthesize manifest from repository structure
     let id = options.id.clone().unwrap_or_else(|| {
+        if let Some(ref ns) = options.namespace {
+            let clean = ns.trim_matches('/').replace('/', "-");
+            let filtered: String = clean
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            if !filtered.is_empty() {
+                return filtered;
+            }
+        }
         let stem = dir
             .file_name()
             .and_then(std::ffi::OsStr::to_str)
@@ -410,24 +457,34 @@ fn detect_or_generate_entrypoint(dir: &Path) -> Result<String, ModuleError> {
         }
     }
 
-    if dir.join("main.py").is_file() {
-        let wrapper = dir.join("run.sh");
-        let content = "#!/bin/sh\nexec python3 \"$(dirname \"$0\")/main.py\" \"$@\"\n";
-        let mut f = File::create(&wrapper)
-            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to create wrapper: {e}")))?;
-        f.write_all(content.as_bytes())
-            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to write wrapper: {e}")))?;
-        return Ok("run.sh".to_string());
+    let py_candidates = ["main.py", "app.py", "server.py", "adapter.py"];
+    for py in py_candidates {
+        if dir.join(py).is_file() {
+            let wrapper = dir.join("run.sh");
+            let content = format!("#!/bin/sh\nexec python3 \"$(dirname \"$0\")/{py}\" \"$@\"\n");
+            let mut f = File::create(&wrapper).map_err(|e| {
+                ModuleError::InvalidManifest(format!("Failed to create wrapper: {e}"))
+            })?;
+            f.write_all(content.as_bytes()).map_err(|e| {
+                ModuleError::InvalidManifest(format!("Failed to write wrapper: {e}"))
+            })?;
+            return Ok("run.sh".to_string());
+        }
     }
 
-    if dir.join("index.js").is_file() {
-        let wrapper = dir.join("run.sh");
-        let content = "#!/bin/sh\nexec node \"$(dirname \"$0\")/index.js\" \"$@\"\n";
-        let mut f = File::create(&wrapper)
-            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to create wrapper: {e}")))?;
-        f.write_all(content.as_bytes())
-            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to write wrapper: {e}")))?;
-        return Ok("run.sh".to_string());
+    let js_candidates = ["index.js", "main.js", "server.js", "app.js"];
+    for js in js_candidates {
+        if dir.join(js).is_file() {
+            let wrapper = dir.join("run.sh");
+            let content = format!("#!/bin/sh\nexec node \"$(dirname \"$0\")/{js}\" \"$@\"\n");
+            let mut f = File::create(&wrapper).map_err(|e| {
+                ModuleError::InvalidManifest(format!("Failed to create wrapper: {e}"))
+            })?;
+            f.write_all(content.as_bytes()).map_err(|e| {
+                ModuleError::InvalidManifest(format!("Failed to write wrapper: {e}"))
+            })?;
+            return Ok("run.sh".to_string());
+        }
     }
 
     Err(ModuleError::InvalidManifest(

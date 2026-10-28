@@ -204,6 +204,100 @@ fn test_install_from_zip_bytes() {
 }
 
 #[test]
+fn test_install_from_zip_with_single_top_level_wrapper() {
+    let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
+    let manifest_json = r#"{
+        "id": "wrapped-module",
+        "name": "Wrapped Module",
+        "version": "1.0.0",
+        "namespace": "/custom/wrapped",
+        "entrypoint": "main.py",
+        "protocol": "stdio-stream",
+        "capabilities": ["models"]
+    }"#;
+    let main_py = "print('hello from wrapped')\n";
+
+    let mut zip = Vec::new();
+    let entries = [
+        ("repo-main/module.json", manifest_json.as_bytes()),
+        ("repo-main/main.py", main_py.as_bytes()),
+    ];
+
+    let mut central_entries = Vec::new();
+    for (name, data) in &entries {
+        let local_offset = zip.len();
+        let name_bytes = name.as_bytes();
+        let mut crc = flate2::Crc::new();
+        crc.update(data);
+        let crc32 = crc.sum();
+
+        zip.extend_from_slice(b"PK\x03\x04");
+        zip.extend_from_slice(&20u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&crc32.to_le_bytes());
+        zip.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        zip.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        zip.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(name_bytes);
+        zip.extend_from_slice(data);
+
+        central_entries.push((*name, local_offset, data.len(), crc32));
+    }
+
+    let cd_offset = zip.len();
+    for (name, loc, size, crc32) in &central_entries {
+        let name_bytes = name.as_bytes();
+        zip.extend_from_slice(b"PK\x01\x02");
+        zip.extend_from_slice(&20u16.to_le_bytes());
+        zip.extend_from_slice(&20u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&crc32.to_le_bytes());
+        zip.extend_from_slice(&(*size as u32).to_le_bytes());
+        zip.extend_from_slice(&(*size as u32).to_le_bytes());
+        zip.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u16.to_le_bytes());
+        zip.extend_from_slice(&0u32.to_le_bytes());
+        zip.extend_from_slice(&(*loc as u32).to_le_bytes());
+        zip.extend_from_slice(name_bytes);
+    }
+
+    let cd_size = zip.len() - cd_offset;
+    zip.extend_from_slice(b"PK\x05\x06");
+    zip.extend_from_slice(&0u16.to_le_bytes());
+    zip.extend_from_slice(&0u16.to_le_bytes());
+    zip.extend_from_slice(&(central_entries.len() as u16).to_le_bytes());
+    zip.extend_from_slice(&(central_entries.len() as u16).to_le_bytes());
+    zip.extend_from_slice(&(cd_size as u32).to_le_bytes());
+    zip.extend_from_slice(&(cd_offset as u32).to_le_bytes());
+    zip.extend_from_slice(&0u16.to_le_bytes());
+
+    let manifest = install_module(
+        InstallSource::ZipBytes(zip),
+        InstallOptions::default(),
+        &temp_state,
+    )
+    .expect("wrapped zip unwraps and installs successfully");
+
+    assert_eq!(manifest.id, "wrapped-module");
+    assert_eq!(manifest.namespace, "/custom/wrapped");
+    assert!(manifest.entrypoint.ends_with("main.py"));
+    assert!(Path::new(&manifest.entrypoint).is_file());
+
+    cleanup_module_files("wrapped-module", &temp_state);
+    let _ = fs::remove_dir_all(&temp_state);
+}
+
+#[test]
 fn test_module_id_validation_rejects_traversal_and_invalid_chars() {
     let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
     let src_dir = std::env::temp_dir().join(format!("test_src_{}", uuid::Uuid::new_v4()));
@@ -434,7 +528,7 @@ fn test_dashboard_module_api_lifecycle() {
     let port = listener.local_addr().unwrap().port();
     let store_clone = store.clone();
     let handle = thread::spawn(move || {
-        for _ in 0..4 {
+        for _ in 0..5 {
             let (client, _) = listener.accept().unwrap();
             let _ = route_request(client, &store_clone);
         }
@@ -473,7 +567,24 @@ fn test_dashboard_module_api_lifecycle() {
     let head = read_response_head(&mut client).unwrap();
     assert_eq!(head.status, 200);
 
-    // 3. POST /api/v1/dashboard/modules/state
+    // 3. POST /api/v1/dashboard/modules/install with omitted optional fields (auto-infers id and entrypoint)
+    let simple_install_body = serde_json::json!({
+        "namespace": "/custom/auto-derived-tool"
+    })
+    .to_string();
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        client,
+        "POST /api/v1/dashboard/modules/install HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        simple_install_body.len(),
+        simple_install_body
+    )
+    .unwrap();
+    let head = read_response_head(&mut client).unwrap();
+    assert_eq!(head.status, 200);
+
+    // 4. POST /api/v1/dashboard/modules/state
     let toggle_body = serde_json::json!({"id": "http-test-mod", "enabled": false}).to_string();
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
     write!(
@@ -486,7 +597,7 @@ fn test_dashboard_module_api_lifecycle() {
     let head = read_response_head(&mut client).unwrap();
     assert_eq!(head.status, 200);
 
-    // 4. POST /api/v1/dashboard/modules/remove
+    // 5. POST /api/v1/dashboard/modules/remove
     let remove_body = serde_json::json!({"id": "http-test-mod"}).to_string();
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
     write!(
