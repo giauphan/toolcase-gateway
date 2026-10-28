@@ -12,6 +12,36 @@ pub struct Header {
     pub value: String,
 }
 
+/// Returns standard encrypted service headers expected by the Hatch VM endpoint.
+pub fn standard_hatch_headers(accept: &str) -> Vec<Header> {
+    vec![
+        Header {
+            key: "Host".to_string(),
+            value: "hatch.metaaivm.com".to_string(),
+        },
+        Header {
+            key: "Content-Type".to_string(),
+            value: "application/json".to_string(),
+        },
+        Header {
+            key: "Accept".to_string(),
+            value: accept.to_string(),
+        },
+        Header {
+            key: "x-request-id".to_string(),
+            value: uuid::Uuid::new_v4().to_string(),
+        },
+        Header {
+            key: "x-app-id".to_string(),
+            value: "hatch-web".to_string(),
+        },
+        Header {
+            key: "Accept-Language".to_string(),
+            value: "en-US".to_string(),
+        },
+    ]
+}
+
 #[derive(Debug, PartialEq)]
 pub enum ServiceFrameKind {
     Response {

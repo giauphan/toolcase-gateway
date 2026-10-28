@@ -280,15 +280,7 @@ fn handle_create_video_internal(
                     ),
                 );
             }
-            let (status_code, error_type) = match e.kind() {
-                io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
-                io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
-                io::ErrorKind::NotFound => (404, "Not Found"),
-                io::ErrorKind::WouldBlock | io::ErrorKind::AlreadyExists => (409, "Conflict"),
-                io::ErrorKind::Unsupported => (501, "Not Implemented"),
-                io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
-                _ => (502, "Bad Gateway"),
-            };
+            let (status_code, error_type) = crate::http::io_error_to_http_status(e.kind());
             crate::http::write_error(
                 client,
                 status_code,
@@ -373,6 +365,21 @@ pub fn handle_museai_threads_cleanup_run(
     client.flush()
 }
 
+fn write_video_job_lookup_error(client: &mut TcpStream, e: io::Error) -> io::Result<()> {
+    match e.kind() {
+        io::ErrorKind::NotFound => crate::http::write_error(
+            client,
+            404,
+            "Not Found",
+            &format!("video job not found: {e}"),
+        ),
+        io::ErrorKind::InvalidInput => {
+            crate::http::write_error(client, 400, "Bad Request", &format!("invalid job id: {e}"))
+        }
+        _ => crate::http::write_error(client, 500, "Internal Server Error", &e.to_string()),
+    }
+}
+
 pub fn handle_update_video_prompt(
     client: &mut TcpStream,
     job_id: &str,
@@ -416,16 +423,7 @@ pub fn handle_update_video_prompt(
             crate::http::write_json_ok(client, &response_str)?;
             client.flush()
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => crate::http::write_error(
-            client,
-            404,
-            "Not Found",
-            &format!("video job not found: {e}"),
-        ),
-        Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
-            crate::http::write_error(client, 400, "Bad Request", &format!("invalid job id: {e}"))
-        }
-        Err(e) => crate::http::write_error(client, 500, "Internal Server Error", &e.to_string()),
+        Err(e) => write_video_job_lookup_error(client, e),
     }
 }
 
@@ -490,16 +488,7 @@ fn handle_get_video_with_host(
             crate::http::write_json_ok(client, &response_str)?;
             client.flush()
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => crate::http::write_error(
-            client,
-            404,
-            "Not Found",
-            &format!("video job not found: {e}"),
-        ),
-        Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
-            crate::http::write_error(client, 400, "Bad Request", &format!("invalid job id: {e}"))
-        }
-        Err(e) => crate::http::write_error(client, 500, "Internal Server Error", &e.to_string()),
+        Err(e) => write_video_job_lookup_error(client, e),
     }
 }
 

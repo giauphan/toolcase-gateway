@@ -3,7 +3,7 @@ use super::types::{
 };
 use crate::config::Config;
 use crate::providers::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
-use crate::providers::museai::protocol::{Header, ServiceFrameKind, SERVICE_SENTINEL};
+use crate::providers::museai::protocol::{ServiceFrameKind, SERVICE_SENTINEL};
 use crate::providers::museai::session::{bootstrap_museai_config, build_museai_ws_url};
 use crate::providers::museai::transport::MuseWebSocket;
 use std::io;
@@ -88,32 +88,8 @@ impl MuseSentinelClient {
         let stream_id = self.next_stream_id;
         self.next_stream_id = self.next_stream_id.wrapping_add(2);
 
-        let headers = vec![
-            Header {
-                key: "Host".to_string(),
-                value: "hatch.metaaivm.com".to_string(),
-            },
-            Header {
-                key: "Content-Type".to_string(),
-                value: "application/json".to_string(),
-            },
-            Header {
-                key: "Accept".to_string(),
-                value: "application/json".to_string(),
-            },
-            Header {
-                key: "x-request-id".to_string(),
-                value: Uuid::new_v4().to_string(),
-            },
-            Header {
-                key: "x-app-id".to_string(),
-                value: "hatch-web".to_string(),
-            },
-            Header {
-                key: "Accept-Language".to_string(),
-                value: "en-US".to_string(),
-            },
-        ];
+        let headers =
+            crate::providers::museai::protocol::standard_hatch_headers("application/json");
 
         self.socket.send_encrypted_service_request(
             &mut self.session,

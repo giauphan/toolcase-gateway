@@ -202,7 +202,8 @@ pub fn is_spoofed_host(url: &str) -> bool {
     !is_trusted_video_cdn_host(authority)
 }
 
-pub fn has_supported_video_extension(url: &str) -> bool {
+/// Normalizes a URL by stripping scheme/host, query strings, and fragments, returning a lowercase clean path.
+pub fn clean_url_path(url: &str) -> String {
     let path_str = if let Some(after_scheme) = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
@@ -214,7 +215,7 @@ pub fn has_supported_video_extension(url: &str) -> bool {
     } else {
         url
     };
-    let path = path_str
+    path_str
         .split('?')
         .next()
         .unwrap_or("")
@@ -222,7 +223,11 @@ pub fn has_supported_video_extension(url: &str) -> bool {
         .next()
         .unwrap_or("")
         .trim_end_matches('/')
-        .to_ascii_lowercase();
+        .to_ascii_lowercase()
+}
+
+pub fn has_supported_video_extension(url: &str) -> bool {
+    let path = clean_url_path(url);
     path.ends_with(".mp4")
         || path.ends_with(".mov")
         || path.ends_with(".webm")

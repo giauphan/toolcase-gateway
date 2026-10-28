@@ -318,7 +318,7 @@ pub fn parse_approval_record_json(val: &serde_json::Value) -> io::Result<Approva
     })
 }
 
-pub fn parse_approvals_list(body: &[u8]) -> io::Result<Vec<ApprovalRecord>> {
+fn parse_sentinel_response_json(body: &[u8]) -> io::Result<serde_json::Value> {
     if body.len() > MAX_APPROVAL_PAYLOAD_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -337,6 +337,12 @@ pub fn parse_approvals_list(body: &[u8]) -> io::Result<Vec<ApprovalRecord>> {
             .unwrap_or("Sentinel returned ok=false");
         return Err(io::Error::other(format!("Sentinel error: {msg}")));
     }
+
+    Ok(val)
+}
+
+pub fn parse_approvals_list(body: &[u8]) -> io::Result<Vec<ApprovalRecord>> {
+    let val = parse_sentinel_response_json(body)?;
 
     let items_array = if let Some(arr) = val.as_array() {
         arr
@@ -374,24 +380,6 @@ pub fn parse_approvals_list(body: &[u8]) -> io::Result<Vec<ApprovalRecord>> {
 }
 
 pub fn parse_approval_get(body: &[u8]) -> io::Result<ApprovalRecord> {
-    if body.len() > MAX_APPROVAL_PAYLOAD_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Approval response body exceeds size limit",
-        ));
-    }
-
-    let val: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Invalid JSON: {e}")))?;
-
-    if let Some(false) = val.get("ok").and_then(|v| v.as_bool()) {
-        let msg = val
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .unwrap_or("Sentinel returned ok=false");
-        return Err(io::Error::other(format!("Sentinel error: {msg}")));
-    }
-
+    let val = parse_sentinel_response_json(body)?;
     parse_approval_record_json(&val)
 }

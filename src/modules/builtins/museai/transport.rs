@@ -54,37 +54,25 @@ impl MuseWebSocket {
         let mut request = url
             .into_client_request()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-        request.headers_mut().insert(
-            "Origin",
-            HeaderValue::from_str(origin)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
-        );
-        request.headers_mut().insert(
-            "User-Agent",
-            HeaderValue::from_str("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
-        );
-        request.headers_mut().insert(
-            "Accept-Language",
-            HeaderValue::from_str("en-US,en;q=0.9")
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
-        );
-        request.headers_mut().insert(
-            "Cache-Control",
-            HeaderValue::from_str("no-cache")
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
-        );
-        request.headers_mut().insert(
-            "Pragma",
-            HeaderValue::from_str("no-cache")
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
-        );
+        let base_headers: &[(&str, &str)] = &[
+            ("Origin", origin),
+            (
+                "User-Agent",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            ),
+            ("Accept-Language", "en-US,en;q=0.9"),
+            ("Cache-Control", "no-cache"),
+            ("Pragma", "no-cache"),
+        ];
+        for &(name, val) in base_headers {
+            let hv = HeaderValue::from_str(val)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+            request.headers_mut().insert(name, hv);
+        }
         if !cookie.is_empty() {
-            request.headers_mut().insert(
-                "Cookie",
-                HeaderValue::from_str(cookie)
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?,
-            );
+            let hv = HeaderValue::from_str(cookie)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+            request.headers_mut().insert("Cookie", hv);
         }
         let (mut socket, _) = connect(request).map_err(|err| match err {
             tungstenite::Error::Http(ref resp)

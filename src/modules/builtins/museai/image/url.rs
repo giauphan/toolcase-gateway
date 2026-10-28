@@ -1,8 +1,8 @@
 //! Image URL parsing, prompt construction, and aspect ratio handling.
 
 use crate::providers::museai::video::{
-    extract_candidate_urls, is_google_drive_file_path, is_trusted_video_cdn_host, is_vm_media_url,
-    trim_trailing_punct, url_authority,
+    clean_url_path, extract_candidate_urls, is_google_drive_file_path, is_trusted_video_cdn_host,
+    is_vm_media_url, trim_trailing_punct, url_authority,
 };
 
 pub const SUPPORTED_IMAGE_MODELS: [&str; 6] = [
@@ -48,26 +48,7 @@ pub fn build_image_prompt(model: &str, prompt: &str, aspect_ratio: &str) -> Stri
 }
 
 pub fn has_supported_image_extension(url: &str) -> bool {
-    let path_str = if let Some(after_scheme) = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-    {
-        after_scheme
-            .split_once('/')
-            .map(|(_, path)| path)
-            .unwrap_or("")
-    } else {
-        url
-    };
-    let path = path_str
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .split('#')
-        .next()
-        .unwrap_or("")
-        .trim_end_matches('/')
-        .to_ascii_lowercase();
+    let path = clean_url_path(url);
 
     const EXTENSIONS: [&str; 8] = [
         ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".bmp", ".avif",

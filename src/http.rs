@@ -434,6 +434,19 @@ pub fn http_status_text(status: u16) -> &'static str {
     }
 }
 
+/// Maps an `io::ErrorKind` to its corresponding HTTP status code and reason phrase.
+pub fn io_error_to_http_status(kind: io::ErrorKind) -> (u16, &'static str) {
+    match kind {
+        io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
+        io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
+        io::ErrorKind::NotFound => (404, "Not Found"),
+        io::ErrorKind::WouldBlock | io::ErrorKind::AlreadyExists => (409, "Conflict"),
+        io::ErrorKind::Unsupported => (501, "Not Implemented"),
+        io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
+        _ => (502, "Bad Gateway"),
+    }
+}
+
 /// Writes a 200 OK JSON response body to the client stream.
 pub fn write_json_ok(client: &mut TcpStream, body: &str) -> io::Result<()> {
     write!(

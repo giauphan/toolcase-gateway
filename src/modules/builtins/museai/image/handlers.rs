@@ -114,15 +114,7 @@ fn handle_create_image_internal(
                     ),
                 );
             }
-            let (status_code, error_type) = match e.kind() {
-                io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => (400, "Bad Request"),
-                io::ErrorKind::PermissionDenied => (401, "Unauthorized"),
-                io::ErrorKind::NotFound => (404, "Not Found"),
-                io::ErrorKind::WouldBlock | io::ErrorKind::AlreadyExists => (409, "Conflict"),
-                io::ErrorKind::Unsupported => (501, "Not Implemented"),
-                io::ErrorKind::TimedOut => (504, "Gateway Timeout"),
-                _ => (502, "Bad Gateway"),
-            };
+            let (status_code, error_type) = crate::http::io_error_to_http_status(e.kind());
             write_error(
                 client,
                 status_code,

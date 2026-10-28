@@ -318,32 +318,7 @@ pub fn request_museai_chat_completion(
     let (mut socket, mut session) = init_noise_session(&config, base_origin)?;
 
     let stream_id = 1;
-    let headers = vec![
-        Header {
-            key: "Host".to_string(),
-            value: "hatch.metaaivm.com".to_string(),
-        },
-        Header {
-            key: "Content-Type".to_string(),
-            value: "application/json".to_string(),
-        },
-        Header {
-            key: "Accept".to_string(),
-            value: "text/event-stream".to_string(),
-        },
-        Header {
-            key: "x-request-id".to_string(),
-            value: Uuid::new_v4().to_string(),
-        },
-        Header {
-            key: "x-app-id".to_string(),
-            value: "hatch-web".to_string(),
-        },
-        Header {
-            key: "Accept-Language".to_string(),
-            value: "en-US".to_string(),
-        },
-    ];
+    let headers = crate::providers::museai::protocol::standard_hatch_headers("text/event-stream");
 
     let chat_payload = build_muse_chat_request_with_session(&prompt, existing_thread_id.as_deref());
     let payload_bytes = serde_json::to_vec(&chat_payload)
