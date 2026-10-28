@@ -84,9 +84,10 @@ fn dispatch_stdio(
 
     let response_line = match rx.recv_timeout(DEFAULT_MODULE_TIMEOUT) {
         Ok(Ok(line)) => {
+            let _ = child.kill();
+            let _ = child.wait();
             let _ = writer_handle.join();
             let _ = reader_handle.join();
-            let _ = child.wait();
             line
         }
         Ok(Err(e)) => {

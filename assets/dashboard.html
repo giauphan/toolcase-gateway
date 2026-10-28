@@ -316,7 +316,7 @@ label {
   color: var(--text-muted);
   margin-bottom: 6px;
 }
-input[type=text], input[type=number], select, textarea {
+input[type=text], input[type=number], input[type=password], select, textarea {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -329,7 +329,7 @@ input[type=text], input[type=number], select, textarea {
   outline: none;
   transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-input[type=text]:focus, input[type=number]:focus, select:focus, textarea:focus {
+input[type=text]:focus, input[type=number]:focus, input[type=password]:focus, select:focus, textarea:focus {
   border-color: var(--border-focus);
 }
 .hint {
@@ -421,6 +421,16 @@ footer.site-footer {
 }
 .footer-links a:hover {
   color: var(--text-primary);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 </style>
 </head>
@@ -573,9 +583,9 @@ footer.site-footer {
         <div class="hint">Use in Claude Desktop, Cursor, or Antigravity MCP settings.</div>
       </div>
       <div style="background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px;">
-        <div style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">HTTP &amp; SSE Stream Transport</div>
-        <div class="mono" style="font-size: 13px; color: var(--text-primary); word-break: break-all;">POST /mcp &bull; GET /mcp</div>
-        <div class="hint">Complies with the official Streamable HTTP MCP standard.</div>
+        <div style="font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px;">HTTP Transport</div>
+        <div class="mono" style="font-size: 13px; color: var(--text-primary); word-break: break-all;">POST /mcp</div>
+        <div class="hint">JSON-RPC over HTTP POST. Complies with Streamable HTTP MCP standard.</div>
       </div>
     </div>
 
@@ -672,7 +682,7 @@ footer.site-footer {
         </div>
         <div class="field-group">
           <label for="cfg-muse-token">Access Token (Bearer / Auth)</label>
-          <input type="text" id="cfg-muse-token" name="access_token" placeholder="Leave empty to keep existing">
+          <input type="password" id="cfg-muse-token" name="access_token" autocomplete="off" placeholder="Leave empty to keep existing">
           <div class="hint" id="hint-token">Current: not set</div>
         </div>
       </div>
@@ -680,12 +690,12 @@ footer.site-footer {
       <div class="grid-2">
         <div class="field-group">
           <label for="cfg-muse-notary">Notary Token</label>
-          <input type="text" id="cfg-muse-notary" name="notary_token" placeholder="Leave empty to keep existing">
+          <input type="password" id="cfg-muse-notary" name="notary_token" autocomplete="off" placeholder="Leave empty to keep existing">
           <div class="hint" id="hint-notary">Current: not set</div>
         </div>
         <div class="field-group">
           <label for="cfg-muse-cookie">Session Cookie</label>
-          <input type="text" id="cfg-muse-cookie" name="cookie" placeholder="Leave empty to keep existing">
+          <input type="password" id="cfg-muse-cookie" name="cookie" autocomplete="off" placeholder="Leave empty to keep existing">
           <div class="hint" id="hint-cookie">Current: not set</div>
         </div>
       </div>
@@ -898,7 +908,6 @@ footer.site-footer {
   const museErrMsg = byId('muse-err-msg');
   const museBadge = byId('muse-badge');
 
-  const accountsTable = byId('accounts-table');
   const tableBody = byId('accounts-tbody');
   const countBadge = byId('accounts-count-badge');
   const addForm = byId('accounts-form');
@@ -995,18 +1004,30 @@ footer.site-footer {
     modulesTbody.innerHTML = rows.join('');
   }
 
+  function formatAccountCount(count) {
+    if (count === 1) return '1 account';
+    return count + ' accounts';
+  }
+
   window.toggleModule = function(id, enable) {
+    let responseOk = false;
+    let responseStatus = 0;
     fetch('/api/v1/dashboard/modules/state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: id, enabled: enable })
     })
     .then(function(res) {
-      return res.json().catch(function() { return {}; }).then(function(data) {
-        if (!res.ok) throw new Error((data && data.message) || ('HTTP ' + res.status));
-      });
+      responseOk = res.ok;
+      responseStatus = res.status;
+      return res.json().catch(function() { return {}; });
     })
-    .then(function() { loadOverview(); })
+    .then(function(data) {
+      if (!responseOk) {
+        throw new Error((data && data.message) || ('HTTP ' + responseStatus));
+      }
+      loadOverview();
+    })
     .catch(function(err) { alert('Failed to update module state: ' + err.message); });
   };
 
@@ -1028,20 +1049,20 @@ footer.site-footer {
         capabilities: caps
       };
 
+      let installOk = false;
       fetch('/api/v1/dashboard/modules/install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       .then(function(res) {
-        return res.json().then(function(data) {
-          return { ok: res.ok, data: data };
-        });
+        installOk = res.ok;
+        return res.json().catch(function() { return {}; });
       })
-      .then(function(result) {
+      .then(function(data) {
         installBtn.disabled = false;
-        if (!result.ok) {
-          modErrMsg.textContent = result.data.message || 'Error installing module';
+        if (!installOk) {
+          modErrMsg.textContent = (data && data.message) || 'Error installing module';
           modErrMsg.style.display = 'block';
         } else {
           modOkMsg.textContent = 'Module ' + payload.id + ' successfully installed and registered.';
@@ -1075,7 +1096,11 @@ footer.site-footer {
   function renderJevSection(jev, orJev) {
     const cnt = jev.total_accounts || 0;
     const base = jev.base_url || 'https://api.jev.ai';
-    jevStatus.textContent = cnt > 0 ? (cnt + (cnt === 1 ? ' account' : ' accounts')) : 'Default key';
+    if (cnt > 0) {
+      jevStatus.textContent = formatAccountCount(cnt);
+    } else {
+      jevStatus.textContent = 'Default key';
+    }
     jevDesc.textContent = base;
 
     setFieldIfNotFocused(cfgJevBase, jev.base_url || 'https://api.jev.ai');
@@ -1106,7 +1131,7 @@ footer.site-footer {
     }
 
     const totalCnt = cnt + ((orJev && orJev.total_accounts) || 0);
-    countBadge.textContent = totalCnt + (totalCnt === 1 ? ' account' : ' accounts');
+    countBadge.textContent = formatAccountCount(totalCnt);
 
     if (rows.length > 0) {
       tableBody.innerHTML = rows.join('');
@@ -1118,7 +1143,13 @@ footer.site-footer {
   function renderOpenrouterSection(orJev) {
     if (!orJev) return;
     const cnt = orJev.total_accounts || 0;
-    openrouterStatus.textContent = cnt > 0 ? (cnt + (cnt === 1 ? ' account' : ' accounts')) : (orJev.enabled ? 'Ready' : 'Disabled');
+    if (cnt > 0) {
+      openrouterStatus.textContent = formatAccountCount(cnt);
+    } else if (orJev.enabled) {
+      openrouterStatus.textContent = 'Ready';
+    } else {
+      openrouterStatus.textContent = 'Disabled';
+    }
     openrouterDesc.textContent = (orJev.default_model || 'anthropic/claude-3.5-sonnet') + (orJev.active_cookie ? ' (Browser active)' : '');
 
     setFieldIfNotFocused(cfgJevOrBase, orJev.base_url || 'https://openrouter.ai/api/v1');
@@ -1127,30 +1158,49 @@ footer.site-footer {
     if (cfgJevOrEnabled) cfgJevOrEnabled.value = orJev.enabled ? 'true' : 'false';
   }
 
-  function renderMuseaiSection(muse) {
-    museStatus.textContent = muse.configured ? 'Configured' : 'Defaults';
+  function formatCredentialHint(hasCredential, maskedValue) {
+    if (!hasCredential) return 'Current: not set';
+    return 'Current: ' + (maskedValue || 'configured');
+  }
+
+  function renderMuseaiStatus(muse) {
+    const statusText = muse.configured ? 'Configured' : 'Defaults';
+    museStatus.textContent = statusText;
     museDesc.textContent = muse.base_url || 'https://muse.ai';
     if (museBadge) {
-      museBadge.textContent = muse.configured ? 'Configured' : 'Defaults';
+      museBadge.textContent = statusText;
       museBadge.className = 'tag ' + (muse.configured ? 'ok' : 'idle');
     }
     setFieldIfNotFocused(cfgMuseBase, muse.base_url || 'https://muse.ai');
     setFieldIfNotFocused(cfgMuseWs, muse.ws_url || '');
     setFieldIfNotFocused(cfgMuseVmid, muse.vm_id || '');
-    if (hintToken) hintToken.textContent = muse.has_access_token ? ('Current: ' + (muse.masked_access_token || 'configured')) : 'Current: not set';
-    if (hintNotary) hintNotary.textContent = muse.has_notary_token ? ('Current: ' + (muse.masked_notary_token || 'configured')) : 'Current: not set';
-    if (hintCookie) hintCookie.textContent = muse.has_cookie ? ('Current: ' + (muse.masked_cookie || 'configured')) : 'Current: not set';
     setFieldIfNotFocused(cfgMuseVideoPrompt, muse.default_video_prompt || '');
-    if (muse.approval) {
-      if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = muse.approval.mode || 'off';
-      if (cfgMuseApprovalDestinations && !cfgMuseApprovalDestinations.matches(':focus')) {
-        cfgMuseApprovalDestinations.value = (muse.approval.allowed_destinations || []).join(', ');
-      }
-      if (cfgMuseApprovalTypes && !cfgMuseApprovalTypes.matches(':focus')) {
-        cfgMuseApprovalTypes.value = (muse.approval.allowed_types || []).join(', ');
-      }
-      setFieldIfNotFocused(cfgMuseApprovalTimeout, muse.approval.timeout_secs != null ? muse.approval.timeout_secs : 30);
+  }
+
+  function renderMuseaiHints(muse) {
+    if (hintToken) hintToken.textContent = formatCredentialHint(muse.has_access_token, muse.masked_access_token);
+    if (hintNotary) hintNotary.textContent = formatCredentialHint(muse.has_notary_token, muse.masked_notary_token);
+    if (hintCookie) hintCookie.textContent = formatCredentialHint(muse.has_cookie, muse.masked_cookie);
+  }
+
+  function renderMuseaiApproval(approval) {
+    if (!approval) return;
+    if (cfgMuseApprovalMode) {
+      cfgMuseApprovalMode.value = approval.mode || 'off';
     }
+    if (cfgMuseApprovalDestinations && !cfgMuseApprovalDestinations.matches(':focus')) {
+      cfgMuseApprovalDestinations.value = (approval.allowed_destinations || []).join(', ');
+    }
+    if (cfgMuseApprovalTypes && !cfgMuseApprovalTypes.matches(':focus')) {
+      cfgMuseApprovalTypes.value = (approval.allowed_types || []).join(', ');
+    }
+    setFieldIfNotFocused(cfgMuseApprovalTimeout, approval.timeout_secs != null ? approval.timeout_secs : 30);
+  }
+
+  function renderMuseaiSection(muse) {
+    renderMuseaiStatus(muse);
+    renderMuseaiHints(muse);
+    renderMuseaiApproval(muse.approval);
   }
 
   function loadOverview() {
@@ -1202,6 +1252,8 @@ footer.site-footer {
       saveCfgBtn.disabled = true;
       saveCfgBtn.textContent = 'Saving...';
 
+      let cfgOk = false;
+      let cfgStatus = 0;
       fetch('/api/v1/dashboard/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1214,19 +1266,19 @@ footer.site-footer {
         })
       })
       .then(function(res) {
-        return res.json().then(function(json) {
-          return { ok: res.ok, status: res.status, data: json };
-        });
+        cfgOk = res.ok;
+        cfgStatus = res.status;
+        return res.json().catch(function() { return {}; });
       })
-      .then(function(res) {
+      .then(function(json) {
         saveCfgBtn.disabled = false;
         saveCfgBtn.textContent = 'Save Gateway Settings';
 
-        if (!res.ok) {
-          cfgErrMsg.textContent = res.data && res.data.message ? res.data.message : 'Error saving settings (HTTP ' + res.status + ')';
+        if (!cfgOk) {
+          cfgErrMsg.textContent = json && json.message ? json.message : ('Error saving settings (HTTP ' + cfgStatus + ')');
           cfgErrMsg.style.display = 'block';
         } else {
-          cfgOkMsg.textContent = res.data.message || 'Settings successfully saved to persistent JSON storage.';
+          cfgOkMsg.textContent = json.message || 'Settings successfully saved to persistent JSON storage.';
           cfgOkMsg.style.display = 'block';
           loadOverview();
         }
@@ -1269,28 +1321,30 @@ footer.site-footer {
       saveMuseBtn.disabled = true;
       saveMuseBtn.textContent = 'Saving...';
 
+      let museOk = false;
+      let museStatusVal = 0;
       fetch('/api/v1/dashboard/muse-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       .then(function(res) {
-        return res.json().then(function(json) {
-          return { ok: res.ok, status: res.status, data: json };
-        });
+        museOk = res.ok;
+        museStatusVal = res.status;
+        return res.json().catch(function() { return {}; });
       })
-      .then(function(res) {
+      .then(function(json) {
         saveMuseBtn.disabled = false;
         saveMuseBtn.textContent = 'Save Muse AI Settings';
 
-        if (!res.ok) {
-          museErrMsg.textContent = res.data && res.data.message ? res.data.message : ('Error updating Muse AI config (HTTP ' + res.status + ')');
+        if (!museOk) {
+          museErrMsg.textContent = json && json.message ? json.message : ('Error updating Muse AI config (HTTP ' + museStatusVal + ')');
           museErrMsg.style.display = 'block';
         } else {
           cfgMuseToken.value = '';
           cfgMuseNotary.value = '';
           cfgMuseCookie.value = '';
-          museOkMsg.textContent = res.data.message || 'Muse AI configuration updated and saved.';
+          museOkMsg.textContent = json.message || 'Muse AI configuration updated and saved.';
           museOkMsg.style.display = 'block';
           loadOverview();
         }
@@ -1323,23 +1377,25 @@ footer.site-footer {
         jev_credit_cooldown_secs: cfgJevCooldown && cfgJevCooldown.value ? Number.parseInt(cfgJevCooldown.value, 10) : undefined,
       };
 
+      let jevSaveOk = false;
+      let jevSaveStatus = 0;
       fetch('/api/v1/dashboard/jev-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       .then(function(res) {
-        return res.json().then(function(json) {
-          return { ok: res.ok, status: res.status, data: json };
-        });
+        jevSaveOk = res.ok;
+        jevSaveStatus = res.status;
+        return res.json().catch(function() { return {}; });
       })
-      .then(function(res) {
+      .then(function(json) {
         if (saveJevBtn) {
           saveJevBtn.disabled = false;
           saveJevBtn.textContent = 'Save Jev & OpenRouter Settings';
         }
-        if (!res.ok) {
-          jevErrMsg.textContent = res.data && res.data.message ? res.data.message : 'Error saving settings (HTTP ' + res.status + ')';
+        if (!jevSaveOk) {
+          jevErrMsg.textContent = json && json.message ? json.message : ('Error saving settings (HTTP ' + jevSaveStatus + ')');
           jevErrMsg.style.display = 'block';
         } else {
           jevOkMsg.textContent = 'Success! Jev & OpenRouter configuration persisted.';
@@ -1390,27 +1446,29 @@ footer.site-footer {
       payload.label = labelVal;
     }
 
+    let accountsSaveOk = false;
+    let accountsSaveStatus = 0;
     fetch('/api/v1/dashboard/accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
     .then(function(res) {
-      return res.json().then(function(json) {
-        return { ok: res.ok, status: res.status, data: json };
-      });
+      accountsSaveOk = res.ok;
+      accountsSaveStatus = res.status;
+      return res.json().catch(function() { return {}; });
     })
-    .then(function(res) {
+    .then(function(json) {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Add to Account Pool';
 
-      if (!res.ok) {
-        errMsg.textContent = res.data && res.data.message ? res.data.message : 'Error adding accounts (HTTP ' + res.status + ')';
+      if (!accountsSaveOk) {
+        errMsg.textContent = json && json.message ? json.message : ('Error adding accounts (HTTP ' + accountsSaveStatus + ')');
         errMsg.style.display = 'block';
       } else {
         keysInput.value = '';
         if (labelInput) labelInput.value = '';
-        okMsg.textContent = 'Success! Added ' + res.data.added_count + ' new key(s). Total accounts in pool: ' + res.data.total_accounts + '.';
+        okMsg.textContent = 'Success! Added ' + json.added_count + ' new key(s). Total accounts in pool: ' + json.total_accounts + '.';
         okMsg.style.display = 'block';
         loadOverview();
       }

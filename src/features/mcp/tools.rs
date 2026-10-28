@@ -336,7 +336,7 @@ mod tests {
             "name": "Claude Agent Module",
             "version": "1.0.0",
             "namespace": "/personal/claude",
-            "entrypoint": "echo",
+            "entrypoint": "/bin/echo",
             "protocol": "stdio-stream",
             "capabilities": ["chat"]
         });

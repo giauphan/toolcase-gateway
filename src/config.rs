@@ -626,7 +626,12 @@ impl ConfigStore {
         if let Some(persistent) = load_persistent_config(&config_file) {
             if let Some(ref personal) = persistent.personal_modules {
                 for manifest in personal {
-                    let _ = reg.register_personal_module(manifest.clone());
+                    if let Err(e) = reg.register_personal_module(manifest.clone()) {
+                        eprintln!(
+                            "warning: skipping persisted personal module '{}': {e}",
+                            manifest.id
+                        );
+                    }
                 }
             }
             if let Some(ref enabled_map) = persistent.enabled_modules {
@@ -709,17 +714,20 @@ impl ConfigStore {
         let mut persistent = PersistentConfig::from_config(&self.snapshot());
         persistent.jev_accounts = Some(self.jev_pool.accounts());
         persistent.jev_openrouter_accounts = Some(self.jev_pool.openrouter_accounts());
-        if let Ok(reg) = self.module_registry.read() {
-            let mut map = std::collections::HashMap::new();
-            for m in reg.list_modules() {
-                map.insert(
-                    m.id,
-                    m.status == crate::gateway::modules::ModuleStatus::Enabled,
-                );
-            }
-            persistent.enabled_modules = Some(map);
-            persistent.personal_modules = Some(reg.export_personal_manifests());
+        let reg = self
+            .module_registry
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let mut map = std::collections::HashMap::new();
+        for m in reg.list_modules() {
+            map.insert(
+                m.id,
+                m.status == crate::gateway::modules::ModuleStatus::Enabled,
+            );
         }
+        persistent.enabled_modules = Some(map);
+        persistent.personal_modules = Some(reg.export_personal_manifests());
+        drop(reg);
         save_persistent_config(&self.config_file, &persistent)
     }
 }

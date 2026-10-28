@@ -1,6 +1,9 @@
 //! MCP Server transport adapters: Stdio and Streamable HTTP.
 
-use crate::api::mcp::protocol::*;
+use crate::api::mcp::protocol::{
+    JsonRpcRequest, JsonRpcResponse, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST,
+    MCP_PROTOCOL_VERSION, METHOD_NOT_FOUND, PARSE_ERROR,
+};
 use crate::config::ConfigStore;
 use crate::http::Request;
 use serde_json::json;
@@ -20,7 +23,6 @@ pub fn process_json_rpc(raw_line: &str, store: &ConfigStore) -> Option<String> {
     };
 
     if req.jsonrpc != "2.0" {
-        req.id.as_ref()?;
         let resp = JsonRpcResponse::error(
             req.id,
             INVALID_REQUEST,
@@ -174,49 +176,105 @@ pub fn handle_http_mcp(
         return Ok(None);
     }
 
+    let origin_hdr = request
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("origin"))
+        .map(|(_, v)| v.as_str());
+
+    let cors_header = if let Some(origin) = origin_hdr {
+        if !crate::http::is_loopback_origin(origin) {
+            crate::http::write_error(
+                client,
+                403,
+                "Forbidden",
+                "Cross-origin requests from untrusted origins are prohibited",
+            )?;
+            return Ok(Some(403));
+        }
+        format!("Access-Control-Allow-Origin: {origin}\r\n")
+    } else {
+        String::new()
+    };
+
     if request.method.eq_ignore_ascii_case("post") {
+        if origin_hdr.is_some() {
+            let ct_ok = request
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                .is_some_and(|(_, ct)| ct.to_ascii_lowercase().starts_with("application/json"));
+            if !ct_ok {
+                crate::http::write_error(
+                    client,
+                    415,
+                    "Unsupported Media Type",
+                    "MCP endpoint expects Content-Type: application/json",
+                )?;
+                return Ok(Some(415));
+            }
+        } else if let Some((_, ct)) = request
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        {
+            if !ct.to_ascii_lowercase().starts_with("application/json") {
+                crate::http::write_error(
+                    client,
+                    415,
+                    "Unsupported Media Type",
+                    "MCP endpoint expects Content-Type: application/json",
+                )?;
+                return Ok(Some(415));
+            }
+        }
+
         let req_str = String::from_utf8_lossy(&request.body);
         if let Some(resp_json) = process_json_rpc(&req_str, store) {
             let data = resp_json.as_bytes();
             let head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                cors_header,
                 data.len()
             );
             client.write_all(head.as_bytes())?;
             client.write_all(data)?;
             client.flush()?;
             return Ok(Some(200));
-        } else {
-            // Notifications return 202 Accepted with no body in Streamable HTTP MCP
-            let resp = "HTTP/1.1 202 Accepted\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-            client.write_all(resp.as_bytes())?;
-            client.flush()?;
-            return Ok(Some(202));
         }
+        // Notifications return 202 Accepted with no body in Streamable HTTP MCP
+        let resp = format!(
+            "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+            cors_header
+        );
+        client.write_all(resp.as_bytes())?;
+        client.flush()?;
+        return Ok(Some(202));
     }
 
     if request.method.eq_ignore_ascii_case("get") {
-        let info = json!({
-            "service": "toolcase-gateway MCP Server",
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "transports": ["stdio", "http-post", "sse"],
-            "endpoints": {
-                "jsonrpc": "/mcp",
-                "sse": "/mcp/sse"
-            }
-        });
-        let data = serde_json::to_vec_pretty(&info).unwrap_or_default();
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            data.len()
+        let body = r#"{"error":"GET not allowed; use POST /mcp"}"#;
+        let resp = format!(
+            "HTTP/1.1 405 Method Not Allowed\r\nAllow: POST\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+            cors_header,
+            body.len(),
+            body
         );
-        client.write_all(head.as_bytes())?;
-        client.write_all(&data)?;
+        client.write_all(resp.as_bytes())?;
         client.flush()?;
-        return Ok(Some(200));
+        return Ok(Some(405));
     }
 
-    Ok(None)
+    let body = r#"{"error":"Method not allowed; use POST /mcp"}"#;
+    let resp = format!(
+        "HTTP/1.1 405 Method Not Allowed\r\nAllow: POST\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+        cors_header,
+        body.len(),
+        body
+    );
+    client.write_all(resp.as_bytes())?;
+    client.flush()?;
+    Ok(Some(405))
 }
 
 #[cfg(test)]
@@ -260,5 +318,12 @@ mod tests {
         let unk_resp = process_json_rpc(unk, &store).unwrap();
         let val: Value = serde_json::from_str(&unk_resp).unwrap();
         assert_eq!(val["error"]["code"], METHOD_NOT_FOUND);
+
+        // 6. invalid jsonrpc version without id
+        let bad_ver_no_id = r#"{"jsonrpc":"1.0","method":"ping"}"#;
+        let bad_resp = process_json_rpc(bad_ver_no_id, &store).unwrap();
+        let val: Value = serde_json::from_str(&bad_resp).unwrap();
+        assert_eq!(val["error"]["code"], INVALID_REQUEST);
+        assert!(val["id"].is_null());
     }
 }

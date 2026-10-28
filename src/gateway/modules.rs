@@ -200,6 +200,13 @@ impl ModuleRegistry {
         }
 
         // Check for collisions with other modules (excluding re-registering same id)
+        const OMNIROUTE_ALIASES: &[&str] = &["/ominroute", "/omniroute"];
+        if OMNIROUTE_ALIASES.iter().any(|a| {
+            ns == *a || ns.starts_with(&format!("{a}/")) || a.starts_with(&format!("{ns}/"))
+        }) {
+            return Err(ModuleError::NamespaceCollision(manifest.namespace.clone()));
+        }
+
         for (other_id, desc) in &self.modules {
             if other_id != id
                 && (desc.namespace == ns
@@ -210,8 +217,48 @@ impl ModuleRegistry {
             }
         }
 
-        if manifest.entrypoint.trim().is_empty() {
-            return Err(ModuleError::InvalidManifest("Empty entrypoint".to_string()));
+        match manifest.protocol.as_str() {
+            "stdio-stream" => {
+                let ep = manifest.entrypoint.trim();
+                if ep.is_empty() {
+                    return Err(ModuleError::InvalidManifest("Empty entrypoint".to_string()));
+                }
+                let path = std::path::Path::new(ep);
+                if !path.is_absolute() {
+                    return Err(ModuleError::InvalidManifest(format!(
+                        "stdio-stream entrypoint must be an absolute path: '{ep}'"
+                    )));
+                }
+            }
+            "local-http" => {
+                let ep = manifest.entrypoint.trim();
+                if ep.is_empty() {
+                    return Err(ModuleError::InvalidManifest("Empty entrypoint".to_string()));
+                }
+                let lower = ep.to_ascii_lowercase();
+                let is_loopback = lower.strip_prefix("http://").is_some_and(|rest| {
+                    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+                    if authority.contains('@') {
+                        return false;
+                    }
+                    let host = if let Some(v6) = authority.strip_prefix('[') {
+                        v6.split(']').next().unwrap_or("")
+                    } else {
+                        authority.split(':').next().unwrap_or("")
+                    };
+                    matches!(host, "localhost" | "127.0.0.1" | "::1")
+                });
+                if !is_loopback {
+                    return Err(ModuleError::InvalidManifest(format!(
+                        "local-http entrypoint must target a local loopback HTTP endpoint (127.0.0.1, localhost, [::1]): '{ep}'"
+                    )));
+                }
+            }
+            other => {
+                return Err(ModuleError::InvalidManifest(format!(
+                    "Unsupported protocol '{other}'. Supported protocols are 'stdio-stream' and 'local-http'"
+                )));
+            }
         }
 
         let desc = ModuleDescriptor {
@@ -271,19 +318,27 @@ impl ModuleRegistry {
         let mut longest_len = 0;
 
         for desc in self.modules.values() {
-            let ns = &desc.namespace;
-            if trimmed == ns {
-                if ns.len() > longest_len {
+            let ns_str = desc.namespace.as_str();
+            let prefixes: &[&str] = if desc.id == "omniroute" {
+                &["/ominroute", "/omniroute"]
+            } else {
+                std::slice::from_ref(&ns_str)
+            };
+
+            for &ns in prefixes {
+                if trimmed == ns {
+                    if ns.len() > longest_len {
+                        longest_len = ns.len();
+                        matched = Some((desc, ""));
+                    }
+                } else if trimmed.starts_with(ns)
+                    && trimmed[ns.len()..].starts_with('/')
+                    && ns.len() > longest_len
+                {
                     longest_len = ns.len();
-                    matched = Some((desc, ""));
+                    let subpath = &trimmed[ns.len()..];
+                    matched = Some((desc, subpath));
                 }
-            } else if trimmed.starts_with(ns)
-                && trimmed[ns.len()..].starts_with('/')
-                && ns.len() > longest_len
-            {
-                longest_len = ns.len();
-                let subpath = &trimmed[ns.len()..];
-                matched = Some((desc, subpath));
             }
         }
 
@@ -371,7 +426,7 @@ mod tests {
             name: "Custom Provider".to_string(),
             version: "1.0.0".to_string(),
             namespace: "/custom/cohere".to_string(),
-            entrypoint: "./bin/cohere-adapter".to_string(),
+            entrypoint: "/opt/bin/cohere-adapter".to_string(),
             protocol: "stdio-stream".to_string(),
             capabilities: vec!["chat".to_string()],
             config_schema: None,
@@ -385,14 +440,19 @@ mod tests {
         assert_eq!(m.id, "custom-provider");
         assert_eq!(sub, "/v1/generate");
 
+        // OmniRoute alias match
+        let (omni, omni_sub) = reg.match_path("/omniroute/v1/chat/completions").unwrap();
+        assert_eq!(omni.id, "omniroute");
+        assert_eq!(omni_sub, "/v1/chat/completions");
+
         // Collision detection with existing module
         let dup = PersonalManifest {
             id: "dup-provider".to_string(),
             name: "Duplicate".to_string(),
             version: "0.1.0".to_string(),
             namespace: "/custom/cohere".to_string(),
-            entrypoint: "echo".to_string(),
-            protocol: "stdio".to_string(),
+            entrypoint: "/bin/echo".to_string(),
+            protocol: "stdio-stream".to_string(),
             capabilities: vec![],
             config_schema: None,
             permissions: vec![],
@@ -423,8 +483,8 @@ mod tests {
                 name: "Bad".to_string(),
                 version: "0.1.0".to_string(),
                 namespace: format!("{reserved_prefix}/custom"),
-                entrypoint: "echo".to_string(),
-                protocol: "stdio".to_string(),
+                entrypoint: "/bin/echo".to_string(),
+                protocol: "stdio-stream".to_string(),
                 capabilities: vec![],
                 config_schema: None,
                 permissions: vec![],
@@ -442,8 +502,8 @@ mod tests {
                 name: "Takeover".to_string(),
                 version: "0.1.0".to_string(),
                 namespace: "/custom/takeover".to_string(),
-                entrypoint: "echo".to_string(),
-                protocol: "stdio".to_string(),
+                entrypoint: "/bin/echo".to_string(),
+                protocol: "stdio-stream".to_string(),
                 capabilities: vec![],
                 config_schema: None,
                 permissions: vec![],
@@ -453,6 +513,86 @@ mod tests {
                 Err(ModuleError::InvalidId(_))
             ));
         }
+
+        // Test protocol and entrypoint validation
+        let relative_stdio = PersonalManifest {
+            id: "rel-mod".to_string(),
+            name: "Relative".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: "/custom/rel".to_string(),
+            entrypoint: "./relative/bin".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: vec![],
+        };
+        assert!(matches!(
+            reg.register_personal_module(relative_stdio),
+            Err(ModuleError::InvalidManifest(_))
+        ));
+
+        let bad_http = PersonalManifest {
+            id: "bad-http".to_string(),
+            name: "Bad Http".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: "/custom/bad-http".to_string(),
+            entrypoint: "http://example.com/api".to_string(),
+            protocol: "local-http".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: vec![],
+        };
+        assert!(matches!(
+            reg.register_personal_module(bad_http),
+            Err(ModuleError::InvalidManifest(_))
+        ));
+
+        let good_http = PersonalManifest {
+            id: "good-http".to_string(),
+            name: "Good Http".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: "/custom/good-http".to_string(),
+            entrypoint: "http://127.0.0.1:8080".to_string(),
+            protocol: "local-http".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: vec![],
+        };
+        assert!(reg.register_personal_module(good_http).is_ok());
+
+        // Rejection of omniroute alias collision
+        let omni_collide = PersonalManifest {
+            id: "omni-collide".to_string(),
+            name: "Omni Collide".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: "/omniroute/v1".to_string(),
+            entrypoint: "/bin/echo".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: vec![],
+        };
+        assert!(matches!(
+            reg.register_personal_module(omni_collide),
+            Err(ModuleError::NamespaceCollision(_))
+        ));
+
+        // Rejection of SSRF domain spoofing in local-http
+        let ssrf_http = PersonalManifest {
+            id: "ssrf-http".to_string(),
+            name: "SSRF Http".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: "/custom/ssrf".to_string(),
+            entrypoint: "http://localhost.evil.com/api".to_string(),
+            protocol: "local-http".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: vec![],
+        };
+        assert!(matches!(
+            reg.register_personal_module(ssrf_http),
+            Err(ModuleError::InvalidManifest(_))
+        ));
 
         // Unregister
         let removed = reg.unregister_personal_module("custom-provider").unwrap();

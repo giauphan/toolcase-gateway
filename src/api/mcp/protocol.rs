@@ -26,7 +26,6 @@ pub struct JsonRpcRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
@@ -108,5 +107,9 @@ mod tests {
         let err_str = serde_json::to_string(&err_resp).unwrap();
         assert!(err_str.contains("-32601"));
         assert!(err_str.contains("Method not found"));
+
+        let null_id_resp = JsonRpcResponse::error(None, PARSE_ERROR, "Parse error", None);
+        let null_id_str = serde_json::to_string(&null_id_resp).unwrap();
+        assert!(null_id_str.contains("\"id\":null"));
     }
 }

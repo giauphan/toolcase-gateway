@@ -42,6 +42,9 @@ pub fn dispatch_dashboard_route(
         }
         "/api/v1/dashboard/accounts" => {
             if request.method.eq_ignore_ascii_case("post") {
+                if !validate_dashboard_mutation_request(client, request)? {
+                    return Ok(Some(403));
+                }
                 crate::features::dashboard::handle_save_provider_settings(
                     client,
                     &request.body,
@@ -60,6 +63,9 @@ pub fn dispatch_dashboard_route(
         }
         "/api/v1/dashboard/config" => {
             if request.method.eq_ignore_ascii_case("post") {
+                if !validate_dashboard_mutation_request(client, request)? {
+                    return Ok(Some(403));
+                }
                 crate::features::dashboard::handle_update_gateway_config(
                     client,
                     &request.body,
@@ -78,6 +84,9 @@ pub fn dispatch_dashboard_route(
         }
         "/api/v1/dashboard/muse-config" => {
             if request.method.eq_ignore_ascii_case("post") {
+                if !validate_dashboard_mutation_request(client, request)? {
+                    return Ok(Some(403));
+                }
                 crate::features::dashboard::handle_update_muse_config(
                     client,
                     &request.body,
@@ -96,6 +105,9 @@ pub fn dispatch_dashboard_route(
         }
         "/api/v1/dashboard/jev-config" => {
             if request.method.eq_ignore_ascii_case("post") {
+                if !validate_dashboard_mutation_request(client, request)? {
+                    return Ok(Some(403));
+                }
                 crate::features::dashboard::handle_update_jev_config(client, &request.body, store)?;
                 Ok(Some(200))
             } else {
@@ -110,6 +122,9 @@ pub fn dispatch_dashboard_route(
         }
         "/api/v1/dashboard/modules/state" => {
             if request.method.eq_ignore_ascii_case("post") {
+                if !validate_dashboard_mutation_request(client, request)? {
+                    return Ok(Some(403));
+                }
                 crate::features::dashboard::handle_set_module_state(client, &request.body, store)?;
                 Ok(Some(200))
             } else {
@@ -124,6 +139,9 @@ pub fn dispatch_dashboard_route(
         }
         "/api/v1/dashboard/modules/install" => {
             if request.method.eq_ignore_ascii_case("post") {
+                if !validate_dashboard_mutation_request(client, request)? {
+                    return Ok(Some(403));
+                }
                 crate::features::dashboard::handle_install_personal_module(
                     client,
                     &request.body,
@@ -142,6 +160,57 @@ pub fn dispatch_dashboard_route(
         }
         _ => Ok(None),
     }
+}
+
+fn validate_dashboard_mutation_request(
+    client: &mut TcpStream,
+    request: &crate::http::Request,
+) -> io::Result<bool> {
+    if let Some((_, origin)) = request
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("origin"))
+    {
+        if !crate::http::is_loopback_origin(origin) {
+            write_error(
+                client,
+                403,
+                "Forbidden",
+                "Cross-origin requests from untrusted origins are prohibited",
+            )?;
+            return Ok(false);
+        }
+        let ct_ok = request
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .is_some_and(|(_, ct)| ct.to_ascii_lowercase().starts_with("application/json"));
+        if !ct_ok {
+            write_error(
+                client,
+                415,
+                "Unsupported Media Type",
+                "Endpoint expects Content-Type: application/json",
+            )?;
+            return Ok(false);
+        }
+    } else if let Some((_, ct)) = request
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+    {
+        if !ct.to_ascii_lowercase().starts_with("application/json") {
+            write_error(
+                client,
+                415,
+                "Unsupported Media Type",
+                "Endpoint expects Content-Type: application/json",
+            )?;
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 pub fn dispatch_muse_config_route(

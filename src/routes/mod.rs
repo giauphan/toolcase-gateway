@@ -132,6 +132,39 @@ pub fn route_request_dispatch(
         return Ok(200);
     }
 
+    // Check module enablement for built-in providers
+    let (muse_enabled, jev_enabled) = {
+        let reg = store.module_registry();
+        let guard = reg.read().ok();
+        (
+            guard
+                .as_ref()
+                .and_then(|g| g.get_module("muse"))
+                .map(|m| m.status == ModuleStatus::Enabled)
+                .unwrap_or(true),
+            guard
+                .as_ref()
+                .and_then(|g| g.get_module("jev"))
+                .map(|m| m.status == ModuleStatus::Enabled)
+                .unwrap_or(true),
+        )
+    };
+
+    // Muse path enablement check (fail closed for disabled Muse module)
+    let is_muse_path = clean_path == "/muse-ai"
+        || clean_path.starts_with("/muse-ai/")
+        || clean_path == "/v1/images/generations"
+        || clean_path.starts_with("/video/v1/providers");
+    if is_muse_path && !muse_enabled {
+        write_error(
+            client,
+            503,
+            "Service Unavailable",
+            "Muse AI module is currently disabled",
+        )?;
+        return Ok(503);
+    }
+
     // 1. System Dashboard and configuration routes
     if let Some(code) = dispatch_dashboard_route(client, request, store, clean_path)? {
         return Ok(code);
@@ -157,39 +190,7 @@ pub fn route_request_dispatch(
         return Ok(code);
     }
 
-    // Check module enablement for built-in providers
-    let (muse_enabled, jev_enabled) = {
-        let reg = store.module_registry();
-        let guard = reg.read().ok();
-        (
-            guard
-                .as_ref()
-                .and_then(|g| g.get_module("muse"))
-                .map(|m| m.status == ModuleStatus::Enabled)
-                .unwrap_or(true),
-            guard
-                .as_ref()
-                .and_then(|g| g.get_module("jev"))
-                .map(|m| m.status == ModuleStatus::Enabled)
-                .unwrap_or(true),
-        )
-    };
-
     // 5. Muse provider routes
-    let is_muse_path = clean_path == "/muse-ai"
-        || clean_path.starts_with("/muse-ai/")
-        || clean_path == "/v1/images/generations"
-        || clean_path.starts_with("/video/v1/providers");
-    if is_muse_path && !muse_enabled {
-        write_error(
-            client,
-            503,
-            "Service Unavailable",
-            "Muse AI module is currently disabled",
-        )?;
-        return Ok(503);
-    }
-
     if let Some(code) = dispatch_catalog_route(client, request, clean_path)? {
         return Ok(code);
     }
