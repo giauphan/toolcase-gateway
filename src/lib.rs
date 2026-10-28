@@ -15,6 +15,7 @@ pub mod har_config;
 pub mod http;
 pub mod http_provider;
 pub mod jev;
+pub mod modules;
 pub mod museai;
 pub mod omniroute;
 pub mod providers;

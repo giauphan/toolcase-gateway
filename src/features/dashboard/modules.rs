@@ -62,7 +62,9 @@ for line in sys.stdin:
                 if m.get("role") == "user":
                     last_msg = m.get("content", "")
                     break
-            reply = f"[{M_NAME}] Echo: {last_msg}" if last_msg else f"[{M_NAME}] Ready."
+            sub_id = os.environ.get("MODULE_SUB_PROVIDER_ID", "")
+            prefix = f"[{M_NAME}/{sub_id}]" if sub_id else f"[{M_NAME}]"
+            reply = f"{prefix} Echo: {last_msg}" if last_msg else f"{prefix} Ready."
             resp = {
                 "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
                 "object": "chat.completion",
@@ -143,6 +145,27 @@ fn parse_or_synthesize_manifest(
             .find(|c| c.id == target_id || c.namespace == target_id)
         {
             let ep = resolve_entrypoint_path(payload.entrypoint.clone(), &cat.id);
+            let group = if cat.id == "suite-test" {
+                Some(crate::gateway::modules::ModuleGroupManifest {
+                    enabled: true,
+                    providers: vec![
+                        crate::gateway::modules::SubProviderManifest {
+                            id: "chat".to_string(),
+                            name: "Chat Provider".to_string(),
+                            subpath: "/chat".to_string(),
+                            capabilities: vec!["chat_completions".to_string()],
+                        },
+                        crate::gateway::modules::SubProviderManifest {
+                            id: "vision".to_string(),
+                            name: "Vision Provider".to_string(),
+                            subpath: "/vision".to_string(),
+                            capabilities: vec!["vision".to_string()],
+                        },
+                    ],
+                })
+            } else {
+                None
+            };
             return Ok(PersonalManifest {
                 id: cat.id,
                 name: cat.name,
@@ -153,7 +176,7 @@ fn parse_or_synthesize_manifest(
                 capabilities: cat.capabilities,
                 config_schema: None,
                 permissions: Vec::new(),
-                group: None,
+                group,
             });
         }
     }

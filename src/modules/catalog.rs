@@ -66,5 +66,19 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
             protocol: "stdio-stream".to_string(),
             capabilities: vec!["chat_completions".to_string()],
         },
+        SystemCatalogModule {
+            id: "suite-test".to_string(),
+            name: "Suite Provider Group".to_string(),
+            description: "Bundled multi-provider group (chat completions, vision, models)"
+                .to_string(),
+            namespace: "/custom/suite-test".to_string(),
+            version: "1.0.0".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![
+                "chat_completions".to_string(),
+                "vision".to_string(),
+                "models".to_string(),
+            ],
+        },
     ]
 }

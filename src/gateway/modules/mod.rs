@@ -1,13 +1,4 @@
 //! Gateway platform module definitions, manifests, and registry.
+//! Facade re-exporting from unified `crate::modules`.
 
-pub mod catalog;
-pub mod manifest;
-pub mod registry;
-#[cfg(test)]
-mod tests;
-pub mod validation;
-
-pub use catalog::*;
-pub use manifest::*;
-pub use registry::*;
-pub use validation::*;
+pub use crate::modules::*;
