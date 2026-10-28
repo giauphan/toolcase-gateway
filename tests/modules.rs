@@ -626,6 +626,10 @@ fn test_system_catalog_and_one_click_installation() {
     assert!(catalog.iter().any(|c| c.id == "claude-adapter"));
     assert!(catalog.iter().any(|c| c.id == "groq-fast"));
 
+    let state_dir = toolcase_gateway::gateway::installer::get_state_dir();
+    cleanup_module_files("cohere-provider", &state_dir);
+    cleanup_module_files("another-cohere", &state_dir);
+
     let temp_env = std::env::temp_dir().join(format!("cat_test_{}.env", uuid::Uuid::new_v4()));
     let store = ConfigStore::new(Config::default(), temp_env.clone());
 
@@ -647,6 +651,13 @@ fn test_system_catalog_and_one_click_installation() {
 
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
     let head = read_response_head(&mut client).unwrap();
+    if head.status != 200 {
+        panic!(
+            "Failed: status={}, body={:?}",
+            head.status,
+            String::from_utf8_lossy(&head.buffered_body)
+        );
+    }
     assert_eq!(head.status, 200);
     handle.join().unwrap();
 
@@ -686,4 +697,6 @@ fn test_system_catalog_and_one_click_installation() {
 
     let _ = fs::remove_file(temp_env);
     let _ = fs::remove_file(store.config_file);
+    cleanup_module_files("cohere-provider", &state_dir);
+    cleanup_module_files("another-cohere", &state_dir);
 }

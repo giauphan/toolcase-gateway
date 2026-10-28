@@ -244,17 +244,27 @@ pub fn cleanup_module_files(id: &str, state_dir: &Path) {
 }
 
 fn ingest_github(url: &str, branch: Option<&str>, target_dir: &Path) -> Result<(), ModuleError> {
-    let clean_url = url.trim().trim_end_matches(".git").trim_end_matches('/');
-    let parts: Vec<&str> = clean_url.split('/').collect();
+    let clean_url = url.trim().trim_end_matches('/');
+    let path = clean_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("github.com/");
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     if parts.len() < 2 {
         return Err(ModuleError::InvalidManifest(format!(
             "Invalid GitHub URL: {url}"
         )));
     }
-    let owner = parts[parts.len() - 2];
-    let repo = parts[parts.len() - 1];
+    let owner = parts[0];
+    let repo = parts[1].trim_end_matches(".git");
 
-    let branches_to_try = if let Some(b) = branch {
+    let inferred_branch = if branch.is_none() && parts.len() >= 4 && parts[2] == "tree" {
+        Some(parts[3])
+    } else {
+        branch
+    };
+
+    let branches_to_try = if let Some(b) = inferred_branch {
         vec![b.to_string()]
     } else {
         vec!["main".to_string(), "master".to_string()]

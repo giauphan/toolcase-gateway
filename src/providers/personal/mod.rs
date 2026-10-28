@@ -22,12 +22,16 @@ pub fn handle_personal_module_request(
     }
 }
 
-fn dispatch_stdio(
-    client: &mut TcpStream,
-    request: &Request,
-    manifest: &PersonalManifest,
-    subpath: &str,
-) -> io::Result<u16> {
+fn is_sensitive_env_var(var: &str) -> bool {
+    var.starts_with("GW_")
+        || var.starts_with("DATABASE_")
+        || var.contains("COOKIE")
+        || var.contains("TOKEN")
+        || var.contains("SECRET")
+        || var.contains("API_KEY")
+}
+
+fn build_command(manifest: &PersonalManifest) -> Command {
     let entry_path = std::path::Path::new(&manifest.entrypoint);
     let resolved_entrypoint = if entry_path.is_file() {
         entry_path
@@ -50,19 +54,104 @@ fn dispatch_stdio(
     cmd.env_clear();
     for (k, v) in std::env::vars() {
         let upper = k.to_ascii_uppercase();
-        if upper.starts_with("GW_")
-            || upper.starts_with("DATABASE_")
-            || upper.contains("COOKIE")
-            || upper.contains("TOKEN")
-            || upper.contains("SECRET")
-            || upper.contains("API_KEY")
-        {
-            continue;
+        if !is_sensitive_env_var(&upper) {
+            cmd.env(k, v);
         }
-        cmd.env(k, v);
     }
     cmd.env("MODULE_ID", &manifest.id);
+    cmd.env("MODULE_NAME", &manifest.name);
     cmd.env("MODULE_NAMESPACE", &manifest.namespace);
+    cmd
+}
+
+fn spawn_stderr_reader(
+    stderr: Option<std::process::ChildStderr>,
+) -> (
+    std::sync::mpsc::Receiver<String>,
+    std::thread::JoinHandle<()>,
+) {
+    let (tx_err, rx_err) = std::sync::mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        if let Some(mut err_stream) = stderr {
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while let Ok(n) = std::io::Read::read(&mut err_stream, &mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > 4096 {
+                    break;
+                }
+            }
+            let _ = tx_err.send(String::from_utf8_lossy(&buf).to_string());
+        }
+    });
+    (rx_err, handle)
+}
+
+fn wait_for_module_response(
+    mut child: std::process::Child,
+    rx: std::sync::mpsc::Receiver<std::io::Result<String>>,
+    writer_handle: std::thread::JoinHandle<()>,
+    reader_handle: std::thread::JoinHandle<()>,
+    err_reader_handle: std::thread::JoinHandle<()>,
+) -> Result<String, (u16, String)> {
+    match rx.recv_timeout(DEFAULT_MODULE_TIMEOUT) {
+        Ok(Ok(line)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = writer_handle.join();
+            let _ = reader_handle.join();
+            let _ = err_reader_handle.join();
+            Ok(line)
+        }
+        Ok(Err(e)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = writer_handle.join();
+            let _ = reader_handle.join();
+            let _ = err_reader_handle.join();
+            Err((
+                502,
+                format!("Failed to read response from personal module: {e}"),
+            ))
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            drop(writer_handle);
+            drop(reader_handle);
+            drop(err_reader_handle);
+            Err((
+                504,
+                "Personal module execution timed out (30s limit)".to_string(),
+            ))
+        }
+    }
+}
+
+fn format_crash_message(rx_err: std::sync::mpsc::Receiver<String>) -> String {
+    let err_detail = rx_err
+        .recv_timeout(Duration::from_millis(150))
+        .unwrap_or_default();
+    if !err_detail.trim().is_empty() {
+        format!(
+            "Personal module returned empty response or crashed: {}",
+            err_detail.trim()
+        )
+    } else {
+        "Personal module returned empty response or crashed".to_string()
+    }
+}
+
+fn dispatch_stdio(
+    client: &mut TcpStream,
+    request: &Request,
+    manifest: &PersonalManifest,
+    subpath: &str,
+) -> io::Result<u16> {
+    let mut cmd = build_command(manifest);
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
@@ -107,72 +196,21 @@ fn dispatch_stdio(
         let _ = tx.send(res);
     });
 
-    let stderr = child.stderr.take();
-    let (tx_err, rx_err) = std::sync::mpsc::channel();
-    let err_reader_handle = std::thread::spawn(move || {
-        if let Some(mut err_stream) = stderr {
-            let mut buf = Vec::new();
-            let mut chunk = [0u8; 1024];
-            while let Ok(n) = std::io::Read::read(&mut err_stream, &mut chunk) {
-                if n == 0 {
-                    break;
-                }
-                buf.extend_from_slice(&chunk[..n]);
-                if buf.len() > 4096 {
-                    break;
-                }
-            }
-            let _ = tx_err.send(String::from_utf8_lossy(&buf).to_string());
-        }
-    });
+    let (rx_err, err_reader_handle) = spawn_stderr_reader(child.stderr.take());
 
-    let response_line = match rx.recv_timeout(DEFAULT_MODULE_TIMEOUT) {
-        Ok(Ok(line)) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = writer_handle.join();
-            let _ = reader_handle.join();
-            let _ = err_reader_handle.join();
-            line
-        }
-        Ok(Err(e)) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = writer_handle.join();
-            let _ = reader_handle.join();
-            let _ = err_reader_handle.join();
-            return write_personal_error(
-                client,
-                502,
-                &format!("Failed to read response from personal module: {e}"),
-            );
-        }
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            drop(writer_handle);
-            drop(reader_handle);
-            drop(err_reader_handle);
-            return write_personal_error(
-                client,
-                504,
-                "Personal module execution timed out (30s limit)",
-            );
-        }
+    let response_line = match wait_for_module_response(
+        child,
+        rx,
+        writer_handle,
+        reader_handle,
+        err_reader_handle,
+    ) {
+        Ok(line) => line,
+        Err((code, msg)) => return write_personal_error(client, code, &msg),
     };
 
     if response_line.trim().is_empty() {
-        let err_detail = rx_err
-            .recv_timeout(Duration::from_millis(150))
-            .unwrap_or_default();
-        let error_msg = if !err_detail.trim().is_empty() {
-            format!(
-                "Personal module returned empty response or crashed: {}",
-                err_detail.trim()
-            )
-        } else {
-            "Personal module returned empty response or crashed".to_string()
-        };
+        let error_msg = format_crash_message(rx_err);
         crate::runtime::logger::log_message(
             "ERROR",
             "personal_module",

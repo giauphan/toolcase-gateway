@@ -50,7 +50,7 @@ echo-provider/
 
 ## 3. Communication Protocol (`stdio-stream`)
 
-When a request arrives at `/custom/echo/v1/chat/completions`, the gateway spawns `run.sh` in an isolated process sandbox and writes a single-line JSON payload to its standard input (`stdin`):
+When a request arrives at `/custom/echo/v1/chat/completions`, the gateway spawns `run.sh` as a child process (with secret-like environment variables filtered out; the process runs with the gateway's user privileges) and writes a single-line JSON payload to its standard input (`stdin`):
 
 ```json
 {
