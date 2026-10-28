@@ -98,63 +98,39 @@ impl SqliteStorage {
 
     /// Automatically migrates accounts and settings from legacy JSON files into SQLite on first run.
     fn migrate_legacy_json_files(&self, state_dir: &Path) -> Result<(), StorageError> {
-        // 1. Migrate accounts.json
+        self.migrate_legacy_accounts(state_dir)?;
+        self.migrate_legacy_setting(state_dir, "gateway_config.json", "gateway_config")?;
+        self.migrate_legacy_setting(state_dir, "muse_config.json", "muse_config")?;
+        Ok(())
+    }
+
+    fn migrate_legacy_accounts(&self, state_dir: &Path) -> Result<(), StorageError> {
         let accounts_file = state_dir.join("accounts.json");
-        if accounts_file.is_file() {
-            let existing = self.get_accounts()?;
-            if existing.is_empty() {
-                if let Ok(content) = fs::read_to_string(&accounts_file) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        let mut to_migrate = Vec::new();
-                        if let Some(arr) = val.get("accounts").and_then(|v| v.as_array()) {
-                            for (idx, item) in arr.iter().enumerate() {
-                                let key = item.get("key").and_then(|v| v.as_str()).unwrap_or("");
-                                if !key.is_empty() {
-                                    to_migrate.push(StoredAccount {
-                                        id: item
-                                            .get("id")
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.to_string())
-                                            .unwrap_or_else(|| format!("acc_{idx}")),
-                                        provider: item
-                                            .get("provider")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("openrouter")
-                                            .to_string(),
-                                        key: key.to_string(),
-                                        label: item
-                                            .get("label")
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.to_string()),
-                                        is_active: true,
-                                    });
-                                }
-                            }
-                        }
-                        if !to_migrate.is_empty() {
-                            let _ = self.save_accounts(&to_migrate);
-                        }
-                    }
-                }
+        if !accounts_file.is_file() || !self.get_accounts()?.is_empty() {
+            return Ok(());
+        }
+        let Ok(content) = fs::read_to_string(&accounts_file) else {
+            return Ok(());
+        };
+        let to_migrate = parse_legacy_accounts(&content);
+        if !to_migrate.is_empty() {
+            let _ = self.save_accounts(&to_migrate);
+        }
+        Ok(())
+    }
+
+    fn migrate_legacy_setting(
+        &self,
+        state_dir: &Path,
+        file_name: &str,
+        setting_key: &str,
+    ) -> Result<(), StorageError> {
+        let file_path = state_dir.join(file_name);
+        if file_path.is_file() && self.get_setting(setting_key)?.is_none() {
+            if let Ok(content) = fs::read_to_string(&file_path) {
+                let _ = self.set_setting(setting_key, &content);
             }
         }
-
-        // 2. Migrate gateway_config.json
-        let gw_cfg = state_dir.join("gateway_config.json");
-        if gw_cfg.is_file() && self.get_setting("gateway_config")?.is_none() {
-            if let Ok(content) = fs::read_to_string(&gw_cfg) {
-                let _ = self.set_setting("gateway_config", &content);
-            }
-        }
-
-        // 3. Migrate muse_config.json
-        let muse_cfg = state_dir.join("muse_config.json");
-        if muse_cfg.is_file() && self.get_setting("muse_config")?.is_none() {
-            if let Ok(content) = fs::read_to_string(&muse_cfg) {
-                let _ = self.set_setting("muse_config", &content);
-            }
-        }
-
         Ok(())
     }
 
@@ -162,6 +138,43 @@ impl SqliteStorage {
     pub fn db_path(&self) -> &Path {
         &self.db_path
     }
+}
+
+fn parse_legacy_accounts(content: &str) -> Vec<StoredAccount> {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(content) else {
+        return Vec::new();
+    };
+    let Some(arr) = val.get("accounts").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    arr.iter()
+        .enumerate()
+        .filter_map(|(idx, item)| {
+            let key = item.get("key").and_then(|v| v.as_str())?;
+            if key.is_empty() {
+                return None;
+            }
+            Some(StoredAccount {
+                id: item
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("acc_{idx}")),
+                provider: item
+                    .get("provider")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("openrouter")
+                    .to_string(),
+                key: key.to_string(),
+                label: item
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                is_active: true,
+            })
+        })
+        .collect()
 }
 
 impl StorageRepository for SqliteStorage {

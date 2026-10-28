@@ -1119,49 +1119,54 @@ footer.site-footer {
     });
   }
 
+  function collectInstallPayload() {
+    const rawCaps = modCaps && modCaps.value ? modCaps.value : '';
+    const caps = rawCaps.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; });
+    const payload = { capabilities: caps };
+    if (modSource && modSource.value.trim()) payload.source = modSource.value.trim();
+    if (modId && modId.value.trim()) payload.id = modId.value.trim();
+    if (modName && modName.value.trim()) payload.name = modName.value.trim();
+    if (modNamespace && modNamespace.value.trim()) payload.namespace = modNamespace.value.trim();
+    if (modEntrypoint && modEntrypoint.value.trim()) payload.entrypoint = modEntrypoint.value.trim();
+
+    if (!payload.source && !(modZipFile && modZipFile.files && modZipFile.files.length)) {
+      payload.version = payload.version || '0.1.0';
+      payload.name = payload.name || payload.id || 'Custom Module';
+    }
+    return payload;
+  }
+
+  function uploadZipAndInstall(file, payload) {
+    const reader = new FileReader();
+    reader.onload = function() {
+      const parts = (reader.result || '').split(',');
+      payload.zip_base64 = parts[1] || parts[0];
+      executeModuleInstall(payload);
+    };
+    reader.onerror = function() {
+      installBtn.disabled = false;
+      modErrMsg.textContent = 'Failed to read uploaded ZIP file';
+      modErrMsg.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+
   if (installForm) {
     installForm.addEventListener('submit', function(e) {
       e.preventDefault();
       modOkMsg.style.display = 'none';
       modErrMsg.style.display = 'none';
-      installBtn.disabled = true;
 
-      const caps = modCaps.value ? modCaps.value.split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; }) : [];
-      const payload = {
-        capabilities: caps
-      };
-      if (modSource && modSource.value.trim()) payload.source = modSource.value.trim();
-      if (modId && modId.value.trim()) payload.id = modId.value.trim();
-      if (modName && modName.value.trim()) payload.name = modName.value.trim();
-      if (modNamespace && modNamespace.value.trim()) payload.namespace = modNamespace.value.trim();
-      if (modEntrypoint && modEntrypoint.value.trim()) payload.entrypoint = modEntrypoint.value.trim();
-
-      if (!payload.source && !(modZipFile && modZipFile.files && modZipFile.files.length)) {
-        payload.version = payload.version || '0.1.0';
-        payload.name = payload.name || payload.id || 'Custom Module';
-      }
-
+      const payload = collectInstallPayload();
       if (!payload.namespace) {
-        installBtn.disabled = false;
         modErrMsg.textContent = 'Route Path URL Prefix (Namespace) is required (e.g. /custom/my-tool)';
         modErrMsg.style.display = 'block';
         return;
       }
 
+      installBtn.disabled = true;
       if (modZipFile && modZipFile.files && modZipFile.files.length > 0) {
-        const file = modZipFile.files[0];
-        const reader = new FileReader();
-        reader.onload = function() {
-          const parts = (reader.result || '').split(',');
-          payload.zip_base64 = parts[1] || parts[0];
-          executeModuleInstall(payload);
-        };
-        reader.onerror = function() {
-          installBtn.disabled = false;
-          modErrMsg.textContent = 'Failed to read uploaded ZIP file';
-          modErrMsg.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
+        uploadZipAndInstall(modZipFile.files[0], payload);
       } else {
         executeModuleInstall(payload);
       }
