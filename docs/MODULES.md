@@ -186,6 +186,8 @@ If an external repository or zip archive does not contain a `module.json`, the g
 
 ## 6. How to Author a Custom Module
 
+A ready-to-test reference module is included directly in the repository at [`examples/modules/echo-provider/`](../examples/modules/echo-provider/). You can use it as a starting template.
+
 ### Protocol: `stdio-stream`
 
 The gateway spawns the module's entrypoint process and communicates over stdin/stdout using single-line JSON envelopes.

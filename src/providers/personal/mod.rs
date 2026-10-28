@@ -144,7 +144,15 @@ fn dispatch_stdio(
         .filter(|s| (100..=599).contains(s))
         .unwrap_or(200) as u16;
 
-    let body_str = resp_val.get("body").and_then(|b| b.as_str()).unwrap_or("");
+    let body_owned;
+    let body_str = match resp_val.get("body") {
+        Some(serde_json::Value::String(s)) => s.as_str(),
+        Some(v @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) => {
+            body_owned = v.to_string();
+            body_owned.as_str()
+        }
+        _ => "",
+    };
 
     let content_type = resp_val
         .get("headers")

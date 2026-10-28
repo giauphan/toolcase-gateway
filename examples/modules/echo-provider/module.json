@@ -1,0 +1,18 @@
+{
+  "id": "echo-provider",
+  "name": "Echo Provider Adapter",
+  "version": "1.0.0",
+  "namespace": "/custom/echo",
+  "entrypoint": "run.sh",
+  "protocol": "stdio-stream",
+  "capabilities": [
+    "chat_completions",
+    "models"
+  ],
+  "config_schema": {
+    "prefix": {
+      "type": "string",
+      "default": "Echo"
+    }
+  }
+}
