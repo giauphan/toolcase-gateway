@@ -372,7 +372,7 @@ fn fetch_session_metadata(base_url: &str, cookie: &str) -> io::Result<serde_json
         Err(ureq::Error::StatusCode(401 | 403)) => {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "Muse.ai session authentication failed: cookie expired or invalid (HTTP 401 Unauthorized). Please update your session cookie in settings.",
+                "Muse.ai session bootstrap failed: authentication rejected (cookie expired or invalid, HTTP 401 Unauthorized). Please update your session cookie in settings.",
             ));
         }
         Err(error) => {
@@ -385,7 +385,7 @@ fn fetch_session_metadata(base_url: &str, cookie: &str) -> io::Result<serde_json
     if status_code == 401 || status_code == 403 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "Muse.ai session authentication failed: cookie expired or invalid (HTTP 401 Unauthorized). Please update your session cookie in settings.",
+            "Muse.ai session bootstrap failed: authentication rejected (cookie expired or invalid, HTTP 401 Unauthorized). Please update your session cookie in settings.",
         ));
     }
     if !(200..300).contains(&status_code) {
