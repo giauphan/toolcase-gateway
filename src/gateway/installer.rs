@@ -45,40 +45,55 @@ pub fn scan_and_register_modules(
 ) {
     let search_roots = [state_dir.join("modules"), PathBuf::from("modules")];
     for root in &search_roots {
-        let read_dir = match fs::read_dir(root) {
-            Ok(rd) => rd,
-            Err(_) => continue,
-        };
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            for name in &[
-                "module.json",
-                "manifest.json",
-                "__manifest__.json",
-                "toolcase-module.json",
-            ] {
-                let mpath = path.join(name);
-                if mpath.is_file() {
-                    if let Ok(content) = fs::read_to_string(&mpath) {
-                        if let Ok(mut manifest) = serde_json::from_str::<PersonalManifest>(&content)
-                        {
-                            let ep = Path::new(&manifest.entrypoint);
-                            if ep.is_relative() {
-                                manifest.entrypoint = path.join(ep).to_string_lossy().to_string();
-                            }
-                            if registry.get_module(&manifest.id).is_none() {
-                                let _ = registry.register_personal_module(manifest);
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
+        scan_directory_for_modules(root, registry);
+    }
+}
+
+fn scan_directory_for_modules(root: &Path, registry: &mut crate::gateway::modules::ModuleRegistry) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            try_register_module_from_dir(&path, registry);
         }
     }
+}
+
+fn try_register_module_from_dir(
+    path: &Path,
+    registry: &mut crate::gateway::modules::ModuleRegistry,
+) {
+    const CANDIDATES: &[&str] = &[
+        "module.json",
+        "manifest.json",
+        "__manifest__.json",
+        "toolcase-module.json",
+    ];
+
+    for name in CANDIDATES {
+        let mpath = path.join(name);
+        if let Some(manifest) = read_module_manifest(&mpath, path) {
+            if registry.get_module(&manifest.id).is_none() {
+                let _ = registry.register_personal_module(manifest);
+            }
+            break;
+        }
+    }
+}
+
+fn read_module_manifest(mpath: &Path, base_dir: &Path) -> Option<PersonalManifest> {
+    if !mpath.is_file() {
+        return None;
+    }
+    let content = fs::read_to_string(mpath).ok()?;
+    let mut manifest = serde_json::from_str::<PersonalManifest>(&content).ok()?;
+    let ep = Path::new(&manifest.entrypoint);
+    if ep.is_relative() {
+        manifest.entrypoint = base_dir.join(ep).to_string_lossy().to_string();
+    }
+    Some(manifest)
 }
 
 /// Installs a module from any supported source into `$GW_STATE_DIR/modules/<id>`.
@@ -155,7 +170,7 @@ pub fn install_module(
     {
         use std::os::unix::fs::PermissionsExt;
         if resolved_ep.exists() {
-            let _ = fs::set_permissions(&resolved_ep, fs::Permissions::from_mode(0o755));
+            let _ = fs::set_permissions(&resolved_ep, fs::Permissions::from_mode(0o700));
         }
     }
 
@@ -281,7 +296,7 @@ fn discover_or_synthesize_manifest(
     let id = options.id.clone().unwrap_or_else(|| {
         let stem = dir
             .file_name()
-            .and_then(|s| s.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .unwrap_or("custom-module");
         sanitize_id(stem)
     });

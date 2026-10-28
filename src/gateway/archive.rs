@@ -99,7 +99,7 @@ pub fn extract_zip(zip_data: &[u8], target_dir: &Path) -> Result<Vec<PathBuf>, A
         {
             use std::os::unix::fs::PermissionsExt;
             if is_script_or_executable(&out_path, &file_data) {
-                let _ = fs::set_permissions(&out_path, fs::Permissions::from_mode(0o755));
+                let _ = fs::set_permissions(&out_path, fs::Permissions::from_mode(0o700));
             }
         }
 
@@ -305,7 +305,7 @@ fn is_script_or_executable(path: &Path, data: &[u8]) -> bool {
     if data.starts_with(b"#!") {
         return true;
     }
-    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+    if let Some(ext) = path.extension().and_then(std::ffi::OsStr::to_str) {
         matches!(ext, "sh" | "py" | "js" | "rb" | "bin")
     } else {
         false
