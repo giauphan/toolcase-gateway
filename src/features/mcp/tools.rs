@@ -48,6 +48,9 @@ pub fn list_tools() -> Vec<McpTool> {
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "source": { "type": "string", "description": "GitHub URL, ZIP URL, or local path" },
+                    "zip_base64": { "type": "string", "description": "Base64-encoded ZIP archive" },
+                    "branch": { "type": "string", "description": "Git branch for GitHub sources" },
                     "id": { "type": "string", "description": "Unique module identifier" },
                     "name": { "type": "string", "description": "Display name" },
                     "version": { "type": "string", "description": "SemVer version string" },
@@ -57,7 +60,6 @@ pub fn list_tools() -> Vec<McpTool> {
                     "capabilities": { "type": "array", "items": { "type": "string" } },
                     "permissions": { "type": "array", "items": { "type": "string" } }
                 },
-                "required": ["id", "name", "version", "namespace", "entrypoint"],
                 "additionalProperties": true
             }),
         },
@@ -194,6 +196,7 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
                 None
             };
 
+            let installed_from_source = source_opt.is_some();
             let manifest = if let Some(source) = source_opt {
                 crate::gateway::installer::install_module(source, opts, &state_dir)
                     .map_err(|e| format!("Module installation failed: {e}"))?
@@ -206,9 +209,13 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
             {
                 let reg = store.module_registry();
                 let mut guard = reg.write().map_err(|e| e.to_string())?;
-                guard
-                    .register_personal_module(manifest)
-                    .map_err(|e| e.to_string())?;
+                if let Err(e) = guard.register_personal_module(manifest) {
+                    drop(guard);
+                    if installed_from_source {
+                        crate::gateway::installer::cleanup_module_files(&id, &state_dir);
+                    }
+                    return Err(e.to_string());
+                }
             }
             store
                 .save_to_persistent_file()
@@ -347,10 +354,9 @@ mod tests {
 
     #[test]
     fn test_mcp_tools_and_resources_lifecycle() {
-        let store = ConfigStore::new(
-            crate::config::Config::default(),
-            std::path::PathBuf::from("/tmp/mcp_tools_test.env"),
-        );
+        let env_path =
+            std::env::temp_dir().join(format!("mcp_tools_test_{}.env", uuid::Uuid::new_v4()));
+        let store = ConfigStore::new(crate::config::Config::default(), env_path.clone());
 
         // 1. List tools
         let tools = list_tools();
@@ -423,5 +429,8 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("removed"));
+
+        let _ = std::fs::remove_file(&store.config_file);
+        let _ = std::fs::remove_file(&env_path);
     }
 }

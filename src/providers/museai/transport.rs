@@ -356,14 +356,23 @@ pub fn send_museai_request(
                     )
                 }
                 ureq::Error::StatusCode(status) => {
-                    let text = format!("{{\"error\":{{\"message\":\"Upstream returned HTTP {status}\"}},\"message\":\"Upstream returned HTTP {status}\"}}");
+                    let msg = format!("Upstream returned HTTP {status}");
+                    let text = serde_json::json!({
+                        "error": { "message": &msg },
+                        "message": &msg
+                    })
+                    .to_string();
                     (status, "application/json".to_string(), text)
                 }
-                _ => (
-                    502,
-                    "application/json".to_string(),
-                    format!("{{\"error\":{{\"message\":\"Upstream network error: {e}\"}},\"message\":\"Upstream network error: {e}\"}}"),
-                ),
+                _ => {
+                    let msg = format!("Upstream network error: {e}");
+                    let text = serde_json::json!({
+                        "error": { "message": &msg },
+                        "message": &msg
+                    })
+                    .to_string();
+                    (502, "application/json".to_string(), text)
+                }
             };
 
             Ok(UpstreamResponse {

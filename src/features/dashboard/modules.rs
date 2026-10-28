@@ -137,7 +137,8 @@ pub fn handle_install_personal_module(
     store: &ConfigStore,
 ) -> io::Result<()> {
     let payload = serde_json::from_slice::<InstallPayload>(body).unwrap_or_default();
-    let manifest = if payload.source.is_some() || payload.zip_base64.is_some() {
+    let installed_from_source = payload.source.is_some() || payload.zip_base64.is_some();
+    let manifest = if installed_from_source {
         let source = if let Some(ref s) = payload.source {
             crate::gateway::installer::resolve_source(s)
         } else if let Some(ref b64) = payload.zip_base64 {
@@ -176,6 +177,10 @@ pub fn handle_install_personal_module(
         Err(e) => return write_error(client, 500, "Internal Error", &e.to_string()),
     };
     if let Err(e) = guard.register_personal_module(manifest) {
+        drop(guard);
+        if installed_from_source {
+            cleanup_module_files(&id, &get_state_dir());
+        }
         return write_error(client, 400, "Bad Request", &e.to_string());
     }
     drop(guard);

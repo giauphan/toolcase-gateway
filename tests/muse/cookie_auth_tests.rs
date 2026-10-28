@@ -21,6 +21,7 @@ fn spawn_mock_server(status: u16, body: &'static str) -> (u16, Arc<AtomicBool>, 
         while running_clone.load(Ordering::Relaxed) {
             match mock_server.accept() {
                 Ok((mut stream, _)) => {
+                    let _ = stream.set_nonblocking(false);
                     let mut buf = [0u8; 1024];
                     let _ = stream.read(&mut buf);
                     let resp = format!(

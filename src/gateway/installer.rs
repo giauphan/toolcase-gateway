@@ -173,7 +173,11 @@ pub fn install_module(
     // Determine final module directory
     let target_dir = modules_root.join(&manifest.id);
     if target_dir.exists() {
-        let _ = fs::remove_dir_all(&target_dir);
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(ModuleError::InvalidManifest(format!(
+            "Module directory for '{}' already exists; remove the module first",
+            manifest.id
+        )));
     }
 
     if let Err(e) = fs::rename(&staging_dir, &target_dir) {
@@ -270,6 +274,9 @@ fn ingest_github(url: &str, branch: Option<&str>, target_dir: &Path) -> Result<(
 
     // If HTTP zip download failed, attempt git clone as fallback
     let mut git_cmd = std::process::Command::new("git");
+    git_cmd
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null());
     git_cmd.args([
         "clone",
         "--depth",

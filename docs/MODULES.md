@@ -12,7 +12,7 @@ Just like WordPress plugins (`wp-content/plugins/<plugin-slug>/`) and Odoo modul
 
 1. **Self-Contained Bundles**: Every module is an independent directory under `$GW_STATE_DIR/modules/<module-id>/` (or `./modules/<module-id>/`). It bundles its own manifest (`module.json`, `manifest.json`, or `__manifest__.json`), executables, scripts, configuration, and assets.
 2. **Auto-Discovery**: The gateway automatically scans the modules directory on boot. Any valid folder containing a manifest is discovered and registered.
-3. **Dedicated URL Namespace**: Each module owns an isolated public URL prefix (e.g. `/custom/my-provider/...`), completely separate from core gateway routes (`/ominroute/...`, `/muse-ai/...`, `/jev/...`).
+3. **Dedicated URL Namespace**: Each module owns an isolated public URL prefix (e.g. `/custom/my-provider/...`), completely separate from core gateway routes (`/omniroute/...`, `/muse-ai/...`, `/jev/...`).
 4. **Out-of-Process Isolation**: Modules run in isolated child processes (`stdio-stream`) or loopback HTTP services (`local-http`). If a module panics or crashes, the gateway isolates the failure, returns a local `502 Bad Gateway`, and remains healthy.
 5. **Zero Secret Leakage**: Subprocess environments are sanitized. Gateway master keys, cookies, and tokens are never passed to external modules.
 
@@ -259,4 +259,4 @@ for line in sys.stdin:
    - Subprocesses execute with an isolated environment (`env_clear()`), retaining only necessary `PATH` and non-secret contextual identifiers (`MODULE_ID`, `MODULE_NAMESPACE`).
    - Standard timeouts (default 30 seconds) prevent runaway child processes.
 4. **Namespace Collision Defense**:
-   - The registry rejects any module attempting to claim or shadow built-in routes (`/ominroute`, `/muse-ai`, `/jev`) or system routes (`/api`, `/dashboard`, `/mcp`).
+   - The registry rejects any module attempting to claim or shadow built-in routes (`/omniroute`, `/muse-ai`, `/jev`) or system routes (`/api`, `/dashboard`, `/mcp`).
