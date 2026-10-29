@@ -7,7 +7,7 @@
 Key features:
 - **Durable Job Tracking**: Video jobs are recorded under `.gw_state/video_jobs/{job_id}.json` with status lifecycle and revision tracking.
 - **Headless Sentinel Auto-Approval**: Evaluates permission requests automatically when configured with `GW_MUSE_APPROVAL_MODE=on` (or `scoped_auto`), preventing blocking on browser interaction.
-- **Default Video Prompt Configuration**: Operators can define or update the default fallback generation prompt via the web dashboard at `/gateway-config/dashboard` or via `MUSE_LIVE_VIDEO_PROMPT`.
+- **Default Video Prompt Configuration**: Operators can define or update the default fallback generation prompt via the web dashboard at `/dashboard` or via `MUSE_LIVE_VIDEO_PROMPT`.
 - **Idempotency Safeguards**: Repeated requests using the same `idempotency_key` or `submission_key` return existing job status without incurring duplicate generation costs.
 
 ---
@@ -247,7 +247,7 @@ sequenceDiagram
 - `GW_MUSE_APPROVAL_TIMEOUT_SECS`: Sentinel RPC timeout in seconds (default: `30`).
 
 ### Dynamic Policy Management via Dashboard
-You can view and modify approval parameters in real time at `/gateway-config/dashboard` or via:
+You can view and modify approval parameters in real time at `/dashboard` or via:
 ```bash
 curl -X POST http://127.0.0.1:20129/api/v1/dashboard/muse-config \
   -H "Content-Type: application/json" \

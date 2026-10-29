@@ -21,7 +21,7 @@ fn dispatch_builtin_omniroute(
     };
 
     if request.method.eq_ignore_ascii_case("get")
-        && (clean_sub.is_empty() || clean_sub == "dashbard")
+        && (clean_sub.is_empty() || clean_sub == "dashbard" || clean_sub == "home")
     {
         let query_suffix = match request.path.split_once('?') {
             Some((_, q)) => format!("?{q}"),

@@ -3,7 +3,7 @@
 This guide demonstrates how to create videos via `curl` against the local gateway (listening by default on port `20130`), wait for generation to complete, and directly receive playable video URLs.
 
 > [!IMPORTANT]
-> Ensure the gateway is running (`GW_LISTEN_HOST=0.0.0.0 GW_LISTEN_PORT=20130 ./target/release/toolcase-gateway`) and valid Muse credentials are configured via `/gateway-config/dashboard`, `gateway_config.json`, or `.env`.
+> Ensure the gateway is running (`GW_LISTEN_HOST=0.0.0.0 GW_LISTEN_PORT=20130 ./target/release/toolcase-gateway`) and valid Muse credentials are configured via `/dashboard`, `gateway_config.json`, or `.env`.
 
 ---
 
@@ -119,7 +119,7 @@ curl -s http://127.0.0.1:20130/muse-ai/v1/videos/video-...
 
 If the response returns `409 Conflict` with `MuseApprovalRequired`:
 1. **Manual Resolution**: Open the session in your browser and grant permission. Then rerun the curl command with the same prompt.
-2. **Headless Auto-Approval**: Enable headless Sentinel auto-approvals in the dashboard at `http://127.0.0.1:20130/gateway-config/dashboard` or via:
+2. **Headless Auto-Approval**: Enable headless Sentinel auto-approvals in the dashboard at `http://127.0.0.1:20130/dashboard` or via:
    ```bash
    curl -X POST http://127.0.0.1:20130/api/v1/dashboard/muse-config \
      -H "Content-Type: application/json" \

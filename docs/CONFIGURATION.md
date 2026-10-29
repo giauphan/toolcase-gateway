@@ -2,7 +2,7 @@
 
 `toolcase-gateway` provides a dual-layer configuration model:
 1. **Startup Bootstrapping**: Initial settings are loaded from environment variables and an optional `.env` file (configured via `GW_ENV_FILE`).
-2. **Standalone Persistent Storage (`gateway_config.json`)**: Settings managed through the Dashboard UI (`/gateway-config/dashboard`) or management APIs are stored in a standalone, crash-safe JSON file (configured via `GW_CONFIG_FILE`), leaving `.env` untouched.
+2. **Standalone Persistent Storage (`gateway_config.json`)**: Settings managed through the Dashboard UI (`/dashboard`) or management APIs are stored in a standalone, crash-safe JSON file (configured via `GW_CONFIG_FILE`), leaving `.env` untouched.
 
 ---
 
@@ -171,7 +171,7 @@ These limits are defined in `src/http.rs` and `src/runtime/` to prevent memory e
 
 Access the interactive dashboard at:
 ```
-http://127.0.0.1:20130/gateway-config/dashboard
+http://127.0.0.1:20130/dashboard
 ```
 
 - **Gateway Configuration**: Adjust upstream OmniRoute host, port, default model, I/O timeout, and fallback model chains.

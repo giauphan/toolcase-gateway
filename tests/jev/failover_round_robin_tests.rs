@@ -268,7 +268,7 @@ fn test_jev_decision_failover_cascade_direct_to_openrouter_to_alt_to_browser() {
         ..Config::default()
     };
 
-    let store = ConfigStore::new(config, ".env".into());
+    let store = ConfigStore::new(config, ".env.test_jev".into());
 
     let gateway_listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let gateway_port = gateway_listener.local_addr().unwrap().port();
@@ -525,7 +525,7 @@ fn test_step3_round_robin_cascade_with_default_models() {
         ..Config::default()
     };
 
-    let store = ConfigStore::new(config, ".env".into());
+    let store = ConfigStore::new(config, ".env.test_jev".into());
 
     let gateway_listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let gateway_port = gateway_listener.local_addr().unwrap().port();

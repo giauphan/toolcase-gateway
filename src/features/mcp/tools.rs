@@ -255,10 +255,29 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
         }
         "gateway_get_system_metrics" => {
             let config = store.snapshot();
+            let admission = store.admission();
+            let registry = store.module_registry();
+            let reg = registry
+                .read()
+                .map_err(|e| format!("Module registry unavailable: {e}"))?;
+            let list = reg.list_modules();
+            let total_modules = list.len();
+            let enabled_modules = list
+                .iter()
+                .filter(|m| m.status == crate::gateway::modules::ModuleStatus::Enabled)
+                .count();
             let metrics = json!({
                 "status": "healthy",
+                "system": "toolcase-gateway",
+                "version": env!("CARGO_PKG_VERSION"),
                 "target_host": config.target_host,
                 "target_port": config.target_port,
+                "active_connections": admission.active_connections(),
+                "max_connections": admission.max_connections(),
+                "in_flight_bytes": admission.in_flight_bytes(),
+                "max_in_flight_bytes": admission.max_in_flight_bytes(),
+                "total_modules": total_modules,
+                "enabled_modules": enabled_modules,
                 "jev_accounts_count": store.jev_pool().len(),
                 "jev_exhausted_count": store.jev_pool().exhausted_accounts_count(),
                 "openrouter_accounts_count": store.jev_pool().openrouter_accounts().len(),
@@ -353,6 +372,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn system_metrics_reports_a_poisoned_registry() {
+        let env_path =
+            std::env::temp_dir().join(format!("mcp_metrics_test_{}.env", uuid::Uuid::new_v4()));
+        let store = ConfigStore::new(crate::config::Config::default(), env_path.clone());
+        let registry = store.module_registry();
+        let poison_target = registry.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_target.write().unwrap();
+            panic!("poison module registry for test");
+        })
+        .join();
+
+        let err = call_tool("gateway_get_system_metrics", &json!({}), &store).unwrap_err();
+        assert!(err.contains("Module registry unavailable"));
+
+        let _ = std::fs::remove_file(&store.config_file);
+        let _ = std::fs::remove_file(&env_path);
+    }
+
+    #[test]
     fn test_mcp_tools_and_resources_lifecycle() {
         let env_path =
             std::env::temp_dir().join(format!("mcp_tools_test_{}.env", uuid::Uuid::new_v4()));
@@ -429,6 +468,13 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("removed"));
+
+        // 8. Call gateway_get_system_metrics
+        let metrics_res = call_tool("gateway_get_system_metrics", &json!({}), &store).unwrap();
+        let metrics_text = metrics_res["content"][0]["text"].as_str().unwrap();
+        assert!(metrics_text.contains("toolcase-gateway"));
+        assert!(metrics_text.contains("active_connections"));
+        assert!(metrics_text.contains("total_modules"));
 
         let _ = std::fs::remove_file(&store.config_file);
         let _ = std::fs::remove_file(&env_path);

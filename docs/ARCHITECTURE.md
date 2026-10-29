@@ -14,7 +14,7 @@ flowchart TD
     Adm --> Parser[HTTP Framing & Header Parser]
     Parser --> Router{Route Dispatcher\nsrc/routes.rs}
 
-    Router -->|/gateway-config/dashboard\n/api/v1/dashboard/*| Dash[Dashboard & Config Engine\nsrc/features/dashboard/]
+    Router -->|/dashboard\n/api/v1/dashboard/*| Dash[Dashboard & Config Engine\nsrc/features/dashboard/]
     Router -->|/jev/*, /jev-ai/*| Jev[Jev AI Decision Provider\nsrc/providers/jev/]
     Router -->|/muse-ai/*, /video-template\n/muse-config| Muse[Muse AI CVM Subsystem\nsrc/museai/]
     Router -->|/models, /v1/*\nUnclaimed paths| Omni[OmniRoute Upstream Proxy\nsrc/gateway/]
@@ -40,7 +40,7 @@ Dispatch in `src/routes.rs` is **exclusive and fail-closed**: a request matching
 
 | Route | Subsystem / Owner | Allowed Methods | Purpose |
 | :--- | :--- | :--- | :--- |
-| `/gateway-config/dashboard` | Dashboard UI | `GET` | Interactive pipeline, provider pool, and configuration dashboard |
+| `/dashboard` | Dashboard UI | `GET` | Interactive pipeline, provider pool, and configuration dashboard |
 | `/api/v1/dashboard/overview` | Dashboard API | `GET` | Aggregated provider status, masked credentials, and live config |
 | `/api/v1/dashboard/config` | Dashboard API | `POST` | Update gateway parameters (host, port, fallbacks, timeout) |
 | `/api/v1/dashboard/muse-config` | Dashboard API | `POST` | Update Muse AI endpoints, tokens, cookies, approvals, video prompt |
@@ -75,7 +75,7 @@ Dispatch in `src/routes.rs` is **exclusive and fail-closed**: a request matching
 ## 3. Core Subsystems
 
 ### A. Dashboard & Standalone Persistent Storage (`src/features/dashboard/`)
-- **Single Page Application UI**: Served from [`assets/dashboard.html`](file:///home/ubuntu/toolcase-gateway-rs/assets/dashboard.html) at `/gateway-config/dashboard`. Zero external CDN or script dependencies.
+- **Single Page Application UI**: Served from [`assets/dashboard.html`](file:///home/ubuntu/toolcase-gateway-rs/assets/dashboard.html) at `/dashboard`. Zero external CDN or script dependencies.
 - **Standalone JSON Store (`gateway_config.json`)**: Configuration is managed via [`PersistentConfig`](file:///home/ubuntu/toolcase-gateway-rs/src/config.rs). When updated from the dashboard or API, changes are applied immediately to the in-memory [`ConfigStore`](file:///home/ubuntu/toolcase-gateway-rs/src/config.rs) and persisted atomically via `fs::write` to a temporary file (`.gateway_config.json~tmp`), unix permissions `0600`, and `fs::rename`. The `.env` file is left untouched.
 - **Credential Redaction**: API keys, bearer tokens, and session cookies are strictly masked (`mask_key`) in read responses (`sk-glm...d74b` or `***`). Full secrets are never emitted in API responses or log output.
 

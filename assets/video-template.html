@@ -4,57 +4,473 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Video Template Studio</title>
+<title>Muse Video Studio — Toolcase Gateway</title>
 <style>
-:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#e8eaf0;--muted:#9aa0b0;--accent:#5b8cff;--ok:#3fd08a;--err:#ff6b6b;--border:#2a2f3f;--radius:12px}
-@media (prefers-color-scheme: light){:root{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f6;--text:#1a1c24;--muted:#5a5f6e;--accent:#2f5be0;--ok:#1b9e68;--err:#d63;--border:#d8dbe4}}
-*{box-sizing:border-box}
-html,body{margin:0;min-height:100%}
-body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px 16px 60px}
-.wrap{max-width:960px;margin:0 auto}
-h1{font-size:22px;margin:0 0 4px}
-.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px}
-.card h2{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:700}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:640px){.grid{grid-template-columns:1fr}}
-label, .label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
-.req{color:var(--err);font-weight:700}
-input[type=text],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
-.row{margin-bottom:14px}.row:last-child{margin-bottom:0}
-.pill{display:flex;gap:10px;flex-wrap:wrap}
-.chip{cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--panel2);color:var(--text);font-size:13px;user-select:none}
-.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.preview{background:var(--panel2);border:1px dashed var(--border);border-radius:8px;padding:14px;font-size:13px;white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--text);min-height:60px}
-.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-button{font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;padding:12px 20px;background:var(--accent);color:#fff}
-button:disabled{opacity:.5;cursor:not-allowed}
-button.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
-.status{font-size:13px;font-weight:600;min-height:20px}
-.status.ok{color:var(--ok)}
-.status.err{color:var(--err)}
-.status.busy{color:var(--accent)}
-pre{margin:0}
-.err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:12px;font-size:13px;color:var(--err);margin-top:12px;display:none;white-space:pre-wrap}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+:root {
+  --ui-brand: #714b67;
+  --purple: #714b67;
+  --purple-light: #875a7b;
+  --purple-dark: #56394e;
+  --mint: #017e84;
+  --mint-light: #00a09d;
+  --mint-dark: #006064;
+  --bg: #f6f7f9;
+  --surface-1: #ffffff;
+  --surface-2: #f9fafb;
+  --surface-3: #f0f2f5;
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --edge: #e5e7eb;
+  --edge-focus: #017e84;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 12px 28px rgba(0,0,0,0.12);
+  --ok: #017e84;
+  --err: #dc2626;
+  --busy: #714b67;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111827;
+    --surface-1: #1f2937;
+    --surface-2: #182234;
+    --surface-3: #131c2b;
+    --text-primary: #f9fafb;
+    --text-secondary: #d1d5db;
+    --text-muted: #9ca3af;
+    --edge: #374151;
+    --edge-focus: #00a09d;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --shadow-lg: 0 12px 28px rgba(0,0,0,0.5);
+  }
+}
+body.dark {
+  --bg: #111827;
+  --surface-1: #1f2937;
+  --surface-2: #182234;
+  --surface-3: #131c2b;
+  --text-primary: #f9fafb;
+  --text-secondary: #d1d5db;
+  --text-muted: #9ca3af;
+  --edge: #374151;
+  --edge-focus: #00a09d;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 12px 28px rgba(0,0,0,0.5);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.topbar {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--edge);
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-logo {
+  font-size: 18px;
+  color: var(--purple);
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.breadcrumb a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 500;
+}
+.breadcrumb a:hover { color: var(--purple); }
+.breadcrumb-sep { font-size: 11px; opacity: 0.6; }
+.breadcrumb-current { color: var(--text-primary); font-weight: 600; }
+.studio-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.studio-nav a {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  transition: all .15s ease;
+}
+.studio-nav a:hover {
+  background: var(--surface-2);
+  color: var(--purple);
+}
+.studio-nav a.active {
+  background: rgba(113, 75, 103, 0.12);
+  color: var(--purple);
+}
+.theme-btn {
+  background: transparent;
+  border: 1px solid var(--edge);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-btn:hover { border-color: var(--purple); color: var(--purple); }
+.wrap {
+  max-width: 980px;
+  margin: 24px auto;
+  padding: 0 16px 60px;
+}
+.header-box {
+  margin-bottom: 20px;
+}
+.header-box h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.badge-odoo {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: var(--purple);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: .05em;
+}
+.header-box p {
+  color: var(--text-secondary);
+  margin: 0;
+  font-size: 14px;
+}
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-header h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--purple);
+  margin: 0;
+  font-weight: 700;
+}
+.turns-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--edge);
+  flex-wrap: wrap;
+}
+.turn-tab {
+  background: var(--surface-2);
+  border: 1px solid var(--edge);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all .15s ease;
+}
+.turn-tab:hover {
+  border-color: var(--purple);
+  color: var(--purple);
+}
+.turn-tab.active {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+.turn-add {
+  background: transparent;
+  border: 1px dashed var(--edge);
+  color: var(--text-muted);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.turn-add:hover {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media(max-width: 640px) {
+  .grid { grid-template-columns: 1fr; }
+  .topbar { height: auto; padding: 12px 16px; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .studio-nav { flex-wrap: wrap; }
+}
+label, .label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.req { color: var(--err); font-weight: 700; }
+input[type=text], select, textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  transition: border-color .15s ease;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--edge-focus);
+  box-shadow: 0 0 0 3px rgba(1, 126, 132, 0.15);
+}
+.row { margin-bottom: 16px; }
+.row:last-child { margin-bottom: 0; }
+.pill { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  cursor: pointer;
+  padding: 6px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+  transition: all .15s ease;
+}
+.chip:hover {
+  border-color: var(--mint);
+  color: var(--mint);
+  background: var(--surface-1);
+}
+.chip.on {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+.preview {
+  background: var(--surface-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  color: var(--text-primary);
+  min-height: 60px;
+}
+.pipeline-steps {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.pipe-step {
+  flex: 1;
+  min-width: 160px;
+  background: var(--surface-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.pipe-step-num {
+  font-weight: 700;
+  color: var(--purple);
+  margin-bottom: 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.pipe-step-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.btns {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+button#go {
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 12px 24px;
+  background: var(--mint);
+  color: #fff;
+  transition: opacity .15s ease, transform .1s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 4px rgba(1, 126, 132, 0.2);
+}
+button#go:hover:not(:disabled) {
+  background: var(--mint-light);
+  transform: translateY(-1px);
+}
+button#go:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  transform: none;
+}
+.status {
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.status.ok { color: var(--ok); }
+.status.err { color: var(--err); }
+.status.busy { color: var(--busy); }
+.err-box {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid var(--err);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--err);
+  margin-top: 14px;
+  display: none;
+  white-space: pre-wrap;
+}
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-all; font-size: 12px; color: var(--text-muted); }
+.helper-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.btn-quick {
+  background: var(--surface-1);
+  border: 1px solid var(--edge);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-quick:hover { border-color: var(--mint); color: var(--mint); }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Video Template Studio</h1>
-  <p class="sub">Fill Topic + Character. We auto-derive the rest, preview the exact template prompt, then generate via Muse.ai.</p>
+<header class="topbar">
+  <div class="brand-group">
+    <a href="/dashboard" class="brand-logo" aria-label="Toolcase Gateway">
+      <span>▦</span> <span>Toolcase Gateway</span>
+    </a>
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <span class="breadcrumb-sep">/</span>
+      <a href="/dashboard">Gateway Console</a>
+      <span class="breadcrumb-sep">/</span>
+      <span class="breadcrumb-current">Video Studio</span>
+    </nav>
+  </div>
+  <div class="studio-nav" aria-label="Studio Navigation">
+    <a href="/dashboard">Gateway Console</a>
+    <a href="/image-template">Image Studio</a>
+    <a href="/muse-config">HAR Import</a>
+    <button type="button" class="theme-btn" id="theme-toggle" aria-label="Toggle Theme">🌓</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="header-box">
+    <h1>Video Template Studio <span class="badge-odoo">Studio</span></h1>
+    <p class="sub">Fill Topic + Character. We auto-derive the rest, preview the exact template prompt, then generate via Muse.ai.</p>
+  </div>
 
   <div class="card">
-    <h2>Fields</h2>
+    <div class="card-header">
+      <h2>Multi-Turn Video Prompt Builder & Fields</h2>
+    </div>
+
+    <div class="turns-bar" id="turns-container">
+      <button type="button" class="turn-tab active" data-turn="1">🎬 Turn 1: Main Action</button>
+      <button type="button" class="turn-tab" data-turn="2">🔄 Turn 2: Motion Beat</button>
+      <button type="button" class="turn-tab" data-turn="3">✨ Turn 3: Reaction Climax</button>
+      <button type="button" class="turn-add" id="btn-add-turn">+ New Scene Turn</button>
+    </div>
+
     <div class="grid">
       <div class="row">
         <label for="topic">Topic <span class="req">*</span></label>
         <input type="text" id="topic" name="topic" placeholder="e.g. a cozy bakery at dawn">
+        <div class="helper-actions">
+          <button type="button" class="btn-quick" data-for="topic" data-val="a cozy rustic bakery at sunrise">Bakery</button>
+          <button type="button" class="btn-quick" data-for="topic" data-val="a futuristic neon cyber ramen shop in Tokyo">Ramen Shop</button>
+          <button type="button" class="btn-quick" data-for="topic" data-val="a misty magical pine forest glade">Forest</button>
+        </div>
       </div>
       <div class="row">
         <label for="character">Character <span class="req">*</span></label>
         <input type="text" id="character" name="character" placeholder="e.g. a round orange fox baker, big eyes, apron">
+        <div class="helper-actions">
+          <button type="button" class="btn-quick" data-for="character" data-val="a round orange fox baker, big eyes, flour on paws, apron">Fox Baker</button>
+          <button type="button" class="btn-quick" data-for="character" data-val="a tiny friendly robot with glowing cyan eyes and brass gears">Robot</button>
+          <button type="button" class="btn-quick" data-for="character" data-val="an adventurous cat explorer wearing goggles and a leather coat">Cat Explorer</button>
+        </div>
       </div>
       <div class="row">
         <label for="setting">Setting</label>
@@ -67,17 +483,47 @@ pre{margin:0}
       <div class="row">
         <label for="camera">Camera</label>
         <input type="text" id="camera" name="camera" placeholder="slow push-in / gentle pan / static">
+        <div class="helper-actions">
+          <button type="button" class="btn-quick" data-for="camera" data-val="slow push-in with gentle focal rack">Push-in</button>
+          <button type="button" class="btn-quick" data-for="camera" data-val="smooth cinematic lateral pan left to right">Pan Left</button>
+          <button type="button" class="btn-quick" data-for="camera" data-val="low-angle dramatic static hero framing">Low Angle</button>
+        </div>
       </div>
       <div class="row">
         <label for="sound">Sound</label>
         <input type="text" id="sound" name="sound" placeholder="music mood + 1-2 SFX">
+        <div class="helper-actions">
+          <button type="button" class="btn-quick" data-for="sound" data-val="warm lo-fi acoustic guitar, soft sizzle ambient SFX">Lo-Fi Acoustic</button>
+          <button type="button" class="btn-quick" data-for="sound" data-val="ambient synth pads, distant electronic rain SFX">Synth Ambient</button>
+        </div>
       </div>
     </div>
   </div>
 
   <div class="card">
-    <h2>Options</h2>
-    <p style="color:var(--muted);margin:0 0 14px;font-size:13px">Experimental legacy Muse test harness. OpenMontage owns creative profiles and final production orchestration.</p>
+    <div class="card-header">
+      <h2>Pipeline Options & Execution Settings</h2>
+    </div>
+    <p style="color:var(--text-muted);margin:0 0 14px;font-size:13px">Experimental legacy Muse test harness. OpenMontage owns creative profiles and final production orchestration.</p>
+
+    <div class="pipeline-steps">
+      <div class="pipe-step">
+        <div class="pipe-step-num">Step 1</div>
+        <div class="pipe-step-title">Prompt Synthesis</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-step-num">Step 2</div>
+        <div class="pipe-step-title">Gateway Dispatch</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-step-num">Step 3</div>
+        <div class="pipe-step-title">Worker Queue</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-step-num">Step 4</div>
+        <div class="pipe-step-title">Media Verification</div>
+      </div>
+    </div>
 
     <div class="row">
       <div class="label" id="aspect-label">Aspect ratio</div>
@@ -90,11 +536,11 @@ pre{margin:0}
     </div>
 
     <div class="row">
-      <div class="label" id="model-label">Model <span style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-left:6px">Legacy experimental</span></div>
+      <div class="label" id="model-label">Model <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-left:6px">Legacy experimental</span></div>
       <div class="pill" id="model">
         <span class="chip on" data-v="muse-video">Muse Video</span>
       </div>
-      <p style="color:var(--muted);margin:6px 0 0;font-size:13px">Muse uses its built-in video model. Duration and aspect ratio are requests, not guaranteed output settings.</p>
+      <p style="color:var(--text-muted);margin:6px 0 0;font-size:13px">Muse uses its built-in video model. Duration and aspect ratio are requests, not guaranteed output settings.</p>
     </div>
 
     <div class="row">
@@ -109,36 +555,137 @@ pre{margin:0}
   </div>
 
   <div class="card">
-    <h2>Live request preview</h2>
-    <p style="color:var(--muted);margin:0 0 10px;font-size:13px">This exact compiled prompt and requested settings are submitted to the legacy Muse route.</p>
+    <div class="card-header">
+      <h2>Live request preview</h2>
+    </div>
+    <p style="color:var(--text-muted);margin:0 0 10px;font-size:13px">This exact compiled prompt and requested settings are submitted to the legacy Muse route.</p>
     <div class="preview" id="settings-preview"></div>
     <div class="preview" id="preview" style="margin-top:10px"></div>
   </div>
 
   <div class="card">
-    <h2>Generate</h2>
+    <div class="card-header">
+      <h2>Execute & Video Playback</h2>
+    </div>
     <div class="btns">
       <button id="go" type="button">Generate video</button>
       <span class="status" id="status"></span>
     </div>
 
-    <div class="row" style="margin-top:14px">
-      <video id="video-player" controls style="display:none;width:100%;max-height:500px;border-radius:8px;background:#000"></video>
-      <a id="video-download" href="" download style="display:none;margin-top:8px;font-weight:700;color:var(--accent)">Download video</a>
-      <div class="mono" id="video-url" style="display:none;"></div>
+    <div class="row" style="margin-top:16px">
+      <video id="video-player" controls style="display:none;width:100%;max-height:500px;border-radius:10px;background:#000;box-shadow:var(--shadow-md)"></video>
+      <div style="margin-top:10px">
+        <a id="video-download" href="" download style="display:none;font-weight:700;color:var(--mint);text-decoration:none;padding:8px 16px;border-radius:6px;border:1px solid var(--mint);background:var(--surface-2)">Download video</a>
+      </div>
+      <div class="mono" id="video-url" style="display:none;margin-top:10px"></div>
       <div id="raw" style="margin-top:10px"></div>
       <div class="err-box" id="errbox"></div>
     </div>
 
-    <p style="color:var(--muted);margin:12px 0 0;font-size:13px">Video generation requires an authorized Muse session with video capabilities. Returned artifact URLs are unverified; OpenMontage owns download, decode, review, and publishing checks.</p>
+    <p style="color:var(--text-muted);margin:14px 0 0;font-size:13px">Video generation requires an authorized Muse session with video capabilities. Returned artifact URLs are unverified; OpenMontage owns download, decode, review, and publishing checks.</p>
   </div>
-</div>
+</main>
 
 <script>
 (function(){
   "use strict";
 
+  // Theme management
+  var themeToggle = document.getElementById("theme-toggle");
+  var savedTheme = localStorage.getItem("gw_theme");
+  if (savedTheme === "dark") {
+    document.body.classList.add("dark");
+  }
+  if (themeToggle) {
+    themeToggle.addEventListener("click", function(){
+      var isDark = document.body.classList.toggle("dark");
+      localStorage.setItem("gw_theme", isDark ? "dark" : "light");
+    });
+  }
+
   var state={aspect:"9:16",model:"muse-video"};
+
+  // Multi-turn scene storage
+  var turnsData = {
+    1: { topic: "", character: "", setting: "", action: "", camera: "", sound: "" },
+    2: { topic: "", character: "", setting: "", action: "", camera: "", sound: "" },
+    3: { topic: "", character: "", setting: "", action: "", camera: "", sound: "" }
+  };
+  var currentTurn = 1;
+
+  var turnTabs = document.querySelectorAll(".turn-tab");
+  turnTabs.forEach(function(tab){
+    tab.addEventListener("click", function(){
+      saveCurrentTurn();
+      turnTabs.forEach(function(t){ t.classList.remove("active"); });
+      tab.classList.add("active");
+      currentTurn = parseInt(tab.dataset.turn, 10) || 1;
+      loadTurn(currentTurn);
+    });
+  });
+
+  function saveCurrentTurn(){
+    turnsData[currentTurn] = {
+      topic: document.getElementById("topic").value,
+      character: document.getElementById("character").value,
+      setting: document.getElementById("setting").value,
+      action: document.getElementById("action").value,
+      camera: document.getElementById("camera").value,
+      sound: document.getElementById("sound").value
+    };
+  }
+
+  function loadTurn(t){
+    var d = turnsData[t] || {};
+    ["topic", "character", "setting", "action", "camera", "sound"].forEach(function(id){
+      document.getElementById(id).value = d[id] || "";
+    });
+    render();
+  }
+
+  var btnAddTurn = document.getElementById("btn-add-turn");
+  if(btnAddTurn) {
+    btnAddTurn.addEventListener("click", function(){
+      var newTurnNum = Object.keys(turnsData).length + 1;
+      turnsData[newTurnNum] = {
+        topic: document.getElementById("topic").value,
+        character: document.getElementById("character").value,
+        setting: document.getElementById("setting").value,
+        action: "",
+        camera: "",
+        sound: ""
+      };
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "turn-tab";
+      btn.dataset.turn = String(newTurnNum);
+      btn.textContent = "🎬 Turn " + newTurnNum + ": Follow-up";
+      btn.addEventListener("click", function(){
+        saveCurrentTurn();
+        document.querySelectorAll(".turn-tab").forEach(function(t){ t.classList.remove("active"); });
+        btn.classList.add("active");
+        currentTurn = newTurnNum;
+        loadTurn(newTurnNum);
+      });
+      btnAddTurn.parentNode.insertBefore(btn, btnAddTurn);
+      btn.click();
+    });
+  }
+
+  // Quick helper buttons
+  document.querySelectorAll(".btn-quick").forEach(function(b){
+    b.addEventListener("click", function(){
+      var forId = b.dataset.for;
+      var val = b.dataset.val;
+      if (forId && val) {
+        var input = document.getElementById(forId);
+        if (input) {
+          input.value = val;
+          render();
+        }
+      }
+    });
+  });
 
   function derived(id, topic){
     topic=topic.trim();

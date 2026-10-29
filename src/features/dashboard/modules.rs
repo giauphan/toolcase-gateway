@@ -320,7 +320,9 @@ pub fn handle_install_personal_module(
     };
     if let Err(e) = guard.register_personal_module(manifest.clone()) {
         drop(guard);
-        cleanup_module_files(&id, &get_state_dir());
+        if installed_from_source {
+            cleanup_module_files(&id, &get_state_dir());
+        }
         return write_error(client, 400, "Bad Request", &e.to_string());
     }
     drop(guard);

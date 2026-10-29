@@ -96,6 +96,10 @@ fn test_html_includes_form_and_fields() {
     assert!(html.contains("name=\"camera\""));
     assert!(html.contains("name=\"sound\""));
     assert!(html.contains("/muse-ai/v1/create-video"));
+    assert!(html.contains("Gateway Console"));
+    assert!(html.contains("href=\"/dashboard\""));
+    assert!(include_str!("../../assets/image-template.html").contains("Gateway Console"));
+    assert!(include_str!("../../assets/muse-config.html").contains("Gateway Console"));
 }
 
 #[test]

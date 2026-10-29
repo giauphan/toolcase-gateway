@@ -38,10 +38,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:12px;font-size:13px;color:var(--err);margin-top:12px;display:none;white-space:pre-wrap}
 .ok-box{background:rgba(63,208,138,.12);border:1px solid var(--ok);border-radius:8px;padding:12px;font-size:13px;color:var(--ok);margin-top:12px;display:none}
 a{color:var(--accent)}
+.studio-nav{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 16px;font-size:13px}.studio-nav a{color:var(--accent);font-weight:600}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <nav class="studio-nav" aria-label="Gateway navigation"><a href="/dashboard">Gateway Console</a><a href="/image-template">Image Studio</a><a href="/video-template">Video Studio</a></nav>
   <h1>Muse Config — HAR import</h1>
   <p class="sub">Current effective Muse config loads automatically. Upload a DevTools HAR capture (<b>muse-ai.har</b>) to replace or complete it; values apply live and persist to <code>.env</code>.</p>
 

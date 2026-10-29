@@ -116,7 +116,7 @@ a non-compliant upstream cannot mislabel a plaintext body.
 
 ### Dashboard & Persistent Configuration Security Model
 
-The runtime configuration dashboard at `/gateway-config/dashboard` and REST API endpoints
+The runtime configuration dashboard at `/dashboard` and REST API endpoints
 (`GET /api/v1/dashboard/overview`, `POST /api/v1/dashboard/accounts`, `POST /api/v1/dashboard/config`, `POST /api/v1/dashboard/muse-config`) manage live settings and provider account pools:
 
 1. **Credential Masking**: All read responses (`GET /api/v1/dashboard/overview`, `GET /muse-ai/v1/config`) mask API keys, tokens, and cookies. Only the first 6 and last 4 characters are exposed (e.g., `sk-glm...d74b`) or `***` for short secrets. Full plaintext credentials are never returned over read endpoints.

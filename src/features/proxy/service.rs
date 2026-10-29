@@ -207,6 +207,18 @@ impl ProxyService {
                     }
                 }
             }
+            // Mount the upstream web app under the module prefix so its own
+            // paths (/dashboard/providers, /_next/...) never collide with gateway routes.
+            if super::prefix_rewrite::is_rewritable(&head) && request.method != "HEAD" {
+                let body = super::prefix_rewrite::read_full_body(&mut upstream, &head)?;
+                let rewritten = super::prefix_rewrite::rewrite_root_relative(
+                    &String::from_utf8_lossy(&body),
+                    pfx,
+                );
+                let status = head.status;
+                super::prefix_rewrite::write_rewritten(client, &head, rewritten.as_bytes())?;
+                return Ok(Some(status));
+            }
         }
         let status = head.status;
         crate::http::stream_response(client, &mut upstream, head, &request.body)?;

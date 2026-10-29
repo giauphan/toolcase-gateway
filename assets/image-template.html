@@ -4,87 +4,531 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Muse Image Studio</title>
+<title>Muse Image Studio — Toolcase Gateway</title>
 <style>
-:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#e8eaf0;--muted:#9aa0b0;--accent:#5b8cff;--ok:#3fd08a;--err:#ff6b6b;--border:#2a2f3f;--radius:12px}
-@media (prefers-color-scheme: light){:root{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f6;--text:#1a1c24;--muted:#5a5f6e;--accent:#2f5be0;--ok:#1b9e68;--err:#d63;--border:#d8dbe4}}
-*{box-sizing:border-box}
-html,body{margin:0;min-height:100%}
-body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px 16px 60px}
-.wrap{max-width:880px;margin:0 auto}
-h1{font-size:24px;margin:0 0 4px}
-.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
-.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:700}
-label, .label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
-.req{color:var(--err);font-weight:700}
-textarea{width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:var(--text);font:inherit;resize:vertical;min-height:90px}
-textarea:focus{outline:none;border-color:var(--accent)}
-.row{margin-bottom:16px}.row:last-child{margin-bottom:0}
-.pill{display:flex;gap:10px;flex-wrap:wrap}
-.chip{cursor:pointer;padding:8px 16px;border:1px solid var(--border);border-radius:999px;background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;user-select:none;transition:background .15s ease, border-color .15s ease, color .15s ease}
-.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.chip:hover:not(.on){border-color:var(--accent);color:var(--accent)}
-.btns{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:16px}
-button{font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;padding:12px 24px;background:var(--accent);color:#fff;transition:opacity .15s}
-button:disabled{opacity:.5;cursor:not-allowed}
-.btn-secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border);text-decoration:none;display:inline-flex;align-items:center;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px}
-.btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
-.status{font-size:14px;font-weight:600;min-height:22px}
-.status.ok{color:var(--ok)}
-.status.err{color:var(--err)}
-.status.busy{color:var(--accent)}
-.err-box{background:rgba(255,107,107,.12);border:1px solid var(--err);border-radius:8px;padding:12px;font-size:13px;color:var(--err);margin-top:12px;display:none;white-space:pre-wrap}
-.preview-wrap{display:none;margin-top:20px;text-align:center}
-.preview-box{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;display:inline-block;max-width:100%}
-.preview-img{max-width:100%;max-height:540px;border-radius:6px;display:block;margin:0 auto;box-shadow:0 4px 16px rgba(0,0,0,.25)}
-.action-bar{margin-top:12px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+:root {
+  --ui-brand: #714b67;
+  --purple: #714b67;
+  --purple-light: #875a7b;
+  --purple-dark: #56394e;
+  --mint: #017e84;
+  --mint-light: #00a09d;
+  --mint-dark: #006064;
+  --bg: #f6f7f9;
+  --surface-1: #ffffff;
+  --surface-2: #f9fafb;
+  --surface-3: #f0f2f5;
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --edge: #e5e7eb;
+  --edge-focus: #017e84;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 12px 28px rgba(0,0,0,0.12);
+  --ok: #017e84;
+  --err: #dc2626;
+  --busy: #714b67;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111827;
+    --surface-1: #1f2937;
+    --surface-2: #182234;
+    --surface-3: #131c2b;
+    --text-primary: #f9fafb;
+    --text-secondary: #d1d5db;
+    --text-muted: #9ca3af;
+    --edge: #374151;
+    --edge-focus: #00a09d;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --shadow-lg: 0 12px 28px rgba(0,0,0,0.5);
+  }
+}
+body.dark {
+  --bg: #111827;
+  --surface-1: #1f2937;
+  --surface-2: #182234;
+  --surface-3: #131c2b;
+  --text-primary: #f9fafb;
+  --text-secondary: #d1d5db;
+  --text-muted: #9ca3af;
+  --edge: #374151;
+  --edge-focus: #00a09d;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 12px 28px rgba(0,0,0,0.5);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.topbar {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--edge);
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-logo {
+  font-size: 18px;
+  color: var(--purple);
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.breadcrumb a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 500;
+}
+.breadcrumb a:hover { color: var(--purple); }
+.breadcrumb-sep { font-size: 11px; opacity: 0.6; }
+.breadcrumb-current { color: var(--text-primary); font-weight: 600; }
+.studio-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.studio-nav a {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  transition: all .15s ease;
+}
+.studio-nav a:hover {
+  background: var(--surface-2);
+  color: var(--purple);
+}
+.studio-nav a.active {
+  background: rgba(113, 75, 103, 0.12);
+  color: var(--purple);
+}
+.theme-btn {
+  background: transparent;
+  border: 1px solid var(--edge);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-btn:hover { border-color: var(--purple); color: var(--purple); }
+.wrap {
+  max-width: 960px;
+  margin: 24px auto;
+  padding: 0 16px 60px;
+}
+.header-box {
+  margin-bottom: 20px;
+}
+.header-box h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.badge-odoo {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: var(--purple);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: .05em;
+}
+.header-box p {
+  color: var(--text-secondary);
+  margin: 0;
+  font-size: 14px;
+}
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-header h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--purple);
+  margin: 0;
+  font-weight: 700;
+}
+.card-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+label, .label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.req { color: var(--err); font-weight: 700; }
+textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  resize: vertical;
+  min-height: 96px;
+  transition: border-color .15s ease;
+}
+textarea:focus {
+  outline: none;
+  border-color: var(--edge-focus);
+  box-shadow: 0 0 0 3px rgba(1, 126, 132, 0.15);
+}
+.enhancers {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.enhancer-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.pill { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip {
+  cursor: pointer;
+  padding: 6px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+  transition: all .15s ease;
+}
+.chip:hover {
+  border-color: var(--mint);
+  color: var(--mint);
+  background: var(--surface-1);
+}
+.chip.on {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+.ratio-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+.ratio-icon {
+  display: inline-block;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.8;
+}
+.icon-1-1 { width: 12px; height: 12px; }
+.icon-16-9 { width: 16px; height: 9px; }
+.icon-9-16 { width: 9px; height: 16px; }
+.icon-4-3 { width: 14px; height: 10px; }
+.icon-3-2 { width: 15px; height: 10px; }
+
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn-mini {
+  background: var(--surface-2);
+  border: 1px solid var(--edge);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-mini:hover { border-color: var(--purple); color: var(--purple); }
+
+.btns {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 20px;
+}
+button#btn-create {
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 12px 24px;
+  background: var(--mint);
+  color: #fff;
+  transition: opacity .15s ease, transform .1s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 4px rgba(1, 126, 132, 0.2);
+}
+button#btn-create:hover:not(:disabled) {
+  background: var(--mint-light);
+  transform: translateY(-1px);
+}
+button#btn-create:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  transform: none;
+}
+.status {
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.status.ok { color: var(--ok); }
+.status.err { color: var(--err); }
+.status.busy { color: var(--busy); }
+.status-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+.err-box {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid var(--err);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--err);
+  margin-top: 14px;
+  display: none;
+  white-space: pre-wrap;
+}
+.preview-wrap {
+  display: none;
+  text-align: center;
+}
+.preview-box {
+  background: var(--surface-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: inline-block;
+  max-width: 100%;
+}
+.preview-img {
+  max-width: 100%;
+  max-height: 520px;
+  border-radius: var(--radius-md);
+  display: block;
+  margin: 0 auto;
+  box-shadow: var(--shadow-md);
+}
+.action-bar {
+  margin-top: 16px;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.btn-secondary {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border: 1px solid var(--edge);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 13px;
+  transition: all .15s ease;
+  cursor: pointer;
+}
+.btn-secondary:hover {
+  border-color: var(--purple);
+  color: var(--purple);
+  background: var(--surface-2);
+}
+@media(max-width: 640px) {
+  .topbar { height: auto; padding: 12px 16px; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .studio-nav { flex-wrap: wrap; }
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Muse AI Image Studio</h1>
-  <p class="sub">Create and preview high-fidelity images with customizable aspect ratios via Muse.ai.</p>
+<header class="topbar">
+  <div class="brand-group">
+    <a href="/dashboard" class="brand-logo" aria-label="Toolcase Gateway">
+      <span>▦</span> <span>Toolcase Gateway</span>
+    </a>
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <span class="breadcrumb-sep">/</span>
+      <a href="/dashboard">Gateway Console</a>
+      <span class="breadcrumb-sep">/</span>
+      <span class="breadcrumb-current">Image Studio</span>
+    </nav>
+  </div>
+  <div class="studio-nav" aria-label="Studio Navigation">
+    <a href="/dashboard">Gateway Console</a>
+    <a href="/video-template">Video Studio</a>
+    <a href="/muse-config">HAR Import</a>
+    <button type="button" class="theme-btn" id="theme-toggle" aria-label="Toggle Theme">🌓</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="header-box">
+    <h1>Muse AI Image Studio <span class="badge-odoo">Studio</span></h1>
+    <p>Prompt generator, aspect ratio control, asynchronous job polling, and direct artifact download via Muse.ai.</p>
+  </div>
 
   <div class="card">
-    <h2>Prompt & Settings</h2>
+    <div class="card-header">
+      <h2>Prompt & Creative Enhancers</h2>
+    </div>
     <div class="row">
       <label for="prompt">Prompt Description <span class="req">*</span></label>
       <textarea id="prompt" placeholder="e.g. A serene mountain lake at sunrise, misty pine trees, warm golden hour reflections, 8k resolution"></textarea>
-    </div>
+      
+      <div class="prompt-actions">
+        <button type="button" class="btn-mini" id="btn-sample-1">🌅 Sunrise Lake</button>
+        <button type="button" class="btn-mini" id="btn-sample-2">🏙 Cyberpunk City</button>
+        <button type="button" class="btn-mini" id="btn-sample-3">🦊 Cozy Fox Bakery</button>
+        <button type="button" class="btn-mini" id="btn-clear-prompt">Clear</button>
+      </div>
 
+      <div class="enhancers">
+        <span class="enhancer-label">Quick Style & Detail Enhancers (Click to Append)</span>
+        <div class="pill" id="prompt-enhancers">
+          <span class="chip" data-append=", 8k resolution, cinematic lighting, photorealistic">✨ Photoreal 8K</span>
+          <span class="chip" data-append=", warm golden hour, soft volumetric rays">☀️ Golden Hour</span>
+          <span class="chip" data-append=", studio ghibli anime style, vibrant pastel tones">🎨 Anime Art</span>
+          <span class="chip" data-append=", neon cyberpunk aesthetic, octane render 3D">⚡ Cyberpunk</span>
+          <span class="chip" data-append=", macro close-up photography, sharp focus on subject">🔍 Macro Lens</span>
+          <span class="chip" data-append=", minimalist isometric illustration, vector art">📐 Minimalist 3D</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Aspect Ratio & Generation</h2>
+    </div>
     <div class="row">
       <div class="label" id="aspect-label">Aspect Ratio</div>
       <div class="pill" id="aspect-pills">
-        <span class="chip on" data-v="1:1">1:1 (Square)</span>
-        <span class="chip" data-v="16:9">16:9 (Landscape)</span>
-        <span class="chip" data-v="9:16">9:16 (Portrait)</span>
-        <span class="chip" data-v="4:3">4:3 (Photo)</span>
-        <span class="chip" data-v="3:2">3:2 (35mm)</span>
+        <span class="chip ratio-chip on" data-v="1:1"><span class="ratio-icon icon-1-1"></span> 1:1 (Square)</span>
+        <span class="chip ratio-chip" data-v="16:9"><span class="ratio-icon icon-16-9"></span> 16:9 (Landscape)</span>
+        <span class="chip ratio-chip" data-v="9:16"><span class="ratio-icon icon-9-16"></span> 9:16 (Portrait)</span>
+        <span class="chip ratio-chip" data-v="4:3"><span class="ratio-icon icon-4-3"></span> 4:3 (Photo)</span>
+        <span class="chip ratio-chip" data-v="3:2"><span class="ratio-icon icon-3-2"></span> 3:2 (35mm)</span>
       </div>
     </div>
 
     <div class="btns">
-      <button id="btn-create">Generate Image</button>
+      <button id="btn-create" type="button">Generate Image</button>
       <span class="status" id="status"></span>
     </div>
     <div class="err-box" id="errbox"></div>
   </div>
 
   <div class="card preview-wrap" id="result-card">
-    <h2>Preview & Download</h2>
+    <div class="card-header">
+      <h2>Preview & Download Artifact</h2>
+    </div>
     <div class="preview-box">
       <img id="image-viewer" class="preview-img" alt="Generated Artwork" />
       <div class="action-bar">
         <a id="btn-download" class="btn-secondary" href="#" download>Download Image</a>
         <a id="btn-open" class="btn-secondary" href="#" target="_blank">Open Full Image</a>
+        <button type="button" id="btn-copy-url" class="btn-secondary">Copy Image URL</button>
       </div>
     </div>
   </div>
-</div>
+</main>
 
 <script>
 (function(){
+  "use strict";
+
+  // Theme management
+  var themeToggle = document.getElementById("theme-toggle");
+  var savedTheme = localStorage.getItem("gw_theme");
+  if (savedTheme === "dark") {
+    document.body.classList.add("dark");
+  }
+  if (themeToggle) {
+    themeToggle.addEventListener("click", function(){
+      var isDark = document.body.classList.toggle("dark");
+      localStorage.setItem("gw_theme", isDark ? "dark" : "light");
+    });
+  }
+
   var selectedAspect = "1:1";
   var pills = document.getElementById("aspect-pills").querySelectorAll(".chip");
   pills.forEach(function(pill){
@@ -103,6 +547,45 @@ button:disabled{opacity:.5;cursor:not-allowed}
   var imageViewer = document.getElementById("image-viewer");
   var btnDownload = document.getElementById("btn-download");
   var btnOpen = document.getElementById("btn-open");
+  var btnCopyUrl = document.getElementById("btn-copy-url");
+
+  // Prompt enhancers
+  var enhancerPills = document.querySelectorAll("#prompt-enhancers .chip");
+  enhancerPills.forEach(function(chip){
+    chip.addEventListener("click", function(){
+      var toAppend = chip.dataset.append || "";
+      if (promptEl.value.trim().length > 0) {
+        promptEl.value = promptEl.value.trim() + toAppend;
+      } else {
+        promptEl.value = toAppend.replace(/^[,\s]+/, "");
+      }
+      promptEl.focus();
+    });
+  });
+
+  // Prompt preset samples
+  var samples = {
+    "btn-sample-1": "A serene mountain lake at sunrise, misty pine trees, warm golden hour reflections, 8k resolution, cinematic lighting",
+    "btn-sample-2": "Neon-drenched cyberpunk alleyway in Tokyo at midnight, flying vehicles, holographic signs, ultra detailed, octane render 3D",
+    "btn-sample-3": "A round orange fox baker kneading dough in a cozy rustic kitchen, soft morning light, big expressive eyes, studio ghibli anime style"
+  };
+  Object.keys(samples).forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) {
+      el.addEventListener("click", function(){
+        promptEl.value = samples[id];
+        promptEl.focus();
+      });
+    }
+  });
+
+  var btnClear = document.getElementById("btn-clear-prompt");
+  if(btnClear) {
+    btnClear.addEventListener("click", function(){
+      promptEl.value = "";
+      promptEl.focus();
+    });
+  }
 
   function setStatus(text, cls){
     statusEl.textContent = text;
@@ -148,6 +631,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
     btnDownload.href = dl;
     btnOpen.href = src;
     resultCard.style.display = "block";
+  }
+
+  if (btnCopyUrl) {
+    btnCopyUrl.addEventListener("click", function(){
+      var src = imageViewer.src;
+      if (src && navigator.clipboard) {
+        navigator.clipboard.writeText(src).then(function(){
+          var orig = btnCopyUrl.textContent;
+          btnCopyUrl.textContent = "Copied!";
+          setTimeout(function(){ btnCopyUrl.textContent = orig; }, 1800);
+        });
+      }
+    });
   }
 
   btnCreate.addEventListener("click", function(){
