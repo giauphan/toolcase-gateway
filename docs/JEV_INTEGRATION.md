@@ -171,7 +171,7 @@ if (answers.category.choice === 'billing' && answers.urgency.score >= 2.0) {
 You can configure Jev and OpenRouter credentials statically or dynamically:
 
 1. **Dynamic Dashboard Management (Recommended)**:
-   - Open `/gateway-config/dashboard` in your browser.
+   - Open `/dashboard` in your browser.
    - Use the **Add Multi API Keys / Accounts** section to ingest credentials into dedicated rotation pools:
      - `Direct Jev AI API Keys (sk-glm...)` (`jev`): Ingests direct Jev upstream keys.
      - `OpenRouter Decision API Keys (Bearer Tokens sk-or-...)` (`openrouter-key`): Ingests OpenRouter Bearer API keys used for Decision API evaluation (`Authorization: Bearer <key>`).

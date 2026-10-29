@@ -165,14 +165,18 @@ pub fn run_stdio_transport(store: &ConfigStore) -> io::Result<()> {
     Ok(())
 }
 
-/// Handles inbound HTTP requests destined for the MCP control plane (`/mcp` and `/mcp/sse`).
+/// Handles inbound HTTP requests destined for the MCP control plane (`/mcp`, `/mcp/sse`, `/mcp/messages`, `/sse`).
 pub fn handle_http_mcp(
     client: &mut TcpStream,
     request: &Request,
     store: &ConfigStore,
     clean_path: &str,
 ) -> io::Result<Option<u16>> {
-    if clean_path != "/mcp" && clean_path != "/mcp/sse" {
+    if clean_path != "/mcp"
+        && clean_path != "/mcp/sse"
+        && clean_path != "/mcp/messages"
+        && clean_path != "/sse"
+    {
         return Ok(None);
     }
 
@@ -196,6 +200,26 @@ pub fn handle_http_mcp(
     } else {
         String::new()
     };
+
+    if request.method.eq_ignore_ascii_case("get") {
+        let is_sse_requested = clean_path == "/mcp/sse" || clean_path == "/sse";
+
+        if is_sse_requested {
+            let status = super::sse::handle_sse_stream(client, &cors_header)?;
+            return Ok(Some(status));
+        }
+
+        let body = r#"{"error":"GET not allowed on /mcp; use POST /mcp for Streamable HTTP or GET /mcp/sse for SSE"}"#;
+        let resp = format!(
+            "HTTP/1.1 405 Method Not Allowed\r\nAllow: POST, GET\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+            cors_header,
+            body.len(),
+            body
+        );
+        client.write_all(resp.as_bytes())?;
+        client.flush()?;
+        return Ok(Some(405));
+    }
 
     if request.method.eq_ignore_ascii_case("post") {
         if origin_hdr.is_some() {
@@ -229,8 +253,60 @@ pub fn handle_http_mcp(
             }
         }
 
+        let session_id = super::sse::extract_session_id(request);
+        if let Some(session_id) = &session_id {
+            if !super::sse::has_session(session_id) {
+                let body = r#"{"error":"SSE session not found or expired"}"#;
+                let resp = format!(
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    cors_header,
+                    body.len(),
+                    body
+                );
+                client.write_all(resp.as_bytes())?;
+                client.flush()?;
+                return Ok(Some(404));
+            }
+        }
+
         let req_str = String::from_utf8_lossy(&request.body);
-        if let Some(resp_json) = process_json_rpc(&req_str, store) {
+        let resp_json_opt = process_json_rpc(&req_str, store);
+
+        // Check if this request is targeted to an active SSE session
+        if let Some(session_id) = session_id {
+            if let Some(resp_json) = resp_json_opt {
+                if super::sse::send_to_session(&session_id, resp_json) {
+                    let resp = format!(
+                        "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+                        cors_header
+                    );
+                    client.write_all(resp.as_bytes())?;
+                    client.flush()?;
+                    return Ok(Some(202));
+                }
+                let body = r#"{"error":"SSE session not found or expired"}"#;
+                let resp = format!(
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    cors_header,
+                    body.len(),
+                    body
+                );
+                client.write_all(resp.as_bytes())?;
+                client.flush()?;
+                return Ok(Some(404));
+            }
+            // Notification under SSE returns 202 Accepted
+            let resp = format!(
+                "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+                cors_header
+            );
+            client.write_all(resp.as_bytes())?;
+            client.flush()?;
+            return Ok(Some(202));
+        }
+
+        // Streamable HTTP: Direct bidirectional HTTP response
+        if let Some(resp_json) = resp_json_opt {
             let data = resp_json.as_bytes();
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
@@ -252,22 +328,9 @@ pub fn handle_http_mcp(
         return Ok(Some(202));
     }
 
-    if request.method.eq_ignore_ascii_case("get") {
-        let body = r#"{"error":"GET not allowed; use POST /mcp"}"#;
-        let resp = format!(
-            "HTTP/1.1 405 Method Not Allowed\r\nAllow: POST\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
-            cors_header,
-            body.len(),
-            body
-        );
-        client.write_all(resp.as_bytes())?;
-        client.flush()?;
-        return Ok(Some(405));
-    }
-
-    let body = r#"{"error":"Method not allowed; use POST /mcp"}"#;
+    let body = r#"{"error":"Method not allowed; use POST /mcp or GET /mcp/sse"}"#;
     let resp = format!(
-        "HTTP/1.1 405 Method Not Allowed\r\nAllow: POST\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 405 Method Not Allowed\r\nAllow: POST, GET\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
         cors_header,
         body.len(),
         body

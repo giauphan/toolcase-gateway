@@ -32,15 +32,6 @@ pub fn handle_personal_module_request_with_provider(
     }
 }
 
-fn is_sensitive_env_var(var: &str) -> bool {
-    var.starts_with("GW_")
-        || var.starts_with("DATABASE_")
-        || var.contains("COOKIE")
-        || var.contains("TOKEN")
-        || var.contains("SECRET")
-        || var.contains("API_KEY")
-}
-
 fn heal_legacy_adapter_script(path: &std::path::Path) {
     if let Ok(content) = std::fs::read_to_string(path) {
         if content.contains("cat << 'EOF' | python3") {
@@ -94,12 +85,12 @@ fn build_command(manifest: &PersonalManifest, sub_provider_id: Option<&str>) -> 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    // Filter environment variables to isolate secrets while retaining essential runtime environment
+    // Isolate secrets by only inheriting safe runtime environment variables
     cmd.env_clear();
-    for (k, v) in std::env::vars() {
-        let upper = k.to_ascii_uppercase();
-        if !is_sensitive_env_var(&upper) {
-            cmd.env(k, v);
+    const ALLOWED_ENV_VARS: &[&str] = &["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TZ", "USER"];
+    for key in ALLOWED_ENV_VARS {
+        if let Ok(val) = std::env::var(key) {
+            cmd.env(key, val);
         }
     }
     cmd.env("MODULE_ID", &manifest.id);

@@ -1,6 +1,7 @@
 //! MCP API adapters: JSON-RPC 2.0 protocol and transports.
 
 pub mod protocol;
+pub mod sse;
 pub mod transport;
 
 pub use protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, McpResource, McpTool};

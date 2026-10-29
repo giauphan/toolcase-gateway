@@ -16,7 +16,7 @@ graph TD
     Client["Client (Agent / IDE / curl)"] --> Listener["Gateway Listener (127.0.0.1:20129)"]
     Listener --> Dispatcher["Canonical Dispatcher (src/routes.rs)"]
     
-    Dispatcher -->|"/gateway-config/dashboard"<br>"/api/v1/dashboard/*"| Dashboard["Dashboard Subsystem<br>(src/features/dashboard)"]
+    Dispatcher -->|"/dashboard"<br>"/api/v1/dashboard/*"| Dashboard["Dashboard Subsystem<br>(src/features/dashboard)"]
     Dispatcher -->|"/v1/chat/completions"<br>"/v1/models"| OmniRoute["OmniRoute Proxy<br>(src/omniroute.rs)"]
     Dispatcher -->|"/jev/v1/*"<br>"/jev-ai/v1/*"| JevSubsystem["Jev Decision Subsystem<br>(src/providers/jev)"]
     Dispatcher -->|"/muse-ai/v1/*"<br>"/muse-config"| MuseSubsystem["Muse AI Subsystem<br>(src/providers/museai)"]
@@ -32,7 +32,7 @@ graph TD
 1. **OmniRoute Proxy**: OpenAI-compatible `/v1/chat/completions` proxy providing transparent model candidate failover, request-response tool-name casing restoration, and stream chunking without buffering entire response bodies.
 2. **Jev Decision API**: Multi-account round-robin pool (`JevAccountPool`) and automatic failover on credit exhaustion or auth errors (`401, 402, 403, 429`) routing specialized decision payloads (`/jev/v1/systemone`).
 3. **Muse AI Subsystem**: End-to-end encrypted Noise XX WebSocket transport communicating directly with remote Confidential VMs (CVM), video generation (`/muse-ai/v1/create-video`), durable job state, and headless Sentinel auto-approval coordinator.
-4. **Interactive Dashboard & Standalone Persistent Storage**: Embedded web UI at `/gateway-config/dashboard` and REST endpoints at `/api/v1/dashboard/*` providing real-time overview, provider account ingestion, and atomic POSIX `0600` persistence to `gateway_config.json`.
+4. **Interactive Dashboard & Standalone Persistent Storage**: Embedded web UI at `/dashboard` and REST endpoints at `/api/v1/dashboard/*` providing real-time overview, provider account ingestion, and atomic POSIX `0600` persistence to `gateway_config.json`.
 5. **Video Studio**: Provider task registration, polling, and reconciliation at `/video/v1/*` and `/video-template`.
 
 ---
@@ -104,7 +104,7 @@ Runtime code is cleanly separated into focused modules under `src/`:
 | `src/runtime/` | ~110 | Resource bounds, in-flight byte tracking (`admission.rs`) | Tuning global memory admission bounds |
 | `src/gateway/` | ~280 | Candidate selection, capability detection, retry delay math | Changing model candidate ordering or retry timings |
 | `src/codecs/` | ~90 | SSE parser and chunk framing | Modifying SSE wire format decoding |
-| `src/features/dashboard/` | ~550 | Dashboard UI (`/gateway-config/dashboard`), overview endpoint, account ingestion, config updates | Adding dashboard fields or provider UI features |
+| `src/features/dashboard/` | ~550 | Dashboard UI (`/dashboard`), overview endpoint, account ingestion, config updates | Adding dashboard fields or provider UI features |
 | `src/features/video/` | ~260 | Multi-provider video task registry, status polling, task reconciliation | Adding video studio provider adapters |
 | `src/features/proxy/` | ~180 | Upstream HTTP proxy forwarding abstractions | Modifying core proxy forwarding primitives |
 | `src/providers/omniroute/` | ~140 | OmniRoute provider adapter and dispatch | Changing OmniRoute invocation contracts |
@@ -150,7 +150,7 @@ Communicates directly with Muse Confidential VMs (CVM):
 
 Provides operator management without editing raw configuration files:
 
-1. **Web Interface (`/gateway-config/dashboard`)**: Embedded lightweight HTML/CSS/JS dashboard displaying provider status, account pools, and settings.
+1. **Web Interface (`/dashboard`)**: Embedded lightweight HTML/CSS/JS dashboard displaying provider status, account pools, and settings.
 2. **REST Endpoints**:
    - `GET /api/v1/dashboard/overview`: Returns operational status, provider account summaries, and masked credentials.
    - `POST /api/v1/dashboard/accounts`: Dynamically adds provider API keys into active rotation pools.

@@ -21,11 +21,39 @@ pub fn handle_dashboard_page(client: &mut TcpStream) -> io::Result<()> {
     let html = include_str!("../../../assets/dashboard.html");
     write!(
         client,
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         html.len(),
         html
     )?;
     client.flush()
+}
+
+pub fn handle_dashboard_asset(
+    client: &mut TcpStream,
+    path: &str,
+    include_body: bool,
+) -> io::Result<bool> {
+    let (content_type, body) = match path {
+        "/gateway-ui/dashboard.css" => (
+            "text/css; charset=utf-8",
+            include_str!("../../../assets/ui/dashboard.css"),
+        ),
+        "/gateway-ui/dashboard.js" => (
+            "application/javascript; charset=utf-8",
+            include_str!("../../../assets/ui/dashboard.js"),
+        ),
+        _ => return Ok(false),
+    };
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )?;
+    if include_body {
+        client.write_all(body.as_bytes())?;
+    }
+    client.flush()?;
+    Ok(true)
 }
 
 pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) -> io::Result<()> {
@@ -120,7 +148,27 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
         "catalog": crate::gateway::modules::get_system_module_catalog(),
         "mcp": {
             "status": "enabled",
-            "transports": ["stdio", "http-sse"],
+            "transports": ["stdio", "sse", "streamable_http", "http-sse"],
+            "options": [
+                {
+                    "name": "stdio",
+                    "type": "local",
+                    "command": "toolcase-gateway --mcp",
+                    "description": "Local — IDE spawns process via toolcase-gateway --mcp"
+                },
+                {
+                    "name": "sse",
+                    "type": "remote",
+                    "endpoint": "/mcp/sse",
+                    "description": "Remote — Server-Sent Events over HTTP"
+                },
+                {
+                    "name": "streamable_http",
+                    "type": "remote",
+                    "endpoint": "/mcp",
+                    "description": "Remote — Modern bidirectional HTTP"
+                }
+            ],
             "endpoints": {
                 "jsonrpc": "/mcp",
                 "sse": "/mcp/sse"

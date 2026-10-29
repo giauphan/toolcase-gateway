@@ -34,6 +34,24 @@ pub use storage::*;
 pub fn run() -> io::Result<()> {
     let _ = dotenvy::dotenv();
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("Toolcase Gateway / OmniRoute");
+        println!();
+        println!("Usage: omniroute [OPTIONS]");
+        println!("       toolcase-gateway [OPTIONS]");
+        println!();
+        println!("Options:");
+        println!("  --mcp, --mcp-stdio    Run Model Context Protocol (MCP) in stdio mode for IDE integration");
+        println!("  -h, --help            Print help information");
+        println!("  -V, --version         Print version information");
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     let listen_host = env_or("GW_LISTEN_HOST", "127.0.0.1");
     let listen_port = env_or("GW_LISTEN_PORT", "20130").parse().unwrap_or(20130);
     let max_connections: usize = env_or("GW_MAX_CONNECTIONS", "256").parse().unwrap_or(256);
@@ -176,6 +194,12 @@ pub fn run() -> io::Result<()> {
         max_connections,
         crate::runtime::admission::DEFAULT_MAX_IN_FLIGHT_BYTES,
     );
+    if args
+        .iter()
+        .any(|a| a == "--mcp" || a == "--mcp-stdio" || a == "-mcp")
+    {
+        return crate::api::mcp::run_stdio_transport(&store);
+    }
     let listener = TcpListener::bind((listen_host.as_str(), listen_port))?;
     let config = store.snapshot();
     crate::runtime::logger::log_message(

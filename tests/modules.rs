@@ -367,6 +367,23 @@ fn test_module_namespace_uniqueness_and_collision_prevention() {
         Err(ModuleError::ReservedNamespace(_))
     ));
 
+    let ui_reserved_ns = PersonalManifest {
+        id: "tool-ui".into(),
+        name: "Tool UI".into(),
+        version: "1.0.0".into(),
+        namespace: "/gateway-ui/custom".into(),
+        entrypoint: "/bin/echo".into(),
+        protocol: "stdio-stream".into(),
+        capabilities: vec![],
+        config_schema: None,
+        permissions: vec![],
+        group: None,
+    };
+    assert!(matches!(
+        reg.register_personal_module(ui_reserved_ns),
+        Err(ModuleError::ReservedNamespace(_))
+    ));
+
     // 3. Valid registration succeeds
     let valid_1 = PersonalManifest {
         id: "tool-valid-1".into(),

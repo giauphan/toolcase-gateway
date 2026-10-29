@@ -9,7 +9,7 @@
 3. **Prism OpenAI Adaptation** — Transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism (including transparent `reasoning_effort` and token injection).
 4. **Jev AI Decision API & OpenRouter Failover Pool** — Routes structured decision evaluations (`/jev/v1/systemone`, `/jev/v1/decisions`) and executes a structured 4-tier failover cascade (`Direct Jev -> Jev OpenRouter API Key -> OpenRouter Different Decision -> OpenRouter Browser Cookie`) with round-robin rotation and automatic cooldown demotion on credit caps (`401, 402, 403, 429`).
 5. **Muse AI CVM, Image & Video Generation** — Connects directly to Muse Confidential VMs via Noise XX encrypted WebSockets, supports text-to-image synthesis with configurable aspect ratios (`/muse-ai/v1/create-image`), text-to-video synthesis (`/muse-ai/v1/create-video`), interactive web studios (`/image-template`, `/video-template`), and provides headless Sentinel auto-approvals.
-6. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/gateway-config/dashboard` that saves settings and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
+6. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/dashboard` that saves settings and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
 
 Zero heavy async runtimes (`tokio` forbidden; standard library blocking networking only) and `#![forbid(unsafe_code)]`.
 
@@ -21,6 +21,7 @@ Zero heavy async runtimes (`tokio` forbidden; standard library blocking networki
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Web Dashboard](#web-dashboard)
+- [Model Context Protocol (MCP)](#model-context-protocol-mcp-control-plane)
 - [Provider Integrations](#provider-integrations)
   - [Prism OpenAI](#prism-openai)
   - [Jev AI Decision API](#jev-ai-decision-api)
@@ -40,7 +41,7 @@ graph TD
     Client["Client / IDE / Agent"] --> Gateway["toolcase-gateway (127.0.0.1:20130)"]
     Gateway --> Dispatcher{"Canonical Dispatcher<br>(src/routes.rs)"}
     
-    Dispatcher -->|"/gateway-config/dashboard"| Dashboard["Dashboard UI & REST API"]
+    Dispatcher -->|"/dashboard"| Dashboard["Dashboard UI & REST API"]
     Dispatcher -->|"/v1/chat/completions"| OmniRoute["OmniRoute: Failover & Casing Repair"]
     Dispatcher -->|"/jev/v1/*"| Jev["Jev Decision Engine: Account Pool"]
     Dispatcher -->|"/muse-ai/v1/*"| Muse["Muse CVM: Noise WS & Sentinel"]
@@ -84,7 +85,7 @@ GW_FALLBACK_MODELS="gpt-4o-mini,claude-3-5-sonnet" \
 ./target/release/toolcase-gateway
 ```
 
-Point your client at `http://127.0.0.1:20130` instead of the direct upstream address.
+Point your OpenAI-compatible client at `http://127.0.0.1:20130/ominroute` (e.g., base URL `http://127.0.0.1:20130/ominroute/v1`).
 
 ---
 
@@ -93,7 +94,7 @@ Point your client at `http://127.0.0.1:20130` instead of the direct upstream add
 The gateway includes an embedded, real-time web dashboard accessible at:
 
 ```
-http://127.0.0.1:20130/gateway-config/dashboard
+http://127.0.0.1:20130/dashboard
 ```
 
 From the dashboard, operators can:
@@ -102,6 +103,24 @@ From the dashboard, operators can:
 - Update target host, port, timeout, and default models without restarting.
 - Configure Muse credentials, VM IDs, default video prompt, and headless Sentinel auto-approval policies.
 - Automatically save all changes to `gateway_config.json` with POSIX `0600` permissions.
+
+---
+
+## Model Context Protocol (MCP) Control Plane
+
+The gateway provides native Model Context Protocol (MCP) server support with three connection options for AI agents, IDEs, and external orchestrators:
+
+1. **stdio (Local)**:
+   - IDE spawns process via `toolcase-gateway --mcp` (or `omniroute --mcp`).
+   - Uses standard newline-delimited JSON-RPC 2.0 over `stdin`/`stdout`. Supported in Claude Desktop, Cursor, Windsurf, and Antigravity.
+2. **SSE (Remote)**:
+   - Server-Sent Events over HTTP (`GET /mcp/sse`).
+   - Bidirectional session coordination with real-time event streaming.
+3. **Streamable HTTP (Remote)**:
+   - Modern bidirectional HTTP (`POST /mcp`).
+   - Complies with official MCP Streamable HTTP specifications for JSON-RPC 2.0 request/response exchange.
+
+Available MCP tools include `gateway_list_modules`, `gateway_get_module_info`, `gateway_set_module_state`, `gateway_install_personal_module`, `gateway_remove_personal_module`, and `gateway_get_system_metrics`.
 
 ---
 

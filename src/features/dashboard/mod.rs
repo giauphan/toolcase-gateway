@@ -9,6 +9,7 @@ pub use modules::{
 };
 pub use muse::handle_update_muse_config;
 pub use service::{
-    handle_add_provider_accounts, handle_dashboard_overview, handle_dashboard_page,
-    handle_save_provider_settings, handle_update_gateway_config, mask_key, persist_jev_keys,
+    handle_add_provider_accounts, handle_dashboard_asset, handle_dashboard_overview,
+    handle_dashboard_page, handle_save_provider_settings, handle_update_gateway_config, mask_key,
+    persist_jev_keys,
 };

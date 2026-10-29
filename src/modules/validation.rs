@@ -9,12 +9,14 @@ pub const RESERVED_PREFIXES: &[&str] = &[
     "/dashboard",
     "/assets",
     "/mcp",
+    "/sse",
     "/health",
     "/favicon.ico",
     "/video",
     "/v1",
     "/muse-config",
     "/gateway-config",
+    "/gateway-ui",
     "/video-template",
     "/image-template",
 ];
@@ -142,10 +144,5 @@ pub fn validate_sub_providers(providers: &[SubProviderManifest]) -> Result<(), M
 }
 
 pub fn is_loopback_http_endpoint(ep: &str) -> bool {
-    let lower = ep.to_ascii_lowercase();
-    (lower.starts_with("http://127.0.0.1")
-        || lower.starts_with("http://localhost")
-        || lower.starts_with("https://127.0.0.1")
-        || lower.starts_with("https://localhost"))
-        && !lower.contains('@')
+    crate::http::is_loopback_origin(ep)
 }

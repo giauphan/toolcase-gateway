@@ -112,6 +112,22 @@ impl AdmissionController {
             }
         }
     }
+
+    pub fn active_connections(&self) -> usize {
+        self.active_connections.load(Ordering::Relaxed)
+    }
+
+    pub fn in_flight_bytes(&self) -> usize {
+        self.in_flight_bytes.load(Ordering::Relaxed)
+    }
+
+    pub fn max_connections(&self) -> usize {
+        self.max_connections
+    }
+
+    pub fn max_in_flight_bytes(&self) -> usize {
+        self.max_in_flight_bytes
+    }
 }
 
 #[cfg(test)]

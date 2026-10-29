@@ -175,8 +175,8 @@ curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
    ```
 
 2. **Via Web Dashboard Upload**:
-   - Navigate to `http://127.0.0.1:20130/dashboard#modules-section`.
-   - Open **Install Self-Contained Module**.
+   - Navigate to `http://127.0.0.1:20130/dashboard#module-catalog`.
+   - Open **Install Custom Module (GitHub Repo, ZIP Archive, or Upload)**.
    - Select your `.zip` archive or paste a GitHub link.
    - Click **Install Module**.
 
@@ -203,7 +203,12 @@ Restart or reload the gateway. The module is automatically discovered and regist
 
 ### Option D: Via Model Context Protocol (MCP)
 
-AI agents connected over MCP can invoke the `gateway_install_personal_module` tool:
+AI agents and IDEs can connect over Model Context Protocol using any of the 3 supported transports:
+1. **stdio (Local)**: Local IDE connection where the IDE spawns the gateway process via `toolcase-gateway --mcp` (or `omniroute --mcp`).
+2. **SSE (Remote)**: Remote Server-Sent Events connection over HTTP (`GET /mcp/sse`).
+3. **Streamable HTTP (Remote)**: Remote modern bidirectional HTTP POST (`POST /mcp`).
+
+Once connected, agents invoke the `gateway_install_personal_module` tool:
 
 ```json
 {
@@ -304,7 +309,7 @@ for line in sys.stdin:
 2. **Path Containment**:
    - Module extraction ensures all files reside strictly inside the canonical target directory.
 3. **Child Process Containment**:
-   - Subprocesses execute with an isolated environment (`env_clear()`), retaining only necessary `PATH` and non-secret contextual identifiers (`MODULE_ID`, `MODULE_NAMESPACE`).
+   - Subprocesses execute with an isolated environment (`env_clear()`), retaining only an explicit allowlist of basic system variables (`PATH`, `HOME`, `LANG`, `TMPDIR`, `TZ`, `USER`) and non-secret contextual identifiers (`MODULE_ID`, `MODULE_NAMESPACE`, `MODULE_SUB_PROVIDER_ID`).
    - Standard timeouts (default 30 seconds) prevent runaway child processes.
 4. **Namespace Collision Defense**:
    - The registry rejects any module attempting to claim or shadow built-in routes (`/omniroute`, `/muse-ai`, `/jev`) or system routes (`/api`, `/dashboard`, `/mcp`).
