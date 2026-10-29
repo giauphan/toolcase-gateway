@@ -42,7 +42,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["default"] }
 ureq = { version = "3.2.1", features = ["rustls", "json"] }
 uuid = { version = "1.20.0", features = ["v4"] }
-snow = "0.9.6"
+snow = "0.10.0"
 tungstenite = { version = "0.24.0", features = ["rustls-tls-webpki-roots"] }
 flate2 = "1.0"
 rusqlite = { version = "0.30.0", features = ["bundled"] }
