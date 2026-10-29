@@ -4,7 +4,7 @@ use std::io::{self, ErrorKind, Read, Write};
 const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
 const MAX_HEAD_BYTES: usize = 64 * 1024;
 const MAX_REWRITE_WINDOW: usize = 1024 * 1024;
-const HOP_BY_HOP: [&str; 8] = [
+pub const HOP_BY_HOP: [&str; 8] = [
     "connection",
     "keep-alive",
     "proxy-authenticate",
@@ -273,6 +273,21 @@ pub fn stream_response(
     head: ResponseHead,
     request_body: &[u8],
 ) -> io::Result<()> {
+    if head.status == 304 || head.status == 204 || (100..=199).contains(&head.status) {
+        write!(client, "HTTP/1.1 {} {}\r\n", head.status, head.reason)?;
+        for (name, value) in &head.headers {
+            if name.eq_ignore_ascii_case("content-length")
+                || name.eq_ignore_ascii_case("transfer-encoding")
+                || HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
+            {
+                continue;
+            }
+            write!(client, "{name}: {value}\r\n")?;
+        }
+        write!(client, "Connection: close\r\n\r\n")?;
+        return client.flush();
+    }
+
     write!(client, "HTTP/1.1 {} {}\r\n", head.status, head.reason)?;
     for (name, value) in &head.headers {
         if name.eq_ignore_ascii_case("content-length")

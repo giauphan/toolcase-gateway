@@ -189,3 +189,184 @@ fn test_module_group_validation_rejects_duplicates() {
 
     assert!(reg.register_personal_module(manifest).is_err());
 }
+
+#[test]
+fn test_provider_prefix_required_and_rejects_empty_or_root() {
+    let mut reg = ModuleRegistry::new();
+    let mut manifest = PersonalManifest {
+        id: "no-prefix-mod".to_string(),
+        name: "No Prefix Mod".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: "".to_string(),
+        entrypoint: "/bin/sh".to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec!["chat".to_string()],
+        config_schema: None,
+        permissions: Vec::new(),
+        group: None,
+    };
+
+    // Empty namespace rejected
+    assert!(reg.register_personal_module(manifest.clone()).is_err());
+
+    // Whitespace namespace rejected
+    manifest.namespace = "   ".to_string();
+    assert!(reg.register_personal_module(manifest.clone()).is_err());
+
+    // Root slash namespace rejected
+    manifest.namespace = "/".to_string();
+    assert!(reg.register_personal_module(manifest.clone()).is_err());
+
+    // Multiple slashes rejected
+    manifest.namespace = "///".to_string();
+    assert!(reg.register_personal_module(manifest).is_err());
+}
+
+#[test]
+fn test_provider_prefix_rejects_reserved_gateway_urls() {
+    let mut reg = ModuleRegistry::new();
+    let reserved_samples = [
+        "/dashboard",
+        "/home",
+        "/api",
+        "/mcp",
+        "/sse",
+        "/health",
+        "/status",
+        "/metrics",
+        "/favicon.ico",
+        "/sw.js",
+        "/manifest.webmanifest",
+        "/robots.txt",
+        "/video",
+        "/v1",
+        "/gateway",
+        "/gateway-config",
+        "/gateway-ui",
+        "/video-template",
+        "/image-template",
+        "/muse-config",
+        "/dashboard/custom",
+        "/api/custom",
+    ];
+
+    for (i, prefix) in reserved_samples.iter().enumerate() {
+        let manifest = PersonalManifest {
+            id: format!("reserved-test-mod-{i}"),
+            name: "Reserved Test Mod".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: prefix.to_string(),
+            entrypoint: "/bin/sh".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: Vec::new(),
+            group: None,
+        };
+        let res = reg.register_personal_module(manifest);
+        assert!(
+            res.is_err(),
+            "Expected prefix '{prefix}' to be rejected as reserved gateway URL"
+        );
+    }
+}
+
+#[test]
+fn test_provider_prefix_rejects_builtin_provider_collisions() {
+    let mut reg = ModuleRegistry::new();
+    let builtin_samples = [
+        "/omniroute",
+        "/ominroute",
+        "/muse-ai",
+        "/muse",
+        "/jev",
+        "/jev-ai",
+        "/omniroute/v1",
+        "/muse-ai/v1",
+        "/jev/v1",
+    ];
+
+    for (i, prefix) in builtin_samples.iter().enumerate() {
+        let manifest = PersonalManifest {
+            id: format!("builtin-collision-test-{i}"),
+            name: "Collision Test Mod".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: prefix.to_string(),
+            entrypoint: "/bin/sh".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: Vec::new(),
+            group: None,
+        };
+        let res = reg.register_personal_module(manifest);
+        assert!(
+            res.is_err(),
+            "Expected prefix '{prefix}' to be rejected as colliding with builtin provider"
+        );
+    }
+}
+
+#[test]
+fn test_provider_prefix_rejects_malformed_syntax() {
+    let mut reg = ModuleRegistry::new();
+    let malformed_samples = [
+        "custom/no-leading-slash",
+        "/custom//double-slash",
+        "/custom/space in path",
+        "/custom/has?query",
+        "/custom/has#fragment",
+    ];
+
+    for (i, prefix) in malformed_samples.iter().enumerate() {
+        let manifest = PersonalManifest {
+            id: format!("malformed-test-{i}"),
+            name: "Malformed Test Mod".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: prefix.to_string(),
+            entrypoint: "/bin/sh".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: Vec::new(),
+            group: None,
+        };
+        assert!(
+            reg.register_personal_module(manifest).is_err(),
+            "Expected prefix '{prefix}' to be rejected as malformed"
+        );
+    }
+}
+
+#[test]
+fn test_sub_provider_requires_valid_non_root_subpath() {
+    let mut reg = ModuleRegistry::new();
+    let invalid_subpaths = ["/", "//", "/sub with space", "/sub?query"];
+
+    for (i, subpath) in invalid_subpaths.iter().enumerate() {
+        let manifest = PersonalManifest {
+            id: format!("sub-invalid-mod-{i}"),
+            name: "Invalid Subpath Mod".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: format!("/custom/sub-invalid-{i}"),
+            entrypoint: "/bin/sh".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            config_schema: None,
+            permissions: Vec::new(),
+            group: Some(ModuleGroupManifest {
+                enabled: true,
+                providers: vec![SubProviderManifest {
+                    id: "sub-1".to_string(),
+                    name: "Sub 1".to_string(),
+                    subpath: subpath.to_string(),
+                    capabilities: vec![],
+                }],
+            }),
+        };
+        assert!(
+            reg.register_personal_module(manifest).is_err(),
+            "Expected subpath '{subpath}' to be rejected as invalid"
+        );
+    }
+}

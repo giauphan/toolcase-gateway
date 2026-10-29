@@ -182,19 +182,14 @@ def seed_system_catalog_modules(conn: sqlite3.Connection):
             """, (m["id"], m["namespace"], m["name"], manifest_str))
 
 
-def apply_settings(
-    conn: sqlite3.Connection,
+def _merge_settings_env(
     data: dict,
     env_vars: Optional[Dict[str, str]] = None,
     overrides: Optional[Dict[str, Any]] = None,
-):
-    """Extracts, merges env vars, and persists gateway_config and muse_config."""
+) -> dict:
     env = env_vars or {}
     over = overrides or {}
-
-    # Merge base config
     merged = dict(data)
-    # Apply env variable mappings if present
     env_mappings = {
         "GW_MUSEAI_COOKIE": "museai_cookie",
         "GW_MUSEAI_WS_URL": "museai_ws_url",
@@ -206,17 +201,14 @@ def apply_settings(
         "MUSE_LIVE_VIDEO_PROMPT": "default_video_prompt",
     }
     for env_k, cfg_k in env_mappings.items():
-        if env_k in env and env[env_k]:
+        if env.get(env_k):
             merged[cfg_k] = env[env_k]
-
     merged.update(over)
+    return merged
 
-    # 1. Gateway config payload
-    excluded = {"jev_accounts", "jev_openrouter_accounts", "personal_modules"}
-    gw_payload = {k: v for k, v in merged.items() if k not in excluded and v is not None}
 
-    # 2. Muse config payload (for dashboard & muse module)
-    muse_payload = {
+def _build_muse_payload(merged: dict) -> dict:
+    return {
         "base_url": merged.get("museai_base_url") or merged.get("base_url") or "https://muse.ai",
         "ws_url": merged.get("museai_ws_url") or merged.get("ws_url") or "wss://hatch.metaaivm.com/v1/noise",
         "vm_id": merged.get("museai_vm_id") or merged.get("vm_id") or "",
@@ -229,6 +221,23 @@ def apply_settings(
         "allowed_types": merged.get("muse_approval_allowed_types") or ["network"],
         "timeout_secs": merged.get("muse_approval_timeout_secs") or merged.get("timeout_secs") or 30,
     }
+
+
+def _build_gw_payload(merged: dict) -> dict:
+    excluded = {"jev_accounts", "jev_openrouter_accounts", "personal_modules"}
+    return {k: v for k, v in merged.items() if k not in excluded and v is not None}
+
+
+def apply_settings(
+    conn: sqlite3.Connection,
+    data: dict,
+    env_vars: Optional[Dict[str, str]] = None,
+    overrides: Optional[Dict[str, Any]] = None,
+):
+    """Extracts, merges env vars, and persists gateway_config and muse_config."""
+    merged = _merge_settings_env(data, env_vars, overrides)
+    gw_payload = _build_gw_payload(merged)
+    muse_payload = _build_muse_payload(merged)
 
     with conn:
         conn.execute("""

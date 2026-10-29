@@ -271,12 +271,7 @@ impl ModuleRegistry {
             } else if desc.id == "jev" {
                 &["/jev", "/jev-ai"]
             } else if desc.id == "muse" {
-                &[
-                    "/muse-ai",
-                    "/v1/images/generations",
-                    "/video/v1/providers",
-                    "/v1/models",
-                ]
+                &["/muse-ai", "/v1/images/generations", "/video/v1/providers"]
             } else {
                 std::slice::from_ref(&ns_str)
             };

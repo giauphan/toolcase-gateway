@@ -19,7 +19,7 @@
       <span class="brand-name">Gateway Dashboard</span>
     </a>
     <button class="apps-button" id="appsbtn"><span>▦</span> Apps ⌄</button>
-    <div class="top-search" role="search">
+    <div class="top-search" role="search" aria-label="Global search">
       <span aria-hidden="true">⌕</span>
       <input id="topsearch" aria-label="Search modules and settings" placeholder="Search modules, providers, settings…" autocomplete="off">
       <span class="kbd-shortcut" aria-hidden="true">⌘ K</span>
@@ -224,10 +224,10 @@
             <option value="personal">Personal</option>
           </select>
           <div class="spacer"></div>
-          <div class="seg" role="group" aria-label="View format">
+          <fieldset class="seg" aria-label="View format">
             <button id="listMode" class="selected" type="button" aria-pressed="true">☷ List</button>
             <button id="cardMode" type="button" aria-pressed="false">▦ Cards</button>
-          </div>
+          </fieldset>
         </div>
         <p id="modules-feedback" class="ui-feedback" aria-live="polite"></p>
 
@@ -777,7 +777,7 @@ Accept: text/event-stream</pre>
   </main>
 </div>
 
-<div id="toast" role="status" aria-live="polite" class="is-hidden"></div>
+<output id="toast" aria-live="polite" class="is-hidden"></output>
 
 </body>
 </html>

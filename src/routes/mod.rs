@@ -102,7 +102,7 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
     let duration_ms = start.elapsed().as_millis() as u64;
     let status = match &result {
         Ok(s) => *s,
-        Err(e) if e.kind() == io::ErrorKind::BrokenPipe || e.kind() == io::ErrorKind::ConnectionReset => 499,
+        Err(e) if is_client_disconnect(e.kind()) => 499,
         Err(_) => 500,
     };
     crate::runtime::logger::log_access_with_status(
@@ -113,6 +113,17 @@ pub fn route_request(mut client: TcpStream, store: &ConfigStore) -> io::Result<(
         duration_ms,
     );
     result.map(|_| ())
+}
+
+fn is_client_disconnect(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::UnexpectedEof
+    )
 }
 
 pub fn route_request_dispatch(

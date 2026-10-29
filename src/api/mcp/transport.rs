@@ -222,110 +222,7 @@ pub fn handle_http_mcp(
     }
 
     if request.method.eq_ignore_ascii_case("post") {
-        if origin_hdr.is_some() {
-            let ct_ok = request
-                .headers
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-                .is_some_and(|(_, ct)| ct.to_ascii_lowercase().starts_with("application/json"));
-            if !ct_ok {
-                crate::http::write_error(
-                    client,
-                    415,
-                    "Unsupported Media Type",
-                    "MCP endpoint expects Content-Type: application/json",
-                )?;
-                return Ok(Some(415));
-            }
-        } else if let Some((_, ct)) = request
-            .headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-        {
-            if !ct.to_ascii_lowercase().starts_with("application/json") {
-                crate::http::write_error(
-                    client,
-                    415,
-                    "Unsupported Media Type",
-                    "MCP endpoint expects Content-Type: application/json",
-                )?;
-                return Ok(Some(415));
-            }
-        }
-
-        let session_id = super::sse::extract_session_id(request);
-        if let Some(session_id) = &session_id {
-            if !super::sse::has_session(session_id) {
-                let body = r#"{"error":"SSE session not found or expired"}"#;
-                let resp = format!(
-                    "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    cors_header,
-                    body.len(),
-                    body
-                );
-                client.write_all(resp.as_bytes())?;
-                client.flush()?;
-                return Ok(Some(404));
-            }
-        }
-
-        let req_str = String::from_utf8_lossy(&request.body);
-        let resp_json_opt = process_json_rpc(&req_str, store);
-
-        // Check if this request is targeted to an active SSE session
-        if let Some(session_id) = session_id {
-            if let Some(resp_json) = resp_json_opt {
-                if super::sse::send_to_session(&session_id, resp_json) {
-                    let resp = format!(
-                        "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
-                        cors_header
-                    );
-                    client.write_all(resp.as_bytes())?;
-                    client.flush()?;
-                    return Ok(Some(202));
-                }
-                let body = r#"{"error":"SSE session not found or expired"}"#;
-                let resp = format!(
-                    "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    cors_header,
-                    body.len(),
-                    body
-                );
-                client.write_all(resp.as_bytes())?;
-                client.flush()?;
-                return Ok(Some(404));
-            }
-            // Notification under SSE returns 202 Accepted
-            let resp = format!(
-                "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
-                cors_header
-            );
-            client.write_all(resp.as_bytes())?;
-            client.flush()?;
-            return Ok(Some(202));
-        }
-
-        // Streamable HTTP: Direct bidirectional HTTP response
-        if let Some(resp_json) = resp_json_opt {
-            let data = resp_json.as_bytes();
-            let head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
-                cors_header,
-                data.len()
-            );
-            client.write_all(head.as_bytes())?;
-            client.write_all(data)?;
-            client.flush()?;
-            return Ok(Some(200));
-        }
-        // Notifications return 202 Accepted with no body in Streamable HTTP MCP
-        let resp = format!(
-            "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
-            cors_header
-        );
-        client.write_all(resp.as_bytes())?;
-        client.flush()?;
-        return Ok(Some(202));
+        return handle_mcp_post(client, request, store, &cors_header, origin_hdr.is_some());
     }
 
     let body = r#"{"error":"Method not allowed; use POST /mcp or GET /mcp/sse"}"#;
@@ -338,6 +235,111 @@ pub fn handle_http_mcp(
     client.write_all(resp.as_bytes())?;
     client.flush()?;
     Ok(Some(405))
+}
+
+fn handle_mcp_post(
+    client: &mut TcpStream,
+    request: &Request,
+    store: &ConfigStore,
+    cors_header: &str,
+    has_origin: bool,
+) -> io::Result<Option<u16>> {
+    let has_ct = request
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+    let is_json =
+        has_ct.is_some_and(|(_, ct)| ct.to_ascii_lowercase().starts_with("application/json"));
+
+    if (has_origin && !is_json) || (!has_origin && has_ct.is_some() && !is_json) {
+        crate::http::write_error(
+            client,
+            415,
+            "Unsupported Media Type",
+            "MCP endpoint expects Content-Type: application/json",
+        )?;
+        return Ok(Some(415));
+    }
+
+    let session_id = super::sse::extract_session_id(request);
+    if let Some(session_id) = &session_id {
+        if !super::sse::has_session(session_id) {
+            let body = r#"{"error":"SSE session not found or expired"}"#;
+            let resp = format!(
+                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                cors_header,
+                body.len(),
+                body
+            );
+            client.write_all(resp.as_bytes())?;
+            client.flush()?;
+            return Ok(Some(404));
+        }
+    }
+
+    let req_str = String::from_utf8_lossy(&request.body);
+    let resp_json_opt = process_json_rpc(&req_str, store);
+
+    if let Some(session_id) = session_id {
+        return handle_sse_session_dispatch(client, cors_header, &session_id, resp_json_opt);
+    }
+
+    if let Some(resp_json) = resp_json_opt {
+        let data = resp_json.as_bytes();
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+            cors_header,
+            data.len()
+        );
+        client.write_all(head.as_bytes())?;
+        client.write_all(data)?;
+        client.flush()?;
+        return Ok(Some(200));
+    }
+
+    let resp = format!(
+        "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+        cors_header
+    );
+    client.write_all(resp.as_bytes())?;
+    client.flush()?;
+    Ok(Some(202))
+}
+
+fn handle_sse_session_dispatch(
+    client: &mut TcpStream,
+    cors_header: &str,
+    session_id: &str,
+    resp_json_opt: Option<String>,
+) -> io::Result<Option<u16>> {
+    if let Some(resp_json) = resp_json_opt {
+        if super::sse::send_to_session(session_id, resp_json) {
+            let resp = format!(
+                "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+                cors_header
+            );
+            client.write_all(resp.as_bytes())?;
+            client.flush()?;
+            return Ok(Some(202));
+        }
+        let body = r#"{"error":"SSE session not found or expired"}"#;
+        let resp = format!(
+            "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+            cors_header,
+            body.len(),
+            body
+        );
+        client.write_all(resp.as_bytes())?;
+        client.flush()?;
+        return Ok(Some(404));
+    }
+    let resp = format!(
+        "HTTP/1.1 202 Accepted\r\n{}Content-Length: 0\r\nConnection: close\r\n\r\n",
+        cors_header
+    );
+    client.write_all(resp.as_bytes())?;
+    client.flush()?;
+    Ok(Some(202))
 }
 
 #[cfg(test)]

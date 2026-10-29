@@ -34,7 +34,9 @@ pub fn dispatch_dashboard_route(
     }
     match clean_path {
         "" | "/" | "/gateway-config/dashboard" => {
-            if request.method.eq_ignore_ascii_case("get") || request.method.eq_ignore_ascii_case("head") {
+            if request.method.eq_ignore_ascii_case("get")
+                || request.method.eq_ignore_ascii_case("head")
+            {
                 let response = "HTTP/1.1 302 Found\r\nLocation: /dashboard\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
                 client.write_all(response.as_bytes())?;
                 client.flush()?;
@@ -50,6 +52,29 @@ pub fn dispatch_dashboard_route(
             }
         }
         "/sw.js" => {
+            let has_omni_context = request.path.contains('?')
+                || crate::http::header_value(&request.headers, "referer")
+                    .is_some_and(|r| r.contains("/omniroute") || r.contains("/ominroute"))
+                || crate::http::header_value(&request.headers, "cookie")
+                    .is_some_and(|c| c.contains("omniroute") || c.contains("ominroute"));
+
+            if has_omni_context {
+                let omni_enabled = store
+                    .module_registry()
+                    .read()
+                    .ok()
+                    .and_then(|reg| reg.get_module("omniroute").map(|m| m.status))
+                    .is_some_and(|status| status == crate::gateway::modules::ModuleStatus::Enabled);
+
+                if omni_enabled {
+                    let snapshot = store.snapshot();
+                    let status = crate::routes::modules::dispatch_builtin_omniroute(
+                        client, request, &snapshot, "/sw.js",
+                    )?;
+                    return Ok(Some(status));
+                }
+            }
+
             let response = "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             client.write_all(response.as_bytes())?;
             client.flush()?;

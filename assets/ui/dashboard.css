@@ -164,7 +164,7 @@ button:disabled {
 
 .apps-button {
   align-items: center;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(90, 40, 80, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 7px;
   color: #ffffff;
@@ -175,10 +175,10 @@ button:disabled {
 
 .top-search {
   align-items: center;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(90, 40, 80, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 8px;
-  color: #e4dfe5;
+  color: #ffffff;
   display: flex;
   flex: 1;
   margin-left: 8px;
@@ -901,12 +901,12 @@ tbody tr:hover {
   display: block;
 }
 
-.is-hidden {
-  display: none !important;
+body .is-hidden {
+  display: none;
 }
 
-.is-visible {
-  display: block !important;
+body .is-visible {
+  display: block;
 }
 
 /* DIALOGS */
@@ -947,13 +947,7 @@ tbody tr:hover {
   z-index: 100;
 }
 
-#toast.is-hidden {
-  display: none !important;
-}
 
-#toast.is-visible {
-  display: block !important;
-}
 
 .disclaimer {
   color: var(--text-muted);
@@ -1170,9 +1164,13 @@ tbody tr:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *:before, *:after {
-    animation: none !important;
+  html:focus-within {
     scroll-behavior: auto !important;
-    transition: none !important;
+  }
+  *, *:before, *:after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

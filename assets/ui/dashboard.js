@@ -84,7 +84,6 @@
   const saveMuseBtn = byId("save-muse-btn");
   const museOkMsg = byId("muse-ok-msg");
   const museErrMsg = byId("muse-err-msg");
-  const museBadge = byId("muse-badge");
 
   // Accounts Form & Table
   const tableBody = byId("accounts-tbody");
@@ -130,7 +129,6 @@
   let renderedModules = [];
   let pendingModuleAction = null;
   const moduleRequestsInFlight = new Set();
-  let moduleViewMode = "list";
 
   // Catalog Section
   const catalogGrid = byId("catalog-grid");
@@ -245,7 +243,6 @@
 
   // Module view mode toggling (List vs Cards)
   function setModuleViewMode(mode) {
-    moduleViewMode = mode;
     if (listModeBtn) {
       listModeBtn.classList.toggle("selected", mode === "list");
       listModeBtn.setAttribute("aria-pressed", mode === "list" ? "true" : "false");
@@ -372,7 +369,6 @@
     const detailBtn = e.target.closest(".module-detail");
     if (detailBtn) {
       showModuleDetail(detailBtn.dataset.moduleId);
-      return;
     }
   });
 
@@ -441,13 +437,13 @@
     const module = renderedModules.find(function(candidate) { return candidate.id === id; });
     if (!module || !moduleDetailDialog || !moduleDetailContent) return;
 
-    const capabilities = (module.capabilities && module.capabilities.length)
+    const capabilities = module.capabilities?.length
       ? module.capabilities.map(function(c) {
           return "<span class=\"cap\">" + escapeHtml(c) + "</span>";
         }).join(" ")
       : "<span class=\"hint\">None declared</span>";
 
-    const providers = (module.providers && module.providers.length)
+    const providers = module.providers?.length
       ? module.providers.map(function(p) {
           return "<li><strong>" + escapeHtml(p.id) + "</strong> (" + escapeHtml(p.kind || "provider") + ") · " +
             "<code>" + escapeHtml(p.prefix || module.namespace) + "</code> · " +
@@ -487,6 +483,18 @@
       return;
     }
 
+    function renderModuleActions(m, isBuiltin, isEnabled, isBusy) {
+      const busyAttr = isBusy ? " disabled" : "";
+      const toggleAction = isEnabled ? "false" : "true";
+      const toggleLabel = isEnabled ? "Disable" : "Enable";
+      const toggleBtn = "<button class=\"btn module-toggle\" data-module-id=\"" + escapeHtml(m.id) + "\" data-enable=\"" + toggleAction + "\"" + busyAttr + ">" + toggleLabel + "</button>";
+      let removeBtn = "";
+      if (!isBuiltin) {
+        removeBtn = " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
+      }
+      return toggleBtn + removeBtn;
+    }
+
     // Render Table Mode
     if (modulesTbody) {
       modulesTbody.innerHTML = modules.map(function(m) {
@@ -497,10 +505,7 @@
           return "<span class=\"cap\">" + escapeHtml(c) + "</span>";
         }).join("");
 
-        const toggleBtn = "<button class=\"btn module-toggle\" data-module-id=\"" + escapeHtml(m.id) + "\" data-enable=\"" + (isEnabled ? "false" : "true") + "\"" + (isBusy ? " disabled" : "") + ">" + (isEnabled ? "Disable" : "Enable") + "</button>";
-        const removeBtn = !isBuiltin
-          ? " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + (isBusy ? " disabled" : "") + ">Remove</button>"
-          : "";
+        const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
 
         return "<tr>" +
           "<td><button class=\"name-link module-detail\" data-module-id=\"" + escapeHtml(m.id) + "\">" + escapeHtml(m.id) + "</button></td>" +
@@ -509,7 +514,7 @@
           "<td><code>" + escapeHtml(m.namespace) + "</code></td>" +
           "<td>" + (caps || "<span class=\"hint\">None</span>") + "</td>" +
           "<td><span class=\"pill " + (isEnabled ? "good" : "gray") + "\">" + (isEnabled ? "Enabled" : "Disabled") + "</span></td>" +
-          "<td>" + toggleBtn + removeBtn + "</td>" +
+          "<td>" + actionBtns + "</td>" +
         "</tr>";
       }).join("");
     }
@@ -524,10 +529,7 @@
           return "<span class=\"cap\">" + escapeHtml(c) + "</span>";
         }).join(" ");
 
-        const toggleBtn = "<button class=\"btn module-toggle\" data-module-id=\"" + escapeHtml(m.id) + "\" data-enable=\"" + (isEnabled ? "false" : "true") + "\"" + (isBusy ? " disabled" : "") + ">" + (isEnabled ? "Disable" : "Enable") + "</button>";
-        const removeBtn = !isBuiltin
-          ? " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + (isBusy ? " disabled" : "") + ">Remove</button>"
-          : "";
+        const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
 
         return "<div class=\"card catalogitem\">" +
           "<div class=\"catalogtitle\">" +
@@ -537,7 +539,7 @@
           "<div class=\"catalogdesc\"><code>" + escapeHtml(m.namespace) + "</code><br>" + (caps || "None") + "</div>" +
           "<div class=\"minirow\">" +
             "<span class=\"pill " + (isEnabled ? "good" : "gray") + "\">" + (isEnabled ? "Enabled" : "Disabled") + "</span>" +
-            toggleBtn + removeBtn +
+            actionBtns +
           "</div>" +
         "</div>";
       }).join("");
@@ -546,7 +548,7 @@
 
   function renderCatalog(catalog) {
     if (!catalogGrid) return;
-    if (!catalog || !catalog.length) {
+    if (!catalog?.length) {
       catalogGrid.innerHTML = "<div class=\"empty-hint ui-grid-full\">No catalog entries declared.</div>";
       return;
     }
@@ -688,7 +690,7 @@
       setMessageVisible(modErrMsg, false);
 
       const sourceVal = modSource ? modSource.value.trim() : "";
-      const zipFileInput = modZipFile && modZipFile.files ? modZipFile.files[0] : null;
+      const zipFileInput = modZipFile?.files?.[0] ?? null;
 
       if (!sourceVal && !zipFileInput) {
         modErrMsg.textContent = "Please specify a GitHub/ZIP URL or select a ZIP archive file to upload.";
@@ -703,11 +705,11 @@
         const payload = {
           source: sourceVal || undefined,
           zip_base64: zipBase64 || undefined,
-          id: modId && modId.value.trim() ? modId.value.trim() : undefined,
-          name: modName && modName.value.trim() ? modName.value.trim() : undefined,
-          namespace: modNamespace && modNamespace.value.trim() ? modNamespace.value.trim() : undefined,
-          entrypoint: modEntrypoint && modEntrypoint.value.trim() ? modEntrypoint.value.trim() : undefined,
-          capabilities: modCaps && modCaps.value.trim()
+          id: modId?.value.trim() || undefined,
+          name: modName?.value.trim() || undefined,
+          namespace: modNamespace?.value.trim() || undefined,
+          entrypoint: modEntrypoint?.value.trim() || undefined,
+          capabilities: modCaps?.value.trim()
             ? modCaps.value.split(",").map(function(c) { return c.trim(); }).filter(Boolean)
             : undefined
         };
@@ -787,11 +789,18 @@
         if (omniDesc) omniDesc.textContent = "Model: " + (omni.default_model || config.default_model || "gpt-5.6-sol");
 
         const jevAccountsCount = (jev.accounts || []).length;
-        if (jevStatus) jevStatus.textContent = jevAccountsCount > 0 ? (jevAccountsCount + " account" + (jevAccountsCount === 1 ? "" : "s")) : "Configured";
+        if (jevStatus) {
+          const suffix = jevAccountsCount === 1 ? "" : "s";
+          jevStatus.textContent = jevAccountsCount > 0 ? `${jevAccountsCount} account${suffix}` : "Configured";
+        }
         if (jevDesc) jevDesc.textContent = "Base URL: " + (config.jev_base_url || "https://api.jev.ai");
 
         const orAccountsCount = (orJev.accounts || []).length;
-        if (openrouterStatus) openrouterStatus.textContent = orAccountsCount > 0 ? (orAccountsCount + " browser/key account" + (orAccountsCount === 1 ? "" : "s")) : (orJev.enabled ? "Enabled" : "Disabled");
+        if (openrouterStatus) {
+          const suffix = orAccountsCount === 1 ? "" : "s";
+          const fallback = orJev.enabled ? "Enabled" : "Disabled";
+          openrouterStatus.textContent = orAccountsCount > 0 ? `${orAccountsCount} browser/key account${suffix}` : fallback;
+        }
         if (openrouterDesc) openrouterDesc.textContent = "Model: " + (config.jev_openrouter_model || "anthropic/claude-3.5-sonnet");
 
         if (museStatus) museStatus.textContent = muse.configured ? "Configured" : "Default Config";
@@ -942,9 +951,9 @@
         base_url: cfgMuseBase ? cfgMuseBase.value.trim() : undefined,
         ws_url: cfgMuseWs ? cfgMuseWs.value.trim() : undefined,
         vm_id: cfgMuseVmid ? cfgMuseVmid.value.trim() : undefined,
-        access_token: cfgMuseToken && cfgMuseToken.value ? cfgMuseToken.value : undefined,
-        notary_token: cfgMuseNotary && cfgMuseNotary.value ? cfgMuseNotary.value : undefined,
-        cookie: cfgMuseCookie && cfgMuseCookie.value ? cfgMuseCookie.value : undefined,
+        access_token: cfgMuseToken?.value || undefined,
+        notary_token: cfgMuseNotary?.value || undefined,
+        cookie: cfgMuseCookie?.value || undefined,
         default_video_prompt: cfgMuseVideoPrompt ? cfgMuseVideoPrompt.value : undefined,
         approval: {
           mode: cfgMuseApprovalMode ? cfgMuseApprovalMode.value : undefined,
@@ -1009,7 +1018,7 @@
         jev_openrouter_model: cfgJevOrModel ? cfgJevOrModel.value.trim() : undefined,
         jev_openrouter_fallback_models: cfgJevOrFallbackModels ? cfgJevOrFallbackModels.value.trim() : undefined,
         jev_openrouter_enabled: cfgJevOrEnabled ? (cfgJevOrEnabled.value === "true") : true,
-        jev_credit_cooldown_secs: cfgJevCooldown && cfgJevCooldown.value ? Number.parseInt(cfgJevCooldown.value, 10) : undefined,
+        jev_credit_cooldown_secs: cfgJevCooldown?.value ? Number.parseInt(cfgJevCooldown.value, 10) : undefined,
       };
 
       fetch("/api/v1/dashboard/jev-config", {
@@ -1071,11 +1080,11 @@
       submitBtn.disabled = true;
       submitBtn.textContent = "Adding...";
 
-      const selectedProvider = (providerSelect && providerSelect.value) ? providerSelect.value : "jev";
+      const selectedProvider = providerSelect?.value || "jev";
       const payload = {
         provider: selectedProvider,
         api_keys: keys,
-        label: labelInput && labelInput.value.trim() ? labelInput.value.trim() : undefined
+        label: labelInput?.value.trim() || undefined
       };
 
       fetch("/api/v1/dashboard/accounts", {

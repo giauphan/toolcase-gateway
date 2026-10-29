@@ -167,11 +167,23 @@ pub fn install_module(
 
     // Validate Namespace (path URL prefix is required and must start with /)
     let ns_trimmed = manifest.namespace.trim().trim_end_matches('/');
-    if !ns_trimmed.starts_with('/') || ns_trimmed.len() < 2 {
+    if let Err(e) = crate::modules::validation::validate_module_namespace(
+        ns_trimmed,
+        &manifest.namespace,
+        &manifest.id,
+        &std::collections::HashMap::new(),
+    ) {
         let _ = fs::remove_dir_all(&staging_dir);
-        return Err(ModuleError::InvalidNamespace(manifest.namespace.clone()));
+        return Err(e);
     }
     manifest.namespace = ns_trimmed.to_string();
+
+    if let Some(ref grp) = manifest.group {
+        if let Err(e) = crate::modules::validation::validate_sub_providers(&grp.providers) {
+            let _ = fs::remove_dir_all(&staging_dir);
+            return Err(e);
+        }
+    }
 
     // Determine final module directory
     let target_dir = modules_root.join(&manifest.id);

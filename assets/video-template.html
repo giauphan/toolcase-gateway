@@ -123,7 +123,7 @@ body {
   text-decoration: none;
   padding: 6px 12px;
   border-radius: var(--radius-sm);
-  transition: all .15s ease;
+  transition: background .15s ease, color .15s ease;
 }
 .studio-nav a:hover {
   background: var(--surface-2);
@@ -221,7 +221,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: all .15s ease;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
 }
 .turn-tab:hover {
   border-color: var(--purple);
@@ -293,7 +293,7 @@ input:focus, select:focus, textarea:focus {
   font-size: 12px;
   font-weight: 600;
   user-select: none;
-  transition: all .15s ease;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
 }
 .chip:hover {
   border-color: var(--mint);
@@ -619,7 +619,7 @@ button#go:disabled {
       saveCurrentTurn();
       turnTabs.forEach(function(t){ t.classList.remove("active"); });
       tab.classList.add("active");
-      currentTurn = parseInt(tab.dataset.turn, 10) || 1;
+      currentTurn = Number.parseInt(tab.dataset.turn, 10) || 1;
       loadTurn(currentTurn);
     });
   });

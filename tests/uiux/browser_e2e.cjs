@@ -14,8 +14,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const baseUrl = process.env.GATEWAY_BASE_URL || "http://127.0.0.1:20130";
+const DEFAULT_VIEWPORT = Object.freeze({ width: 1440, height: 900 });
+const SCREENSHOT_DIR = path.resolve(__dirname, "../../target/screenshots");
+fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-async function newPage(browser, viewport = { width: 1440, height: 900 }) {
+async function newPage(browser, viewport = DEFAULT_VIEWPORT) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   const pageErrors = [];
@@ -44,7 +47,7 @@ async function imageSuccess(browser) {
     const image = document.getElementById("image-viewer");
     return image.complete && image.naturalWidth > 0;
   });
-  await page.screenshot({ path: "/tmp/screenshots/image_studio_desktop.png", fullPage: true });
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "image_studio_desktop.png"), fullPage: true });
   assert.deepEqual(pageErrors, []);
   await context.close();
 }
@@ -84,7 +87,7 @@ async function videoSuccess(browser) {
   await page.locator("#video-player").waitFor({ state: "visible" });
   assert.equal(await page.locator("#video-player").getAttribute("src"), "/muse-ai/v1/videos/fixture/content");
   assert.equal((await contentResponse).ok(), true);
-  await page.screenshot({ path: "/tmp/screenshots/video_studio_desktop.png", fullPage: true });
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "video_studio_desktop.png"), fullPage: true });
   assert.deepEqual(pageErrors, []);
   await context.close();
 }
@@ -192,9 +195,7 @@ async function dashboardOverviewAndNavigation(browser) {
 
   // Save screenshot of desktop overview
   await page.locator('.side-nav [data-go="overview"]').click();
-  const screenshotDir = path.join("/tmp", "screenshots");
-  fs.mkdirSync(screenshotDir, { recursive: true });
-  await page.screenshot({ path: path.join(screenshotDir, "gateway_odoo_desktop_overview.png"), fullPage: true });
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gateway_odoo_desktop_overview.png"), fullPage: true });
 
   assert.deepEqual(pageErrors, []);
   await context.close();
@@ -216,9 +217,7 @@ async function dashboardResponsiveMobile(browser) {
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#sidebar").isVisible(), false);
 
-  const screenshotDir = path.join("/tmp", "screenshots");
-  fs.mkdirSync(screenshotDir, { recursive: true });
-  await page.screenshot({ path: path.join(screenshotDir, "gateway_odoo_mobile_overview.png"), fullPage: true });
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gateway_odoo_mobile_overview.png"), fullPage: true });
 
   assert.deepEqual(pageErrors, []);
   await context.close();

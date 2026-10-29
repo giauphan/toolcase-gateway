@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::http::Request;
 use crate::providers::omniroute::OmniRouteAdapter;
 use crate::rewrite::json_string_value;
-use std::io;
+use std::io::{self, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
@@ -197,6 +197,43 @@ impl ProxyService {
             ),
         );
         let mut head = head;
+        let is_sw = crate::http::header_value(&request.headers, "service-worker")
+            .is_some_and(|v| v.eq_ignore_ascii_case("script"))
+            || request.path.ends_with("/sw.js")
+            || request.path.contains("/sw.js?");
+        let allowed_scope = if is_sw {
+            Some(match prefix {
+                Some(pfx) => format!("{pfx}/"),
+                None => "/".to_string(),
+            })
+        } else {
+            None
+        };
+
+        if head.status == 304 || head.status == 204 || (100..=199).contains(&head.status) {
+            let status = head.status;
+            write!(client, "HTTP/1.1 {status} {}\r\n", head.reason)?;
+            for (name, val) in &head.headers {
+                if name.eq_ignore_ascii_case("content-length")
+                    || name.eq_ignore_ascii_case("transfer-encoding")
+                    || (allowed_scope.is_some()
+                        && name.eq_ignore_ascii_case("service-worker-allowed"))
+                    || crate::http::HOP_BY_HOP
+                        .iter()
+                        .any(|h| name.eq_ignore_ascii_case(h))
+                {
+                    continue;
+                }
+                write!(client, "{name}: {val}\r\n")?;
+            }
+            if let Some(ref scope) = allowed_scope {
+                write!(client, "Service-Worker-Allowed: {scope}\r\n")?;
+            }
+            write!(client, "Connection: close\r\n\r\n")?;
+            client.flush()?;
+            return Ok(Some(status));
+        }
+
         if let Some(pfx) = prefix {
             if (300..=399).contains(&head.status) {
                 let target_host = &config.target_host;
@@ -216,7 +253,12 @@ impl ProxyService {
                     pfx,
                 );
                 let status = head.status;
-                super::prefix_rewrite::write_rewritten(client, &head, rewritten.as_bytes())?;
+                super::prefix_rewrite::write_rewritten(
+                    client,
+                    &head,
+                    rewritten.as_bytes(),
+                    allowed_scope.as_deref(),
+                )?;
                 return Ok(Some(status));
             }
         }

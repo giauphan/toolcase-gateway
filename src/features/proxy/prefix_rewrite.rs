@@ -14,6 +14,10 @@ pub const MAX_REWRITE_BODY: usize = 16 * 1024 * 1024;
 
 /// True when the response is HTML, JavaScript or CSS and therefore rewritable.
 pub fn is_rewritable(head: &ResponseHead) -> bool {
+    let status = head.status;
+    if status == 304 || status == 204 || (100..=199).contains(&status) {
+        return false;
+    }
     let Some(ct) = header_value(&head.headers, "content-type") else {
         return false;
     };
@@ -22,6 +26,7 @@ pub fn is_rewritable(head: &ResponseHead) -> bool {
         || ct.starts_with("text/css")
         || ct.contains("javascript")
         || ct.contains("ecmascript")
+        || ct.contains("manifest+json")
 }
 
 /// Prefixes root-relative URL literals in `body` with `prefix`.
@@ -96,7 +101,12 @@ pub fn read_full_body(upstream: &mut TcpStream, head: &ResponseHead) -> io::Resu
 }
 
 /// Writes `head` with a rewritten, length-delimited body.
-pub fn write_rewritten(client: &mut TcpStream, head: &ResponseHead, body: &[u8]) -> io::Result<()> {
+pub fn write_rewritten(
+    client: &mut TcpStream,
+    head: &ResponseHead,
+    body: &[u8],
+    allowed_scope: Option<&str>,
+) -> io::Result<()> {
     write!(client, "HTTP/1.1 {} {}\r\n", head.status, head.reason)?;
     for (name, value) in &head.headers {
         if name.eq_ignore_ascii_case("content-length")
@@ -105,10 +115,14 @@ pub fn write_rewritten(client: &mut TcpStream, head: &ResponseHead, body: &[u8])
             || name.eq_ignore_ascii_case("transfer-encoding")
             || name.eq_ignore_ascii_case("connection")
             || name.eq_ignore_ascii_case("keep-alive")
+            || (allowed_scope.is_some() && name.eq_ignore_ascii_case("service-worker-allowed"))
         {
             continue;
         }
         write!(client, "{name}: {value}\r\n")?;
+    }
+    if let Some(scope) = allowed_scope {
+        write!(client, "Service-Worker-Allowed: {scope}\r\n")?;
     }
     write!(
         client,
@@ -155,5 +169,61 @@ mod tests {
             rewrite_root_relative(r#"router.push("/home")"#, "/omniroute"),
             r#"router.push("/omniroute/home")"#
         );
+        assert_eq!(
+            rewrite_root_relative(
+                r#"{"start_url":"/dashboard","icons":[{"src":"/icon-192.png"}]}"#,
+                "/ominroute"
+            ),
+            r#"{"start_url":"/ominroute/dashboard","icons":[{"src":"/ominroute/icon-192.png"}]}"#
+        );
+    }
+
+    #[test]
+    fn is_rewritable_rejects_304_204_and_non_text() {
+        use super::is_rewritable;
+        use crate::http::ResponseHead;
+
+        let head_304 = ResponseHead {
+            status: 304,
+            reason: "Not Modified".into(),
+            headers: vec![("Content-Type".into(), "application/javascript".into())],
+            buffered_body: vec![],
+        };
+        assert!(!is_rewritable(&head_304));
+
+        let head_204 = ResponseHead {
+            status: 204,
+            reason: "No Content".into(),
+            headers: vec![("Content-Type".into(), "text/html".into())],
+            buffered_body: vec![],
+        };
+        assert!(!is_rewritable(&head_204));
+
+        let head_json = ResponseHead {
+            status: 200,
+            reason: "OK".into(),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            buffered_body: vec![],
+        };
+        assert!(!is_rewritable(&head_json));
+
+        let head_js = ResponseHead {
+            status: 200,
+            reason: "OK".into(),
+            headers: vec![("Content-Type".into(), "application/javascript".into())],
+            buffered_body: vec![],
+        };
+        assert!(is_rewritable(&head_js));
+
+        let head_manifest = ResponseHead {
+            status: 200,
+            reason: "OK".into(),
+            headers: vec![(
+                "Content-Type".into(),
+                "application/manifest+json; charset=utf-8".into(),
+            )],
+            buffered_body: vec![],
+        };
+        assert!(is_rewritable(&head_manifest));
     }
 }

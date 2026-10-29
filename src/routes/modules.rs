@@ -7,17 +7,19 @@ use crate::omniroute::handle_omniroute_proxy_with_prefix;
 use std::io::{self, Write};
 use std::net::TcpStream;
 
-fn dispatch_builtin_omniroute(
+pub(crate) fn dispatch_builtin_omniroute(
     client: &mut TcpStream,
     request: &crate::http::Request,
     config: &Config,
     subpath: &str,
 ) -> io::Result<u16> {
     let clean_sub = subpath.trim_matches('/');
-    let prefix = if request.path.starts_with("/omniroute") {
-        "/omniroute"
-    } else {
+    // OmniRoute supports canonical "/omniroute" as well as the alias "/ominroute".
+    // Default to canonical "/omniroute" for root paths like /sw.js.
+    let prefix = if request.path.starts_with("/ominroute") {
         "/ominroute"
+    } else {
+        "/omniroute"
     };
 
     if request.method.eq_ignore_ascii_case("get")

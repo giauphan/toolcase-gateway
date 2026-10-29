@@ -100,8 +100,7 @@ fn dashboard_page_route_serves_html_and_rejects_post() {
     assert!(body_str.contains("Gateway Dashboard"));
 
     // GET /dashboard/ (with trailing slash)
-    let (head_slash, body_slash) =
-        request_gateway("GET", "/dashboard/", b"", &store);
+    let (head_slash, body_slash) = request_gateway("GET", "/dashboard/", b"", &store);
     assert_eq!(head_slash.status, 200);
     assert!(String::from_utf8_lossy(&body_slash).contains("Gateway Dashboard"));
 
@@ -767,12 +766,18 @@ fn test_root_and_alias_redirect_to_dashboard() {
     // Test GET /
     let (head_root, _) = request_gateway("GET", "/", b"", &store);
     assert_eq!(head_root.status, 302);
-    assert_eq!(header_value(&head_root.headers, "location"), Some("/dashboard"));
+    assert_eq!(
+        header_value(&head_root.headers, "location"),
+        Some("/dashboard")
+    );
 
     // Test GET /gateway-config/dashboard
     let (head_alias, _) = request_gateway("GET", "/gateway-config/dashboard", b"", &store);
     assert_eq!(head_alias.status, 302);
-    assert_eq!(header_value(&head_alias.headers, "location"), Some("/dashboard"));
+    assert_eq!(
+        header_value(&head_alias.headers, "location"),
+        Some("/dashboard")
+    );
 
     // Test GET /sw.js
     let (head_sw, _) = request_gateway("GET", "/sw.js", b"", &store);

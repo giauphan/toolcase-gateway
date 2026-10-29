@@ -3,22 +3,40 @@
 use super::manifest::{ModuleDescriptor, ModuleError, ModuleKind, SubProviderManifest};
 use std::collections::{HashMap, HashSet};
 
-/// System-reserved prefixes that cannot be claimed by provider modules.
+/// System-reserved prefixes that cannot be claimed by provider modules to protect gateway URLs.
 pub const RESERVED_PREFIXES: &[&str] = &[
+    "/",
     "/api",
     "/dashboard",
+    "/home",
     "/assets",
     "/mcp",
     "/sse",
     "/health",
+    "/status",
+    "/metrics",
     "/favicon.ico",
+    "/sw.js",
+    "/manifest.webmanifest",
+    "/robots.txt",
     "/video",
     "/v1",
     "/muse-config",
+    "/gateway",
     "/gateway-config",
     "/gateway-ui",
     "/video-template",
     "/image-template",
+];
+
+/// Known built-in provider prefixes that cannot be claimed or shadowed by personal modules.
+pub const BUILTIN_PROVIDER_PREFIXES: &[&str] = &[
+    "/ominroute",
+    "/omniroute",
+    "/muse-ai",
+    "/muse",
+    "/jev",
+    "/jev-ai",
 ];
 
 pub fn validate_module_id(
@@ -48,26 +66,47 @@ pub fn validate_module_namespace(
     id: &str,
     modules: &HashMap<String, ModuleDescriptor>,
 ) -> Result<(), ModuleError> {
-    if !ns.starts_with('/') || ns.len() < 2 {
+    let trimmed = ns.trim().trim_end_matches('/');
+    if trimmed.is_empty()
+        || !trimmed.starts_with('/')
+        || trimmed.len() < 2
+        || trimmed.contains("//")
+        || trimmed.chars().any(char::is_whitespace)
+        || !trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '/' || c == '-' || c == '_' || c == '.')
+    {
         return Err(ModuleError::InvalidNamespace(raw_ns.to_string()));
     }
+
     for reserved in RESERVED_PREFIXES {
-        if ns == *reserved || ns.starts_with(&format!("{reserved}/")) {
+        if *reserved == "/" {
+            if trimmed == "/" {
+                return Err(ModuleError::ReservedNamespace(raw_ns.to_string()));
+            }
+        } else if trimmed == *reserved
+            || trimmed.starts_with(&format!("{reserved}/"))
+            || reserved.starts_with(&format!("{trimmed}/"))
+        {
             return Err(ModuleError::ReservedNamespace(raw_ns.to_string()));
         }
     }
-    const OMNIROUTE_ALIASES: &[&str] = &["/ominroute", "/omniroute"];
-    if OMNIROUTE_ALIASES
-        .iter()
-        .any(|a| ns == *a || ns.starts_with(&format!("{a}/")) || a.starts_with(&format!("{ns}/")))
-    {
-        return Err(ModuleError::NamespaceCollision(raw_ns.to_string()));
+
+    for builtin in BUILTIN_PROVIDER_PREFIXES {
+        if trimmed == *builtin
+            || trimmed.starts_with(&format!("{builtin}/"))
+            || builtin.starts_with(&format!("{trimmed}/"))
+        {
+            return Err(ModuleError::NamespaceCollision(raw_ns.to_string()));
+        }
     }
+
     for (other_id, desc) in modules {
+        let other_ns = desc.namespace.trim_end_matches('/');
         if other_id != id
-            && (desc.namespace == ns
-                || ns.starts_with(&format!("{}/", desc.namespace))
-                || desc.namespace.starts_with(&format!("{ns}/")))
+            && (other_ns == trimmed
+                || trimmed.starts_with(&format!("{other_ns}/"))
+                || other_ns.starts_with(&format!("{trimmed}/")))
         {
             return Err(ModuleError::NamespaceCollision(raw_ns.to_string()));
         }
@@ -126,12 +165,24 @@ pub fn validate_sub_providers(providers: &[SubProviderManifest]) -> Result<(), M
             )));
         }
 
-        let clean_subpath = if p.subpath.is_empty() {
+        let clean_subpath = if p.subpath.trim().is_empty() {
             format!("/{trimmed_id}")
-        } else if !p.subpath.starts_with('/') {
-            format!("/{}", p.subpath.trim_end_matches('/'))
         } else {
-            p.subpath.trim_end_matches('/').to_string()
+            let s = p.subpath.trim().trim_end_matches('/');
+            if !s.starts_with('/')
+                || s.len() < 2
+                || s.contains("//")
+                || s.chars().any(char::is_whitespace)
+                || !s.chars().all(|c| {
+                    c.is_ascii_alphanumeric() || c == '/' || c == '-' || c == '_' || c == '.'
+                })
+            {
+                return Err(ModuleError::InvalidManifest(format!(
+                    "Sub-provider '{trimmed_id}' must specify a valid subpath prefix starting with '/' (got '{}')",
+                    p.subpath
+                )));
+            }
+            s.to_string()
         };
 
         if !subpaths.insert(clean_subpath.clone()) {
