@@ -2,7 +2,7 @@
 
 use crate::config::ConfigStore;
 use crate::http::write_error;
-use std::io;
+use std::io::{self, Write};
 use std::net::TcpStream;
 
 pub fn dispatch_dashboard_route(
@@ -11,8 +11,51 @@ pub fn dispatch_dashboard_route(
     store: &ConfigStore,
     clean_path: &str,
 ) -> io::Result<Option<u16>> {
+    if clean_path.starts_with("/gateway-ui/") {
+        if !request.method.eq_ignore_ascii_case("get")
+            && !request.method.eq_ignore_ascii_case("head")
+        {
+            write_error(
+                client,
+                405,
+                "Method Not Allowed",
+                "gateway UI assets only support GET and HEAD",
+            )?;
+            return Ok(Some(405));
+        }
+        if crate::features::dashboard::handle_dashboard_asset(
+            client,
+            clean_path,
+            request.method.eq_ignore_ascii_case("get"),
+        )? {
+            return Ok(Some(200));
+        }
+        return Ok(None);
+    }
     match clean_path {
-        "" | "/" | "/dashboard" | "/gateway-config/dashboard" => handle_get(
+        "" | "/" | "/gateway-config/dashboard" => {
+            if request.method.eq_ignore_ascii_case("get") || request.method.eq_ignore_ascii_case("head") {
+                let response = "HTTP/1.1 302 Found\r\nLocation: /dashboard\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                client.write_all(response.as_bytes())?;
+                client.flush()?;
+                Ok(Some(302))
+            } else {
+                write_error(
+                    client,
+                    405,
+                    "Method Not Allowed",
+                    "root endpoint only supports GET and HEAD",
+                )?;
+                Ok(Some(405))
+            }
+        }
+        "/sw.js" => {
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            client.write_all(response.as_bytes())?;
+            client.flush()?;
+            Ok(Some(200))
+        }
+        "/dashboard" => handle_get(
             client,
             request,
             "dashboard",

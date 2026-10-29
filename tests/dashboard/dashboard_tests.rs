@@ -754,3 +754,28 @@ fn dashboard_accounts_openrouter_explicit_key_and_cookie_ingest_and_persistence(
     let _ = fs::remove_file(tmp_env);
     let _ = fs::remove_file(store.config_file);
 }
+
+#[test]
+fn test_root_and_alias_redirect_to_dashboard() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+    let cfg = test_config();
+    let store = ConfigStore::new(cfg, tmp_env.clone());
+
+    // Test GET /
+    let (head_root, _) = request_gateway("GET", "/", b"", &store);
+    assert_eq!(head_root.status, 302);
+    assert_eq!(header_value(&head_root.headers, "location"), Some("/dashboard"));
+
+    // Test GET /gateway-config/dashboard
+    let (head_alias, _) = request_gateway("GET", "/gateway-config/dashboard", b"", &store);
+    assert_eq!(head_alias.status, 302);
+    assert_eq!(header_value(&head_alias.headers, "location"), Some("/dashboard"));
+
+    // Test GET /sw.js
+    let (head_sw, _) = request_gateway("GET", "/sw.js", b"", &store);
+    assert_eq!(head_sw.status, 200);
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(store.config_file);
+}
