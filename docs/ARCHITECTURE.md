@@ -6,22 +6,25 @@
 
 ## 1. Subsystem Architecture
 
-The gateway serves four cohesive subsystems behind an admission controller and exclusive, fail-closed router:
+The gateway coordinates six cohesive subsystems behind an admission controller and exclusive, fail-closed router:
 
 ```mermaid
 flowchart TD
     Client[Client Request] --> Adm[Admission Controller & Quota Guard]
     Adm --> Parser[HTTP Framing & Header Parser]
-    Parser --> Router{Route Dispatcher\nsrc/routes.rs}
+    Parser --> Router{Route Dispatcher\nsrc/routes/}
 
     Router -->|/dashboard\n/api/v1/dashboard/*| Dash[Dashboard & Config Engine\nsrc/features/dashboard/]
-    Router -->|/jev/*, /jev-ai/*| Jev[Jev AI Decision Provider\nsrc/providers/jev/]
+    Router -->|/mcp\n/mcp/sse| MCP[Model Context Protocol Engine\nsrc/api/mcp/]
+    Router -->|/jev/*, /jev-ai/*| Jev[Jev AI Decision Provider\nsrc/modules/builtins/jev/]
     Router -->|/muse-ai/*, /video-template\n/muse-config| Muse[Muse AI CVM Subsystem\nsrc/museai/]
-    Router -->|/models, /v1/*\nUnclaimed paths| Omni[OmniRoute Upstream Proxy\nsrc/gateway/]
+    Router -->|/modules/*, /custom/*\n/api/v1/modules/*| Mod[Dynamic Modules & Groups\nsrc/modules/personal/]
+    Router -->|/omniroute, /v1/*\nUnclaimed paths| Omni[OmniRoute Upstream Proxy\nsrc/omniroute.rs]
 
     Dash --> Storage[(Standalone JSON Store\ngateway_config.json)]
+    Dash & Mod --> SQLite[(Encrypted SQLite DB\nAES-256-GCM Storage)]
     Jev --> JevPool[Account Pool & Round-Robin Rotation]
-    JevPool --> JevUpstream[Jev Decision API\njev-ai.org]
+    JevPool --> JevUpstream[Jev Decision API / OpenRouter]
 
     Muse --> Noise[Noise_XX CVM WebSocket]
     Muse --> Sentinel[Muse Sentinel Auto-Approval Coordinator]
@@ -36,13 +39,24 @@ flowchart TD
 
 ## 2. Route Ownership & Invariants
 
-Dispatch in `src/routes.rs` is **exclusive and fail-closed**: a request matching a subsystem namespace is strictly handled or rejected within that subsystem. It **never falls through** to the generic OmniRoute proxy. Unknown paths under reserved namespaces return `404 Not Found`; mismatched HTTP methods return `405 Method Not Allowed`.
+Dispatch in `src/routes/` is **exclusive and fail-closed**: a request matching a subsystem namespace is strictly handled or rejected within that subsystem. It **never falls through** to the generic OmniRoute proxy. Unknown paths under reserved namespaces return `404 Not Found`; mismatched HTTP methods return `405 Method Not Allowed`.
 
 | Route | Subsystem / Owner | Allowed Methods | Purpose |
 | :--- | :--- | :--- | :--- |
-| `/dashboard` | Dashboard UI | `GET` | Interactive pipeline, provider pool, and configuration dashboard |
+| `/dashboard`, `/dashboard/` | Dashboard UI | `GET` | Interactive pipeline, provider pool, and configuration dashboard |
+| `/sw.js`, `/manifest.webmanifest` | Dashboard PWA | `GET` | Service worker and web app manifest for dashboard PWA |
 | `/api/v1/dashboard/overview` | Dashboard API | `GET` | Aggregated provider status, masked credentials, and live config |
 | `/api/v1/dashboard/config` | Dashboard API | `POST` | Update gateway parameters (host, port, fallbacks, timeout) |
+| `/api/v1/dashboard/muse-config` | Dashboard API | `POST` | Update Muse AI endpoints, tokens, cookies, approvals, video prompt |
+| `/api/v1/dashboard/accounts` | Dashboard API | `POST` | Ingest multi-API keys/accounts into live rotation pools |
+| `/api/v1/dashboard/jev-config` | Dashboard API | `POST` | Update Jev AI base URLs, OpenRouter models, and cooldowns |
+| `/mcp` | MCP Transport | `POST` | Model Context Protocol Streamable HTTP endpoint for AI agents |
+| `/mcp/sse` | MCP Transport | `GET` | Model Context Protocol Server-Sent Events (SSE) stream |
+| `/api/v1/modules` | Module Registry | `GET` | List all discovered, installed, and built-in provider modules |
+| `/api/v1/modules/install` | Module Registry | `POST` | Dynamically install module from local path, ZIP, or GitHub repo |
+| `/api/v1/modules/state` | Module Registry | `POST` | Enable or disable an installed module |
+| `/api/v1/modules/{id}` | Module Registry | `DELETE` | Uninstall and purge a personal provider module |
+| `/modules/*`, `/custom/*` | Personal Modules | Any | Dedicated URL prefix routed to dynamic out-of-tree personal modules |
 | `/api/v1/dashboard/muse-config` | Dashboard API | `POST` | Update Muse AI endpoints, tokens, cookies, approvals, video prompt |
 | `/api/v1/dashboard/accounts` | Dashboard API | `POST` | Ingest multi-API keys/accounts into live rotation pools |
 | `/jev/models`, `/jev/v1/models` | Jev Decision | `GET` | Supported Jev decision model catalog |
@@ -90,39 +104,50 @@ Dispatch in `src/routes.rs` is **exclusive and fail-closed**: a request matching
 - **Sentinel Headless Auto-Approval Coordinator**: Manages auto-approval policies for outbound network requests without requiring interactive browser automation. Modes: `off` (fail-closed, prompts browser approval), `observe` (logs decisions), and `on` (`scoped-auto`, automatically approves destinations matching `allowed_destinations`).
 - **Video Generation & Polling**: Handles video task submission, prompt revision tracking, artifact verification (`video_url`), and background thread cleanup (`src/museai/video.rs`, `src/museai/threads.rs`).
 
-### D. OmniRoute Reverse Proxy (`src/gateway/`)
+### D. OmniRoute Reverse Proxy (`src/omniroute.rs`, `src/rewrite.rs`)
 - **Candidate Model Planning**: Sequential candidate failover for transient or retryable errors (`401, 402, 403, 408, 429, 499, 500, 502, 503, 504, 524`). Non-retryable errors (`400 Bad Request`, `413 Payload Too Large`) fail immediately without consuming candidates.
 - **Tool-Name Case Repair**: Scans request tool definitions and restores exact casing in streamed responses (e.g. `bash` -> `Bash`) to repair casing mutations introduced by certain upstream models.
+
+### E. Model Context Protocol (MCP) Control Plane (`src/api/mcp/`, `src/features/mcp/`)
+- **Triple Transport Support**: Stdio JSON-RPC 2.0 (via CLI `--mcp` flag), Server-Sent Events (`GET /mcp/sse`), and Streamable HTTP (`POST /mcp`).
+- **Autonomous Toolset**: Exposes tools for listing modules, installing remote GitHub/ZIP packages, toggling module states, and querying live memory/traffic metrics.
+- **Agent Interoperability**: Seamless integration with modern AI engineering environments (Claude Desktop, Cursor, Windsurf, Antigravity).
+
+### F. Dynamic Personal Modules & Plugin Architecture (`src/modules/personal/`, `src/gateway/installer.rs`)
+- **WordPress/Odoo Paradigm**: Discovers self-contained modules located in `.gw_state/modules/<id>/`.
+- **Manifest Engine**: Supports declarative `module.json`, `manifest.json`, or `__manifest__.json` formats defining entrypoint scripts, protocols, and URL namespaces.
+- **Sub-Provider Groups**: Modules can declare multiple sub-providers mounted under subpaths, completely isolated from core system routes.
+
+### G. Encrypted Storage & Cryptographic Primitives (`src/storage/`)
+- **AES-256-GCM Envelope Encryption**: Credentials, API keys, and session cookies are encrypted before disk writes using hardware-accelerated AES-GCM.
+- **Deterministic Blind Indexing**: Uses HMAC-SHA256 blind indexing to allow constant-time credential lookups without decrypting the entire database.
+- **Embedded SQLite Engine**: Backed by `rusqlite` with the bundled SQLite engine for zero-configuration, robust ACID storage alongside the standalone `gateway_config.json`.
 
 ---
 
 ## 4. Module Map & Responsibilities
 
-The codebase follows strict Domain-Driven Design (DDD) with clear boundaries:
+The codebase follows strict Clean Architecture & Domain-Driven Design (DDD) with clear boundaries:
 
 | Path | Purpose / Domain | Line Target |
 | :--- | :--- | :--- |
-| `src/main.rs` | CLI executable entry point, signals, server loop | <150 lines |
+| `src/main.rs` | CLI executable entry point, signals, server loop, MCP stdio dispatch | <150 lines |
 | `src/lib.rs` | Public library entry, bootstrap, and store initialization | <180 lines |
-| `src/config.rs` | Configuration models, `PersistentConfig`, and `ConfigStore` | <480 lines |
-| `src/routes.rs` | Canonical route dispatch and status code enforcement | <450 lines |
-| `src/http.rs` | HTTP framing, header parsing, and write utilities | <400 lines |
-| `src/har_config.rs` | DevTools HAR capture parser and credential extractor | <800 lines |
-| `src/video_template.rs` | Handlers serving Video Studio and Muse Config HTML pages | <50 lines |
-| `src/features/dashboard/mod.rs` | Dashboard feature facade and re-exports | <20 lines |
-| `src/features/dashboard/service.rs` | Dashboard overview, gateway settings API, and account ingestion | <360 lines |
-| `src/features/dashboard/muse.rs` | Muse AI config mutation handler and validation | <200 lines |
-| `src/providers/jev/mod.rs` | Jev provider facade and exports | <30 lines |
-| `src/providers/jev/adapter.rs` | Jev upstream transport, execution, and catalog handler | <160 lines |
-| `src/providers/jev/accounts.rs` | Jev multi-account pool, round-robin, and failover state | <120 lines |
-| `src/providers/jev/route.rs` | Jev route resolution and mapping | <60 lines |
-| `src/providers/jev/business.rs` | Jev retryable status classifier | <30 lines |
+| `src/config/` | Decomposed configuration: types, store, persistent JSON, and env resolution | <450 lines/module |
+| `src/routes/` | Modular fail-closed route dispatchers (dashboard, jev, muse, modules, templates) | <450 lines/module |
+| `src/api/mcp/` | MCP protocol framing, SSE streams, and streamable HTTP transports | <450 lines/module |
+| `src/features/mcp/` | MCP tool catalog, system metrics handler, and resource definitions | <450 lines/module |
+| `src/features/dashboard/` | Dashboard overview, gateway settings API, account ingestion, and module UI | <450 lines/module |
+| `src/features/har/` | HAR capture parser, credential extractor, and token masking | <450 lines/module |
+| `src/features/proxy/` | Prefix rewriting and reverse proxy helpers | <450 lines/module |
+| `src/modules/` | Clean Architecture module engine: builtins (jev, muse), personal, registry, catalog | <450 lines/module |
 | `src/museai/` | Muse AI subsystem: transport, noise, chat, video, approval, session | Decomposed <450/module |
 | `src/gateway/` | Candidate planning, retry classification, policy rules, archive extractor, module installer | Decomposed <450/module |
-| `src/runtime/` | Admission controller, byte guard, connection limits | Decomposed <450/module |
+| `src/storage/` | AES-256-GCM envelope encryption, blind indexing, and SQLite persistence | <450 lines/module |
+| `src/runtime/` | Admission controller, byte guard, connection limits, and logger (with ZIP compression) | Decomposed <450/module |
 | `src/codecs/` | SSE and chunked streaming decoders | Decomposed <450/module |
 
-For details on authoring, installing, and auto-discovering external provider modules (modeled after WordPress plugins and Odoo addons), consult [`docs/MODULES.md`](MODULES.md).
+For details on authoring, installing, and auto-discovering external provider modules, consult [`docs/MODULES.md`](MODULES.md).
 
 ---
 
@@ -130,6 +155,7 @@ For details on authoring, installing, and auto-discovering external provider mod
 
 1. **Zero External Async Runtime**: All I/O uses blocking `std::net::TcpStream` with thread-per-connection pools bounded by `GW_MAX_CONNECTIONS`. No `tokio`, `async-std`, or hidden event loops.
 2. **`#![forbid(unsafe_code)]`**: Enforced compiler-wide in `Cargo.toml`. Zero unsafe blocks across the entire codebase.
-3. **Zero New Dependencies**: Minimal, focused dependencies (`serde`, `serde_json`, `ureq`, `uuid`, `snow`, `tungstenite`, `dotenvy`). No external databases (e.g. SQLite); persistence is strictly file-based and atomic.
-4. **Strict Modular Line Ceilings**: Target under 450 lines per module (soft ceiling 800 lines maximum). Monolithic files must be decomposed into focused submodules with facade re-exports.
+3. **Embedded Local Storage**: Zero dependency on external database servers or cloud databases. Persistence is strictly local, using atomic `0600` JSON files and embedded SQLite (`rusqlite`) with AES-256-GCM encryption.
+4. **Strict Modular Line Ceilings**: Target under 450 lines per module (soft ceiling 800 lines maximum). Files exceeding this threshold must be partitioned into cohesive submodules with facade re-exports.
 5. **Fail-Closed Security**: Network bounds, URL schemes, and route namespaces fail closed by default.
+6. **Continuous Dependency Auditing**: Maintained with active Dependabot security checks for Cargo dependencies and GitHub Actions.

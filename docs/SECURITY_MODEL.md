@@ -9,9 +9,12 @@ the client it serves, reachable only over `127.0.0.1`.
 graph TD
     A["Trusted: Local Client / Editor / Agent"] --> B["Trusted: Gateway on 127.0.0.1"]
     B --> C["Dashboard & Runtime Storage (gateway_config.json 0600)"]
+    B --> C2["Encrypted SQLite Database (AES-256-GCM Envelope)"]
+    B --> MCP["Model Context Protocol (stdio / SSE / Streamable HTTP)"]
     B --> D["External Upstream: OmniRoute / Prism LLM APIs"]
     B --> E["External Upstream: Jev Decision API (Account Pool)"]
     B --> F["External Upstream: Muse AI (Noise CVM & Sentinel)"]
+    B --> G["External Modules: Subprocesses & Local Adapters"]
 ```
 
 **The gateway performs no public authentication and no multi-tenant authorization.** Any process that
@@ -32,7 +35,9 @@ gateway on loopback.
 | :--- | :--- | :--- |
 | **Client to gateway** | inbound | Client is local and authorized by OS-level access control. Bytes are parsed defensively; malformed heads or oversized bodies are rejected before allocation. |
 | **Dashboard to gateway** | inbound | Web UI and REST API run strictly over loopback. Submissions are strictly validated; secrets are masked on read. |
-| **Gateway to persistent storage** | local disk | Persistent JSON (`gateway_config.json`) is stored locally with atomic replacement and POSIX `0600` permissions (owner read/write only). `.env` is never overwritten. |
+| **MCP client to gateway** | inbound | MCP stdio, SSE, or Streamable HTTP callers are local agents. Commands are strictly validated against tool definitions. |
+| **Gateway to persistent storage** | local disk | Persistent JSON (`gateway_config.json`) is stored locally with atomic replacement and POSIX `0600` permissions (owner read/write only). Stored credentials in SQLite are protected via AES-256-GCM envelope encryption and blind indexing. `.env` is never overwritten. |
+| **Gateway to Personal Modules** | local subprocess | Out-of-tree plugins execute in isolated child processes with sanitized environments. Parent process keys and cookies are not passed downstream. |
 | **Gateway to OmniRoute / Prism** | outbound | Upstream is reachable over HTTP/HTTPS. Status lines dictate model candidate failover before body streaming begins. Responses are re-framed and tool casing is repaired. |
 | **Gateway to Jev Decision API** | outbound | Upstream is reachable over HTTPS. Accounts in `JevAccountPool` rotate across requests. Account errors (`401, 402, 403, 429`) trigger silent failover without exposing raw keys. |
 | **Gateway to Muse AI (Noise CVM)** | outbound | Upstream WebSocket connection is authenticated via Noise XX handshake with mutual attestation. Inbound frames are bounded and strictly correlated to thread IDs. |
@@ -122,8 +127,9 @@ The runtime configuration dashboard at `/dashboard` and REST API endpoints
 1. **Credential Masking**: All read responses (`GET /api/v1/dashboard/overview`, `GET /muse-ai/v1/config`) mask API keys, tokens, and cookies. Only the first 6 and last 4 characters are exposed (e.g., `sk-glm...d74b`) or `***` for short secrets. Full plaintext credentials are never returned over read endpoints.
 2. **Isolated Persistent Storage (`gateway_config.json`)**: Persistent configuration changes are written to a standalone `gateway_config.json` file. The original `.env` file is left untouched. Updates write to a temporary file (`.gateway_config.json~tmp`) and atomically rename it to the target file.
 3. **POSIX File Permissions (`0600`)**: On Unix platforms, `gateway_config.json` and temporary staging files are explicitly created with permissions `0600` (read/write by owner only), preventing non-privileged local users from reading stored API keys.
-4. **Fail-Closed Validation**: Incoming JSON payloads are strictly validated. Unknown providers, empty key arrays, invalid ports, or malformed URLs immediately return HTTP 400 Bad Request.
-5. **Deduplication**: Ingesting existing provider API keys via `POST /api/v1/dashboard/accounts` deduplicates keys in memory to prevent rotation pool bloat.
+4. **AES-256-GCM Envelope Encryption & Blind Indexing**: Stored credentials in embedded SQLite are protected using AES-256-GCM authenticated encryption. Searchable queries use deterministic HMAC-SHA256 blind indexing (`derive_blind_index`), preventing raw secret exposure in SQLite tables.
+5. **Fail-Closed Validation**: Incoming JSON payloads are strictly validated. Unknown providers, empty key arrays, invalid ports, or malformed URLs immediately return HTTP 400 Bad Request.
+6. **Deduplication**: Ingesting existing provider API keys via `POST /api/v1/dashboard/accounts` deduplicates keys in memory to prevent rotation pool bloat.
 
 ---
 
@@ -198,6 +204,9 @@ Key security tests:
 - `test_atomic_config_persistence_mode_0600`
 - `test_mask_key_redaction`
 - `test_approval_policy_evaluator`
+- `test_secret_encryption_and_decryption_roundtrip`
+- `test_sqlite_account_credential_encryption_and_decryption`
+- `test_derive_blind_index_deterministic`
 
 ---
 

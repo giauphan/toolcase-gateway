@@ -9,31 +9,37 @@ Use this document as an authoritative architectural map before modifying code.
 
 `toolcase-gateway` is a high-performance, zero-async, local Rust reverse proxy and sidecar gateway designed to run alongside local clients (IDEs, agent runners, developer tooling).
 
-It orchestrates four primary subsystems:
+It orchestrates six primary subsystems:
 
 ```mermaid
 graph TD
-    Client["Client (Agent / IDE / curl)"] --> Listener["Gateway Listener (127.0.0.1:20129)"]
-    Listener --> Dispatcher["Canonical Dispatcher (src/routes.rs)"]
+    Client["Client (Agent / IDE / curl)"] --> Listener["Gateway Listener (127.0.0.1:20130)"]
+    Listener --> Dispatcher["Canonical Dispatcher (src/routes/)"]
     
     Dispatcher -->|"/dashboard"<br>"/api/v1/dashboard/*"| Dashboard["Dashboard Subsystem<br>(src/features/dashboard)"]
+    Dispatcher -->|"/mcp"<br>"/mcp/sse"| MCPSubsystem["MCP Control Plane<br>(src/api/mcp)"]
     Dispatcher -->|"/v1/chat/completions"<br>"/v1/models"| OmniRoute["OmniRoute Proxy<br>(src/omniroute.rs)"]
-    Dispatcher -->|"/jev/v1/*"<br>"/jev-ai/v1/*"| JevSubsystem["Jev Decision Subsystem<br>(src/providers/jev)"]
-    Dispatcher -->|"/muse-ai/v1/*"<br>"/muse-config"| MuseSubsystem["Muse AI Subsystem<br>(src/providers/museai)"]
+    Dispatcher -->|"/jev/v1/*"<br>"/jev-ai/v1/*"| JevSubsystem["Jev Decision Subsystem<br>(src/modules/builtins/jev)"]
+    Dispatcher -->|"/muse-ai/v1/*"<br>"/muse-config"| MuseSubsystem["Muse AI Subsystem<br>(src/museai)"]
+    Dispatcher -->|"/modules/*"<br>"/custom/*"| ModuleSubsystem["Dynamic Modules & Groups<br>(src/modules/personal)"]
     Dispatcher -->|"/video/v1/*"<br>"/video-template"| VideoStudio["Video Studio Subsystem<br>(src/features/video)"]
 
     Dashboard --> Storage[("Persistent Storage<br>gateway_config.json (0600)")]
+    Dashboard & ModuleSubsystem --> SQLite[("Encrypted SQLite DB<br>(AES-256-GCM)")]
     OmniRoute --> UpstreamLLM["External LLM Upstream<br>(Prism / OpenAI / DeepSeek)"]
-    JevSubsystem --> UpstreamJev["External Jev Upstream<br>(jev-ai.org)"]
+    JevSubsystem --> UpstreamJev["External Jev Upstream<br>(jev-ai.org / OpenRouter)"]
     MuseSubsystem --> UpstreamMuse["External Muse CVM<br>(Noise XX / Sentinel)"]
+    ModuleSubsystem --> Subprocesses["External Subprocesses / HTTP Adapters"]
 ```
 
 ### Primary Subsystems
 1. **OmniRoute Proxy**: OpenAI-compatible `/v1/chat/completions` proxy providing transparent model candidate failover, request-response tool-name casing restoration, and stream chunking without buffering entire response bodies.
-2. **Jev Decision API**: Multi-account round-robin pool (`JevAccountPool`) and automatic failover on credit exhaustion or auth errors (`401, 402, 403, 429`) routing specialized decision payloads (`/jev/v1/systemone`).
-3. **Muse AI Subsystem**: End-to-end encrypted Noise XX WebSocket transport communicating directly with remote Confidential VMs (CVM), video generation (`/muse-ai/v1/create-video`), durable job state, and headless Sentinel auto-approval coordinator.
-4. **Interactive Dashboard & Standalone Persistent Storage**: Embedded web UI at `/dashboard` and REST endpoints at `/api/v1/dashboard/*` providing real-time overview, provider account ingestion, and atomic POSIX `0600` persistence to `gateway_config.json`.
-5. **Video Studio**: Provider task registration, polling, and reconciliation at `/video/v1/*` and `/video-template`.
+2. **Jev Decision API**: Multi-account round-robin pool (`JevAccountPool`) and automatic failover on credit exhaustion or auth errors (`401, 402, 403, 429`) routing specialized decision payloads (`/jev/v1/systemone`) and OpenRouter decision tiers.
+3. **Muse AI Subsystem**: End-to-end encrypted Noise XX WebSocket transport communicating directly with remote Confidential VMs (CVM), conversational chat continuity, video generation (`/muse-ai/v1/create-video`), image synthesis (`/muse-ai/v1/create-image`), and headless Sentinel auto-approval coordinator.
+4. **Interactive Dashboard & Standalone Persistent Storage**: Embedded web UI at `/dashboard` and REST endpoints at `/api/v1/dashboard/*` providing real-time overview, provider account ingestion, PWA support, and atomic POSIX `0600` persistence to `gateway_config.json`.
+5. **Model Context Protocol (MCP) Control Plane**: Native MCP server engine implementing stdio, SSE (`/mcp/sse`), and Streamable HTTP (`/mcp`) transports for autonomous AI engineering environments.
+6. **Dynamic Modules & Plugin Architecture**: WordPress/Odoo-style self-contained personal modules, declarative manifests, GitHub/ZIP remote installation, and prefix-isolated URL namespaces.
+7. **Encrypted Storage Subsystem**: Embedded SQLite engine (`rusqlite`) utilizing hardware-accelerated AES-256-GCM envelope encryption and blind indexing for credential and module state storage.
 
 ---
 
@@ -45,10 +51,11 @@ Every change to the codebase must maintain these foundational invariants:
 2. **Memory Safety**: `#![forbid(unsafe_code)]` is enforced at crate root and compiler lints. No `unsafe` blocks are permitted anywhere in the repository.
 3. **File Size Ceilings**:
    - **Target**: Under **450 lines** per file.
-   - **Soft Ceiling**: **800 lines** maximum. Files approaching 800 lines must be partitioned into cohesive submodules following Domain-Driven Design (DDD).
-4. **Fail-Closed Canonical Routing**: Route matching is centralized exclusively in `src/routes.rs`. Unknown routes or invalid HTTP methods fail closed immediately (HTTP 404 or 405) with JSON error envelopes.
+   - **Soft Ceiling**: **800 lines** maximum. Files approaching 800 lines must be partitioned into cohesive submodules following Clean Architecture and Domain-Driven Design (DDD).
+4. **Fail-Closed Canonical Routing**: Route matching is centralized exclusively in `src/routes/`. Unknown routes or invalid HTTP methods fail closed immediately (HTTP 404 or 405) with JSON error envelopes.
 5. **Subsystem Facade Encapsulation**: Domain modules are encapsulated behind module facades (`pub(crate) use` in `mod.rs`), preserving stable internal contracts and backward-compatible entry points (e.g. `src/museai/mod.rs` and `src/jev/mod.rs`).
-6. **Isolated Persistent Configuration**: User configuration updates are persisted exclusively to `gateway_config.json` via atomic rename and restricted permissions (`0600`). The startup `.env` file is never rewritten or corrupted.
+6. **Isolated Persistent Configuration**: User configuration updates are persisted to `gateway_config.json` via atomic rename and restricted permissions (`0600`) and to encrypted SQLite. The startup `.env` file is never rewritten or corrupted.
+7. **Continuous Supply-Chain Verification**: Dependabot actively tracks Cargo dependencies and GitHub Actions workflows, resolving all published advisories.
 
 ---
 
@@ -88,30 +95,29 @@ flowchart TD
 
 ## 4. Components and Code Ownership
 
-Runtime code is cleanly separated into focused modules under `src/`:
+Runtime code is cleanly separated into focused modules under `src/` honoring Clean Architecture and Domain-Driven Design (DDD) rules:
 
-| Directory / File | Lines | Architectural Responsibility | When to modify |
+| Directory / File | Lines Target | Architectural Responsibility | When to modify |
 | :--- | :--- | :--- | :--- |
-| `src/main.rs` | ~70 | CLI entry point, signal handling, TCP listener loop, admission bounds | Modifying process startup or listen loop |
-| `src/lib.rs` | ~25 | Crate entry point, library facade re-exports | Exposing crate-level library APIs |
-| `src/routes.rs` | ~430 | Canonical route dispatcher, HTTP method gating, CORS preflight | Adding or modifying any API or route path |
-| `src/config.rs` | ~420 | `Config`, `ConfigStore`, `PersistentConfig`, env resolution, atomic `0600` JSON persistence | Adding configuration fields or storage rules |
-| `src/http.rs` | ~380 | HTTP/1.1 framing parser, header validation, chunked encoding, error writer | Changing HTTP syntax rules or size limits |
-| `src/omniroute.rs` | ~390 | OmniRoute fallback candidate runner, streaming proxy, response writer | Modifying model failover or stream piping |
-| `src/rewrite.rs` | ~220 | Pure stream transformations, tool-name casing restoration, JSON string parsing | Tuning tool casing repair logic |
-| `src/har_config.rs` | ~780 | HAR capture extraction, cookie/token parsing, credential validation | Updating HAR import parsing algorithms |
-| `src/video_template.rs` | ~320 | Embedded HTML asset delivery (`/video-template`, `/muse-config`) | Modifying static template delivery |
-| `src/runtime/` | ~110 | Resource bounds, in-flight byte tracking (`admission.rs`) | Tuning global memory admission bounds |
-| `src/gateway/` | ~280 | Candidate selection, capability detection, retry delay math | Changing model candidate ordering or retry timings |
-| `src/codecs/` | ~90 | SSE parser and chunk framing | Modifying SSE wire format decoding |
-| `src/features/dashboard/` | ~550 | Dashboard UI (`/dashboard`), overview endpoint, account ingestion, config updates | Adding dashboard fields or provider UI features |
-| `src/features/video/` | ~260 | Multi-provider video task registry, status polling, task reconciliation | Adding video studio provider adapters |
-| `src/features/proxy/` | ~180 | Upstream HTTP proxy forwarding abstractions | Modifying core proxy forwarding primitives |
-| `src/providers/omniroute/` | ~140 | OmniRoute provider adapter and dispatch | Changing OmniRoute invocation contracts |
-| `src/providers/jev/` | ~430 | Jev Decision API adapter, `JevAccountPool` rotation & failover, route mapping | Modifying Jev Decision API routing or pool logic |
-| `src/providers/museai/` | ~1800 | Muse AI subsystem, Noise XX transport, Sentinel auto-approval coordinator, chat & video services | Modifying Muse CVM communication or Sentinel policies |
-| `src/museai/mod.rs` | ~15 | Backwards-compatible facade re-exports for Muse AI | Preserving public entry point contracts |
-| `src/jev/mod.rs` | ~10 | Backwards-compatible facade re-exports for Jev AI | Preserving public entry point contracts |
+| `src/main.rs` | <150 | CLI entry point, signal handling, TCP listener loop, admission bounds, `--mcp` entry | Modifying process startup or listen loop |
+| `src/lib.rs` | <180 | Crate entry point, library facade re-exports, bootstrap | Exposing crate-level library APIs |
+| `src/routes/` | <450/mod | Modular fail-closed route dispatchers (`dashboard`, `jev`, `modules`, `muse`, `templates`) | Adding or modifying any API or route path |
+| `src/config/` | <450/mod | Modular config (`types`, `store`, `persistent`, `env`), atomic `0600` JSON persistence | Adding configuration fields or storage rules |
+| `src/api/mcp/` | <450/mod | Native MCP server engine: stdio, SSE (`/mcp/sse`), and Streamable HTTP (`/mcp`) | Extending Model Context Protocol capabilities |
+| `src/storage/` | <450/mod | SQLite database (`rusqlite`), AES-256-GCM envelope encryption, blind indexing | Modifying encrypted credential or module storage |
+| `src/modules/` | <450/mod | Clean Architecture modular system: built-in providers (`jev`, `museai`), personal plugins, catalog | Adding or modifying provider modules |
+| `src/http.rs` | <400 | HTTP/1.1 framing parser, header validation, chunked encoding, error writer | Changing HTTP syntax rules or size limits |
+| `src/omniroute.rs` | <400 | OmniRoute fallback candidate runner, streaming proxy, response writer | Modifying model failover or stream piping |
+| `src/rewrite.rs` | <250 | Pure stream transformations, tool-name casing restoration, JSON string parsing | Tuning tool casing repair logic |
+| `src/har_config.rs` | <800 | HAR capture extraction, cookie/token parsing, credential validation | Updating HAR import parsing algorithms |
+| `src/video_template.rs` | <350 | Embedded HTML asset delivery (`/video-template`, `/image-template`, `/muse-config`) | Modifying static template delivery |
+| `src/runtime/` | <450/mod | Admission controller (`admission.rs`), multi-stream logger with ZIP compression (`logger/`) | Tuning memory bounds or log retention |
+| `src/gateway/` | <450/mod | Candidate selection, retry policies, module installer (`installer.rs`, `archive.rs`) | Changing retry timings or module packaging |
+| `src/codecs/` | <150 | SSE parser and chunk framing | Modifying SSE wire format decoding |
+| `src/features/dashboard/` | <450/mod | Dashboard UI, overview endpoint, account ingestion, config updates, PWA handlers | Adding dashboard fields or provider UI features |
+| `src/features/mcp/` | <450/mod | MCP tool implementations (`gateway_list_modules`, metrics) and resource registries | Adding agentic MCP tools |
+| `src/features/proxy/` | <450/mod | Upstream proxy forwarding, prefix rewriting for PWA service workers | Modifying core proxy forwarding primitives |
+| `src/museai/` | <450/mod | Muse AI subsystem: Noise XX transport, Sentinel auto-approvals, chat & video services | Modifying Muse CVM communication or Sentinel policies |
 
 ---
 

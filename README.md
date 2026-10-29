@@ -10,6 +10,10 @@
 4. **Jev AI Decision API & OpenRouter Failover Pool** — Routes structured decision evaluations (`/jev/v1/systemone`, `/jev/v1/decisions`) and executes a structured 4-tier failover cascade (`Direct Jev -> Jev OpenRouter API Key -> OpenRouter Different Decision -> OpenRouter Browser Cookie`) with round-robin rotation and automatic cooldown demotion on credit caps (`401, 402, 403, 429`).
 5. **Muse AI CVM, Image & Video Generation** — Connects directly to Muse Confidential VMs via Noise XX encrypted WebSockets, supports text-to-image synthesis with configurable aspect ratios (`/muse-ai/v1/create-image`), text-to-video synthesis (`/muse-ai/v1/create-video`), interactive web studios (`/image-template`, `/video-template`), and provides headless Sentinel auto-approvals.
 6. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/dashboard` that saves settings and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
+7. **Model Context Protocol (MCP) Control Plane** — Full native MCP implementation supporting 3 transports (`stdio`, `SSE`, and `Streamable HTTP`) enabling agentic tools to inspect modules, manage lifecycle, and query system health.
+8. **Extensible Modular Architecture** — WordPress/Odoo-style dynamic module plugins (`.gw_state/modules/<id>/`), declarative manifests, GitHub/ZIP remote installation, and prefix routing isolation.
+9. **Hardware-Safe Encrypted Storage** — AES-256-GCM envelope encryption and blind indexing powered by embedded SQLite alongside atomic POSIX `0600` files.
+10. **Automated Dependency Security** — Continuous Dependabot monitoring for both Cargo crates and GitHub Actions workflows.
 
 Zero heavy async runtimes (`tokio` forbidden; standard library blocking networking only) and `#![forbid(unsafe_code)]`.
 
@@ -39,17 +43,21 @@ Zero heavy async runtimes (`tokio` forbidden; standard library blocking networki
 ```mermaid
 graph TD
     Client["Client / IDE / Agent"] --> Gateway["toolcase-gateway (127.0.0.1:20130)"]
-    Gateway --> Dispatcher{"Canonical Dispatcher<br>(src/routes.rs)"}
+    Gateway --> Dispatcher{"Canonical Dispatcher<br>(src/routes/)"}
     
-    Dispatcher -->|"/dashboard"| Dashboard["Dashboard UI & REST API"]
-    Dispatcher -->|"/v1/chat/completions"| OmniRoute["OmniRoute: Failover & Casing Repair"]
+    Dispatcher -->|"/dashboard", "/api/v1/dashboard/*"| Dashboard["Dashboard UI & REST API"]
+    Dispatcher -->|"/mcp", "/mcp/sse"| MCP["MCP Control Plane (stdio/SSE/HTTP)"]
+    Dispatcher -->|"/omniroute", "/v1/chat/completions"| OmniRoute["OmniRoute: Failover & Casing Repair"]
     Dispatcher -->|"/jev/v1/*"| Jev["Jev Decision Engine: Account Pool"]
     Dispatcher -->|"/muse-ai/v1/*"| Muse["Muse CVM: Noise WS & Sentinel"]
+    Dispatcher -->|"/modules/*", "/custom/*"| Modules["Personal Modules & Groups"]
     
     Dashboard --> Disk[("gateway_config.json (0600)")]
+    Dashboard & Modules --> SQLite[("Encrypted SQLite DB<br>(AES-256-GCM)")]
     OmniRoute --> UpstreamLLM["External LLM Upstream"]
     Jev --> UpstreamJev["External Jev Upstream"]
     Muse --> UpstreamMuse["External Muse CVM"]
+    Modules --> Subprocesses["External Subprocesses / Local HTTP"]
 ```
 
 The failover decision happens **before** any byte reaches the client, ensuring retries are completely invisible downstream. Once committed, response streams are processed chunk-by-chunk with casing restored on the fly.
@@ -317,7 +325,7 @@ See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for full threat modeling.
 ## Development
 
 ```sh
-cargo test                    # run all 268+ automated unit and integration tests
+cargo test                    # run all 400+ automated unit and integration tests
 cargo clippy --all-targets    # linting and contract verification
 cargo fmt -- --check          # code formatting verification
 cargo build --release         # production release build

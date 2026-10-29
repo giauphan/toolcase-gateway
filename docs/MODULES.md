@@ -313,3 +313,18 @@ for line in sys.stdin:
    - Standard timeouts (default 30 seconds) prevent runaway child processes.
 4. **Namespace Collision Defense**:
    - The registry rejects any module attempting to claim or shadow built-in routes (`/omniroute`, `/muse-ai`, `/jev`) or system routes (`/api`, `/dashboard`, `/mcp`).
+
+---
+
+## 8. Managing Modules via Model Context Protocol (MCP)
+
+AI agents and editor extensions can orchestrate the platform module lifecycle autonomously through native MCP tools:
+
+| MCP Tool | Arguments | Purpose |
+| :--- | :--- | :--- |
+| `gateway_list_modules` | *(none)* | Returns JSON array of all registered modules, enabled status, kind, and namespaces |
+| `gateway_get_module_info` | `{"module_id": "string"}` | Retrieves complete metadata, author info, capabilities, and sub-providers for a module |
+| `gateway_set_module_state`| `{"module_id": "string", "enabled": bool}` | Dynamically activates or deactivates a module without server restart |
+| `gateway_install_personal_module` | `{"source": "string", "source_type": "dir\|zip\|github"}` | Installs and registers an out-of-tree module from disk, ZIP, or remote GitHub repository |
+| `gateway_remove_personal_module` | `{"module_id": "string"}` | Uninstalls and purges an installed module directory from disk |
+| `gateway_get_system_metrics` | *(none)* | Returns live platform telemetry, memory usage, active connections, and module counters |
