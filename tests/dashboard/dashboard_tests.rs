@@ -71,40 +71,42 @@ fn request_gateway(
 #[test]
 fn dashboard_html_structure_and_assets() {
     let html = include_str!("../../assets/dashboard.html");
-    assert!(html.contains("Gateway Dashboard"));
-    assert!(html.contains("OmniRoute Proxy"));
-    assert!(html.contains("Jev AI Decision API"));
-    assert!(html.contains("MuseAI Subsystem"));
-    assert!(html.contains("Jev AI Provider Multi-Account Pool"));
-    assert!(html.contains("Add Multi API Keys / Accounts"));
-    assert!(html.contains("Muse AI Subsystem Configuration"));
-    assert!(html.contains("Muse Sentinel Approval Mode"));
-    assert!(html.contains("Default Video Prompt"));
-    assert!(html.contains("/api/v1/dashboard/overview"));
-    assert!(html.contains("/api/v1/dashboard/accounts"));
-    assert!(html.contains("/api/v1/dashboard/muse-config"));
+    let js = include_str!("../../assets/ui/dashboard.js");
+    let combined = format!("{html}\n{js}");
+    assert!(combined.contains("Gateway Dashboard"));
+    assert!(combined.contains("OmniRoute Proxy"));
+    assert!(combined.contains("Jev AI Decision API"));
+    assert!(combined.contains("MuseAI Subsystem"));
+    assert!(combined.contains("Jev AI Provider Multi-Account Pool"));
+    assert!(combined.contains("Add Multi API Keys / Accounts"));
+    assert!(combined.contains("Muse AI Subsystem Configuration"));
+    assert!(combined.contains("Muse Sentinel Approval Mode"));
+    assert!(combined.contains("Default Video Prompt"));
+    assert!(combined.contains("/api/v1/dashboard/overview"));
+    assert!(combined.contains("/api/v1/dashboard/accounts"));
+    assert!(combined.contains("/api/v1/dashboard/muse-config"));
 }
 
 #[test]
 fn dashboard_page_route_serves_html_and_rejects_post() {
     let store = ConfigStore::new(test_config(), PathBuf::from(".env.test_dashboard"));
 
-    // GET /gateway-config/dashboard
-    let (head, body) = request_gateway("GET", "/gateway-config/dashboard", b"", &store);
+    // GET /dashboard
+    let (head, body) = request_gateway("GET", "/dashboard", b"", &store);
     assert_eq!(head.status, 200);
     let content_type = header_value(&head.headers, "content-type").unwrap();
     assert!(content_type.contains("text/html"));
     let body_str = String::from_utf8_lossy(&body);
     assert!(body_str.contains("Gateway Dashboard"));
 
-    // GET /gateway-config/dashboard/ (with trailing slash)
+    // GET /dashboard/ (with trailing slash)
     let (head_slash, body_slash) =
-        request_gateway("GET", "/gateway-config/dashboard/", b"", &store);
+        request_gateway("GET", "/dashboard/", b"", &store);
     assert_eq!(head_slash.status, 200);
     assert!(String::from_utf8_lossy(&body_slash).contains("Gateway Dashboard"));
 
-    // POST /gateway-config/dashboard -> 405 Method Not Allowed
-    let (head_post, _) = request_gateway("POST", "/gateway-config/dashboard", b"", &store);
+    // POST /dashboard -> 405 Method Not Allowed
+    let (head_post, _) = request_gateway("POST", "/dashboard", b"", &store);
     assert_eq!(head_post.status, 405);
 }
 

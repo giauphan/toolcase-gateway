@@ -206,7 +206,7 @@ fn round_trip(
 
     let gateway_listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let gateway_port = gateway_listener.local_addr().unwrap().port();
-    let store = ConfigStore::new(jev_config(upstream_port, keys), ".env".into());
+    let store = ConfigStore::new(jev_config(upstream_port, keys), ".env.test_jev".into());
     let gateway = thread::spawn(move || {
         let (socket, _) = gateway_listener.accept().unwrap();
         toolcase_gateway::routes::route_request(socket, &store).unwrap();
@@ -529,7 +529,7 @@ fn test_jev_credit_limit_automatic_failover_to_openrouter_upstream() {
         ..Config::default()
     };
 
-    let store = ConfigStore::new(config, ".env".into());
+    let store = ConfigStore::new(config, ".env.test_jev".into());
 
     let gateway_listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let gateway_port = gateway_listener.local_addr().unwrap().port();
@@ -650,7 +650,7 @@ fn test_jev_openrouter_api_key_bearer_authentication_and_headers() {
         ..Config::default()
     };
 
-    let store = ConfigStore::new(config, ".env".into());
+    let store = ConfigStore::new(config, ".env.test_jev".into());
 
     let gateway_listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let gateway_port = gateway_listener.local_addr().unwrap().port();
