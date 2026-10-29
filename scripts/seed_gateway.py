@@ -3,27 +3,52 @@
 Gateway Configuration & Database Seeder
 ========================================
 Applies legacy provider configurations from `gateway_config.json` / `.env`
-into SQLite storage (`gateway.db`) while seeding new flows, system catalog
+into SQLite storage (`gateway.db`) while seeding flows, system catalog
 modules, and provider accounts non-destructively.
 
 Features:
-- Preserves all old provider credentials (Muse, Jev, OpenRouter, Custom Modules).
+- Preserves all provider credentials (Muse, Jev, OpenRouter, Custom Modules).
 - Idempotent: safe to run repeatedly across deployments or updates.
 - Supports secret protection (HMAC / AES envelope / blind indexing).
+- Automatically discovers DATABASE_URL / GW_STATE_DIR from environment or .env.
 """
 
-import os
-import sys
-import json
-import sqlite3
+import base64
 import hashlib
 import hmac
-import base64
-import uuid
+import json
+import os
+import sqlite3
+import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-DEFAULT_DB_PATH = "gateway.db"
+DEFAULT_STATE_DIR = ".gw_state"
+DEFAULT_DB_PATH = f"{DEFAULT_STATE_DIR}/gateway.db"
 DEFAULT_CONFIG_PATH = "gateway_config.json"
+
+
+def load_env_vars(env_path: Optional[Path] = None) -> Dict[str, str]:
+    """Parses environment variables from .env file safely."""
+    path = env_path or Path(".env")
+    env_vars: Dict[str, str] = {}
+    if not path.is_file():
+        return env_vars
+
+    try:
+        content = path.read_text(encoding="utf-8")
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k:
+                env_vars[k] = v
+    except Exception as e:
+        print(f"[SEEDER] Warning: Failed to parse {path}: {e}")
+    return env_vars
 
 
 def safe_resolve_sqlite_path(raw_path: str) -> Path:
@@ -42,7 +67,7 @@ def safe_resolve_sqlite_path(raw_path: str) -> Path:
         cleaned = cleaned.split("?")[0].replace("\0", "")
 
     resolved = Path(cleaned).expanduser().resolve()
-    if resolved.parent and not resolved.parent.exists():
+    if resolved.parent:
         resolved.parent.mkdir(parents=True, exist_ok=True)
     return resolved
 
@@ -73,20 +98,7 @@ def protect_credential(secret: str, encryption_key: str) -> str:
         payload_b64 = base64.b64encode(ciphertext).decode("ascii")
         return f"enc:v1:{nonce_b64}:{payload_b64}"
     except ImportError:
-        # Fallback to authenticated XOR keystream if cryptography is unavailable
-        key_bytes = hashlib.sha256(encryption_key.encode("utf-8")).digest()
-        nonce = os.urandom(12)
-        keystream = b""
-        counter = 0
-        while len(keystream) < len(secret.encode("utf-8")):
-            keystream += hmac.new(key_bytes, nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest()
-            counter += 1
-        cipher_bytes = bytes(b ^ k for b, k in zip(secret.encode("utf-8"), keystream))
-        tag = hmac.new(key_bytes, nonce + cipher_bytes, hashlib.sha256).digest()[:16]
-        payload = cipher_bytes + tag
-        nonce_b64 = base64.b64encode(nonce).decode("ascii")
-        payload_b64 = base64.b64encode(payload).decode("ascii")
-        return f"enc:v1:{nonce_b64}:{payload_b64}"
+        raise RuntimeError("The 'cryptography' library is required to encrypt secrets compatible with toolcase-gateway.")
 
 
 def init_schema(conn: sqlite3.Connection):
@@ -188,13 +200,9 @@ def seed_system_catalog_modules(conn: sqlite3.Connection):
 
 
 def apply_settings(conn: sqlite3.Connection, data: dict):
-    """Extracts and persists legacy gateway settings."""
-    tracked_keys = [
-        "target_host", "target_port", "fallbacks", "default_model",
-        "museai_cookie", "museai_access_token", "museai_notary_token", "museai_vm_id",
-        "muse_approval_mode", "jev_openrouter_model", "jev_openrouter_enabled",
-    ]
-    payload = {k: data[k] for k in tracked_keys if k in data and data[k] is not None}
+    """Extracts and persists gateway settings into settings table."""
+    excluded_keys = {"jev_accounts", "jev_openrouter_accounts", "personal_modules"}
+    payload = {k: v for k, v in data.items() if k not in excluded_keys and v is not None}
     if not payload:
         return
 
@@ -210,15 +218,15 @@ def apply_settings(conn: sqlite3.Connection, data: dict):
 
 
 def apply_jev_accounts(conn: sqlite3.Connection, accounts: list, enc_key: str):
-    """Extracts and persists legacy Jev accounts."""
+    """Extracts and persists Jev accounts."""
     count = 0
     with conn:
         for acc in accounts:
-            raw_key = acc.get("key", "").strip()
+            raw_key = (acc.get("api_key") or acc.get("key") or "").strip()
             if not raw_key:
                 continue
             prot_key = protect_credential(raw_key, enc_key)
-            acc_id = acc.get("id") or f"jev_{uuid.uuid4().hex[:12]}"
+            acc_id = acc.get("id") or f"jev_{derive_blind_index(raw_key)[:16]}"
             label = acc.get("label", "jev-account")
             conn.execute("""
                 INSERT INTO accounts (id, provider, key, label, is_active, updated_at)
@@ -234,15 +242,15 @@ def apply_jev_accounts(conn: sqlite3.Connection, accounts: list, enc_key: str):
 
 
 def apply_openrouter_accounts(conn: sqlite3.Connection, accounts: list, enc_key: str):
-    """Extracts and persists legacy OpenRouter accounts."""
+    """Extracts and persists OpenRouter accounts."""
     count = 0
     with conn:
         for acc in accounts:
-            raw_key = (acc.get("api_key", "") or acc.get("cookie", "")).strip()
+            raw_key = (acc.get("api_key", "") or acc.get("cookie", "") or acc.get("key", "")).strip()
             if not raw_key:
                 continue
             prot_key = protect_credential(raw_key, enc_key)
-            acc_id = acc.get("id") or f"or_{uuid.uuid4().hex[:12]}"
+            acc_id = acc.get("id") or f"or_{derive_blind_index(raw_key)[:16]}"
             label = acc.get("label", "openrouter-account")
             conn.execute("""
                 INSERT INTO accounts (id, provider, key, label, is_active, updated_at)
@@ -258,7 +266,7 @@ def apply_openrouter_accounts(conn: sqlite3.Connection, accounts: list, enc_key:
 
 
 def apply_personal_modules(conn: sqlite3.Connection, modules: list):
-    """Extracts and persists legacy personal module configurations."""
+    """Extracts and persists personal module configurations."""
     count = 0
     with conn:
         for mod in modules:
@@ -283,7 +291,7 @@ def apply_personal_modules(conn: sqlite3.Connection, modules: list):
 
 
 def seed_from_gateway_config(conn: sqlite3.Connection, config_path: str, enc_key: str):
-    """Reads legacy provider config from gateway_config.json and applies it."""
+    """Reads provider config from gateway_config.json and applies it."""
     cfg_file = Path(config_path)
     if not cfg_file.is_file():
         print(f"[SEEDER] Note: {config_path} not found. Skipping file-based legacy config.")
@@ -303,79 +311,78 @@ def seed_from_gateway_config(conn: sqlite3.Connection, config_path: str, enc_key
     apply_personal_modules(conn, data.get("personal_modules") or [])
 
 
-def read_key_from_env_file(env_path: Path) -> str:
-    """Extracts existing encryption key from an environment file if present."""
-    if not env_path.is_file():
-        return ""
-    try:
-        content = env_path.read_text(encoding="utf-8")
-        for line in content.splitlines():
-            line = line.strip()
-            if line.startswith("GW_ENCRYPTION_KEY=") and not line.startswith("#"):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    except Exception:
-        pass
-    return ""
-
-
-def generate_and_save_key(env_path: Path) -> str:
-    """Generates a secure 256-bit key and appends it to the env file."""
-    import secrets
-    new_key = secrets.token_hex(32)
-    try:
-        with open(env_path, "a", encoding="utf-8") as f:
-            f.write(f"\n# Auto-generated storage encryption key\nGW_ENCRYPTION_KEY={new_key}\n")
-        print(f"[SECURITY] Generated new GW_ENCRYPTION_KEY and saved to {env_path}")
-    except Exception as e:
-        print(f"[SECURITY] Warning: Could not write key to {env_path}: {e}")
-    return new_key
-
-
-def resolve_encryption_key(auto_generate: bool) -> str:
+def resolve_encryption_key(auto_generate: bool, env_vars: Optional[Dict[str, str]] = None) -> str:
     """Resolves existing encryption key or optionally auto-generates one into .env."""
     key = os.environ.get("GW_ENCRYPTION_KEY", "").strip()
     if key:
         return key
 
-    env_path = Path(".env")
-    key = read_key_from_env_file(env_path)
-    if key:
-        return key
+    vars_dict = env_vars or load_env_vars()
+    if vars_dict.get("GW_ENCRYPTION_KEY"):
+        return vars_dict["GW_ENCRYPTION_KEY"]
 
     if auto_generate:
-        return generate_and_save_key(env_path)
+        import secrets
+        new_key = secrets.token_hex(32)
+        env_path = Path(".env")
+        try:
+            with open(env_path, "a", encoding="utf-8") as f:
+                f.write(f"\n# Auto-generated storage encryption key\nGW_ENCRYPTION_KEY={new_key}\n")
+            print(f"[SECURITY] Generated new GW_ENCRYPTION_KEY and saved to {env_path}")
+            return new_key
+        except Exception as e:
+            print(f"[SECURITY] Warning: Could not write key to {env_path}: {e}")
 
     return ""
 
 
-def parse_cli_args():
-    """Parses CLI arguments safely without raw connection strings."""
+def resolve_database_path(cli_db: Optional[str] = None, env_vars: Optional[Dict[str, str]] = None) -> str:
+    """Resolves the active database path prioritizing CLI, env, .env, and state dir."""
+    if cli_db:
+        return cli_db
+
+    vars_dict = env_vars or load_env_vars()
+    for env_key in ("DATABASE_URL", "GW_DATABASE_URL"):
+        val = os.environ.get(env_key) or vars_dict.get(env_key)
+        if val:
+            return val
+
+    state_dir = os.environ.get("GW_STATE_DIR") or vars_dict.get("GW_STATE_DIR") or DEFAULT_STATE_DIR
+    return f"{state_dir}/gateway.db"
+
+
+def parse_cli_args() -> Tuple[str, str, bool]:
+    """Parses CLI arguments safely and merges with .env configuration."""
     args = sys.argv[1:]
     auto_gen = "--generate-key" in args
     filtered_args = [a for a in args if a != "--generate-key"]
 
-    db_arg = filtered_args[0] if len(filtered_args) > 0 else os.environ.get("GW_DATABASE_URL", DEFAULT_DB_PATH)
-    cfg_arg = filtered_args[1] if len(filtered_args) > 1 else os.environ.get("GW_CONFIG_FILE", DEFAULT_CONFIG_PATH)
+    env_vars = load_env_vars()
+    cli_db = filtered_args[0] if len(filtered_args) > 0 else None
+    cli_cfg = filtered_args[1] if len(filtered_args) > 1 else None
+
+    db_arg = resolve_database_path(cli_db, env_vars)
+    cfg_arg = cli_cfg or os.environ.get("GW_CONFIG_FILE") or env_vars.get("GW_CONFIG_FILE") or DEFAULT_CONFIG_PATH
 
     return db_arg, cfg_arg, auto_gen
 
 
 def main():
     raw_db, raw_cfg, auto_gen = parse_cli_args()
+    env_vars = load_env_vars()
     db_path = safe_resolve_sqlite_path(raw_db)
-    enc_key = resolve_encryption_key(auto_gen)
+    enc_key = resolve_encryption_key(auto_gen, env_vars)
 
     print("==================================================")
     print(" toolcase-gateway: Flow & Database Seeder")
     print("==================================================")
     print(f"[*] Target SQLite Database: {db_path}")
-    print(f"[*] Legacy Config File   : {raw_cfg}")
+    print(f"[*] Gateway Config File   : {raw_cfg}")
     if enc_key:
         print("[*] Credential Protection: ENABLED (Authenticated Envelope)")
     else:
         print("[*] Credential Protection: Standard Plaintext (use --generate-key to enable)")
 
-    # Explicit uri=False prevents connection string / URI parameter injection attacks
     conn = sqlite3.connect(str(db_path), uri=False)
     try:
         init_schema(conn)
