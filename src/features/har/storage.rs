@@ -80,20 +80,5 @@ pub fn persist_muse_env(path: &Path, fields: &[(&str, &str)]) -> io::Result<()> 
         return Ok(());
     }
 
-    let parent = path.parent().unwrap_or(Path::new("."));
-    if !parent.exists() {
-        fs::create_dir_all(parent).ok();
-    }
-    let tmp = parent.join(format!(
-        ".{}~tmp",
-        path.file_name().unwrap_or_default().to_string_lossy()
-    ));
-    fs::write(&tmp, content.as_bytes())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
-    }
-    fs::rename(&tmp, path)?;
-    Ok(())
+    crate::storage::write_atomic_0600(path, content.as_bytes())
 }

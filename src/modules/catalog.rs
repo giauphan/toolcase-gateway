@@ -38,6 +38,55 @@ fn catalog_item(
     }
 }
 
+fn text_field(key: &str, label: &str, placeholder: &str, desc: &str) -> serde_json::Value {
+    serde_json::json!({
+        "key": key,
+        "label": label,
+        "type": "text",
+        "placeholder": placeholder,
+        "description": desc,
+    })
+}
+
+fn secret_field(key: &str, label: &str, placeholder: &str, desc: &str) -> serde_json::Value {
+    serde_json::json!({
+        "key": key,
+        "label": label,
+        "type": "password",
+        "secret": true,
+        "placeholder": placeholder,
+        "description": desc,
+    })
+}
+
+fn bool_field(key: &str, label: &str, default_val: bool, desc: &str) -> serde_json::Value {
+    serde_json::json!({
+        "key": key,
+        "label": label,
+        "type": "boolean",
+        "default": default_val,
+        "description": desc,
+    })
+}
+
+fn config_schema(
+    title: &str,
+    module_id: &str,
+    namespace: &str,
+    har_endpoint: &str,
+    har_hint: &str,
+    fields: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "title": title,
+        "module_id": module_id,
+        "namespace": namespace,
+        "har_endpoint": har_endpoint,
+        "har_hint": har_hint,
+        "fields": fields,
+    })
+}
+
 /// Returns the available catalog of standard provider modules ready for installation.
 pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
     vec![
@@ -101,45 +150,19 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "studio".to_string(),
             ],
             source: Some("https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git".to_string()),
-            config_schema: Some(serde_json::json!({
-                "title": "TikTok Creator Studio Config & HAR Import",
-                "module_id": "tiktok-studio",
-                "namespace": "/custom/tiktok",
-                "har_endpoint": "/custom/tiktok/v1/config/har",
-                "har_hint": "Drop download-tiktok.har here or select file (.har, .json) to auto-extract Cookie and CSRF token",
-                "fields": [
-                    {
-                        "key": "base_url",
-                        "label": "TikTok Base URL",
-                        "type": "text",
-                        "placeholder": "https://www.tiktok.com",
-                        "description": "Primary TikTok Creator Studio upstream URL"
-                    },
-                    {
-                        "key": "enabled",
-                        "label": "Module Status",
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Enable or disable TikTok Creator Studio requests"
-                    },
-                    {
-                        "key": "cookie",
-                        "label": "Session Cookie",
-                        "type": "password",
-                        "secret": true,
-                        "placeholder": "Leave empty to keep existing cookie",
-                        "description": "TikTok Creator Studio authenticated session cookie"
-                    },
-                    {
-                        "key": "csrf_token",
-                        "label": "CSRF Token (tt-csrf-token)",
-                        "type": "password",
-                        "secret": true,
-                        "placeholder": "Leave empty to keep existing CSRF token",
-                        "description": "TikTok CSRF protection token extracted from x-tt-csrf-token or cookies"
-                    }
-                ]
-            })),
+            config_schema: Some(config_schema(
+                "TikTok Creator Studio Config & HAR Import",
+                "tiktok-studio",
+                "/custom/tiktok",
+                "/custom/tiktok/v1/config/har",
+                "Drop download-tiktok.har here or select file (.har, .json) to auto-extract Cookie and CSRF token",
+                vec![
+                    text_field("base_url", "TikTok Base URL", "https://www.tiktok.com", "Primary TikTok Creator Studio upstream URL"),
+                    bool_field("enabled", "Module Status", true, "Enable or disable TikTok Creator Studio requests"),
+                    secret_field("cookie", "Session Cookie", "Leave empty to keep existing cookie", "TikTok Creator Studio authenticated session cookie"),
+                    secret_field("csrf_token", "CSRF Token (tt-csrf-token)", "Leave empty to keep existing CSRF token", "TikTok CSRF protection token extracted from x-tt-csrf-token or cookies"),
+                ],
+            )),
         },
         SystemCatalogModule {
             id: "facebook-suite".to_string(),
@@ -157,73 +180,23 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "studio".to_string(),
             ],
             source: None,
-            config_schema: Some(serde_json::json!({
-                "title": "Meta Business Suite Config & HAR Import",
-                "module_id": "facebook-suite",
-                "namespace": "/custom/facebook",
-                "har_endpoint": "/custom/facebook/v1/config/har",
-                "har_hint": "Drop download-facebook.har here or select file (.har, .json) to auto-extract credentials and Comet parameters",
-                "fields": [
-                    {
-                        "key": "base_url",
-                        "label": "Meta Business Base URL",
-                        "type": "text",
-                        "placeholder": "https://business.facebook.com",
-                        "description": "Primary Meta Business Suite upstream URL"
-                    },
-                    {
-                        "key": "enabled",
-                        "label": "Module Status",
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Enable or disable Meta Business Suite requests"
-                    },
-                    {
-                        "key": "cookie",
-                        "label": "Session Cookie",
-                        "type": "password",
-                        "secret": true,
-                        "placeholder": "Leave empty to keep existing cookie",
-                        "description": "Facebook authenticated session cookie"
-                    },
-                    {
-                        "key": "fb_dtsg",
-                        "label": "CSRF Token (fb_dtsg)",
-                        "type": "password",
-                        "secret": true,
-                        "placeholder": "Leave empty to keep existing fb_dtsg token",
-                        "description": "Comet anti-CSRF token extracted from HAR or page payload"
-                    },
-                    {
-                        "key": "user_id",
-                        "label": "Facebook User ID (__user)",
-                        "type": "text",
-                        "placeholder": "1000...",
-                        "description": "Authenticated Facebook User ID"
-                    },
-                    {
-                        "key": "actor_id",
-                        "label": "Actor ID (av)",
-                        "type": "text",
-                        "placeholder": "1435...",
-                        "description": "Active acting identity or Page ID"
-                    },
-                    {
-                        "key": "target_id",
-                        "label": "Target Page ID",
-                        "type": "text",
-                        "placeholder": "1435...",
-                        "description": "Default target Facebook Page for uploads and reels"
-                    },
-                    {
-                        "key": "business_id",
-                        "label": "Business ID (__bid)",
-                        "type": "text",
-                        "placeholder": "2567...",
-                        "description": "Associated Meta Business Account ID"
-                    }
-                ]
-            })),
+            config_schema: Some(config_schema(
+                "Meta Business Suite Config & HAR Import",
+                "facebook-suite",
+                "/custom/facebook",
+                "/custom/facebook/v1/config/har",
+                "Drop download-facebook.har here or select file (.har, .json) to auto-extract credentials and Comet parameters",
+                vec![
+                    text_field("base_url", "Meta Business Base URL", "https://business.facebook.com", "Primary Meta Business Suite upstream URL"),
+                    bool_field("enabled", "Module Status", true, "Enable or disable Meta Business Suite requests"),
+                    secret_field("cookie", "Session Cookie", "Leave empty to keep existing cookie", "Facebook authenticated session cookie"),
+                    secret_field("fb_dtsg", "CSRF Token (fb_dtsg)", "Leave empty to keep existing fb_dtsg token", "Comet anti-CSRF token extracted from HAR or page payload"),
+                    text_field("user_id", "Facebook User ID (__user)", "1000...", "Authenticated Facebook User ID"),
+                    text_field("actor_id", "Actor ID (av)", "1435...", "Active acting identity or Page ID"),
+                    text_field("target_id", "Target Page ID", "1435...", "Default target Facebook Page for uploads and reels"),
+                    text_field("business_id", "Business ID (__bid)", "2567...", "Associated Meta Business Account ID"),
+                ],
+            )),
         },
     ]
 }

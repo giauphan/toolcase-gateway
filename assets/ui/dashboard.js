@@ -24,6 +24,18 @@
     }
   }
 
+  function postJson(url, payload) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function(res) {
+      return res.text().then(function(text) {
+        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
+      });
+    });
+  }
+
   function setMessageVisible(element, visible) {
     if (element) {
       element.classList.toggle("is-visible", visible);
@@ -169,17 +181,28 @@
     settings: "Gateway / Settings",
   };
 
+  const ROUTE_ALIASES = {
+    overview: "overview",
+    modules: "modules",
+    "modules-section": "modules",
+    catalog: "catalog",
+    "module-catalog": "catalog",
+    providers: "providers",
+    "provider-settings": "providers",
+    "muse-settings": "providers",
+    accounts: "accounts",
+    "accounts-settings": "accounts",
+    mcp: "mcp",
+    "mcp-section": "mcp",
+    studios: "studios",
+    "studios-section": "studios",
+    settings: "settings",
+    "settings-section": "settings"
+  };
+
   function normalizeRoute(hash) {
     const raw = (hash || "").replace(/^#/, "").trim().toLowerCase();
-    if (!raw || raw === "overview") return "overview";
-    if (raw === "modules" || raw === "modules-section") return "modules";
-    if (raw === "catalog" || raw === "module-catalog") return "catalog";
-    if (raw === "providers" || raw === "provider-settings" || raw === "muse-settings") return "providers";
-    if (raw === "accounts" || raw === "accounts-settings") return "accounts";
-    if (raw === "mcp" || raw === "mcp-section") return "mcp";
-    if (raw === "studios" || raw === "studios-section") return "studios";
-    if (raw === "settings" || raw === "settings-section") return "settings";
-    return "overview";
+    return ROUTE_ALIASES[raw] || "overview";
   }
 
   function navigateTo(viewKey, tabKey) {
@@ -659,101 +682,75 @@
   }
 
   function executeModuleInstall(payload, catalogButton) {
-    fetch("/api/v1/dashboard/modules/install", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    })
-    .then(function(res) {
-      return res.text().then(function(text) {
-        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
+    postJson("/api/v1/dashboard/modules/install", payload)
+      .then(function(result) {
+        if (catalogButton) {
+          catalogButton.disabled = false;
+          catalogButton.textContent = "Explore & install";
+        }
+        if (!result.ok) {
+          const errorDetail = result.json.message || ("HTTP " + result.status);
+          showModulesFeedback('Failed to install module: ' + errorDetail, true);
+        } else {
+          showModulesFeedback("Module '" + (result.json.module ? result.json.module.id : "package") + "' installed successfully.", false);
+          loadOverview();
+        }
+      })
+      .catch(function(err) {
+        if (catalogButton) {
+          catalogButton.disabled = false;
+          catalogButton.textContent = "Explore & install";
+        }
+        showModulesFeedback('Network error: ' + err.message, true);
       });
-    })
-    .then(function(result) {
-      if (catalogButton) {
-        catalogButton.disabled = false;
-        catalogButton.textContent = "Explore & install";
-      }
-      if (!result.ok) {
-        const errorDetail = result.json.message || ("HTTP " + result.status);
-        showModulesFeedback('Failed to install module: ' + errorDetail, true);
-      } else {
-        showModulesFeedback("Module '" + (result.json.module ? result.json.module.id : "package") + "' installed successfully.", false);
-        loadOverview();
-      }
-    })
-    .catch(function(err) {
-      if (catalogButton) {
-        catalogButton.disabled = false;
-        catalogButton.textContent = "Explore & install";
-      }
-      showModulesFeedback('Network error: ' + err.message, true);
-    });
+  }
+
+  function sendModuleRequest(id, endpoint, payload, initialMsg, successMsg, failPrefix) {
+    moduleRequestsInFlight.add(id);
+    renderModules(renderedModules, true);
+    if (initialMsg) {
+      showModulesFeedback(initialMsg, false);
+    }
+
+    postJson(endpoint, payload)
+      .then(function(result) {
+        moduleRequestsInFlight.delete(id);
+        if (!result.ok) {
+          const errorDetail = result.json.message || ("HTTP " + result.status);
+          showModulesFeedback(failPrefix + ": " + errorDetail, true);
+          renderModules(renderedModules, true);
+        } else {
+          showModulesFeedback(successMsg, false);
+          loadOverview();
+        }
+      })
+      .catch(function(err) {
+        moduleRequestsInFlight.delete(id);
+        renderModules(renderedModules, true);
+        showModulesFeedback("Network error: " + err.message, true);
+      });
   }
 
   window.toggleModule = function(id, enable) {
-    moduleRequestsInFlight.add(id);
-    renderModules(renderedModules, true);
-    showModulesFeedback((enable ? "Enabling" : "Disabling") + " module '" + id + "'...", false);
-
-    fetch("/api/v1/dashboard/modules/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: id, enabled: enable })
-    })
-    .then(function(res) {
-      moduleRequestsInFlight.delete(id);
-      return res.text().then(function(text) {
-        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-      });
-    })
-    .then(function(result) {
-      if (!result.ok) {
-        const errorDetail = result.json.message || ("HTTP " + result.status);
-        showModulesFeedback("Failed to update module state: " + errorDetail, true);
-      } else {
-        showModulesFeedback("Module '" + id + "' is now " + (enable ? "enabled" : "disabled") + ".", false);
-        loadOverview();
-      }
-    })
-    .catch(function(err) {
-      moduleRequestsInFlight.delete(id);
-      renderModules(renderedModules, true);
-      showModulesFeedback("Network error: " + err.message, true);
-    });
+    sendModuleRequest(
+      id,
+      "/api/v1/dashboard/modules/state",
+      { id: id, enabled: enable },
+      (enable ? "Enabling" : "Disabling") + " module '" + id + "'...",
+      "Module '" + id + "' is now " + (enable ? "enabled" : "disabled") + ".",
+      "Failed to update module state"
+    );
   };
 
   window.updateModulePosition = function(id, opts) {
-    moduleRequestsInFlight.add(id);
-    renderModules(renderedModules, true);
-    const payload = { id: id, ...opts };
-
-    fetch("/api/v1/dashboard/modules/position", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    })
-    .then(function(res) {
-      moduleRequestsInFlight.delete(id);
-      return res.text().then(function(text) {
-        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-      });
-    })
-    .then(function(result) {
-      if (!result.ok) {
-        const errorDetail = result.json.message || ("HTTP " + result.status);
-        showModulesFeedback("Failed to update module menu position: " + errorDetail, true);
-        renderModules(renderedModules, true);
-      } else {
-        showModulesFeedback("Module '" + id + "' menu position updated.", false);
-        loadOverview();
-      }
-    })
-    .catch(function(err) {
-      moduleRequestsInFlight.delete(id);
-      renderModules(renderedModules, true);
-      showModulesFeedback("Network error: " + err.message, true);
-    });
+    sendModuleRequest(
+      id,
+      "/api/v1/dashboard/modules/position",
+      { id: id, ...opts },
+      null,
+      "Module '" + id + "' menu position updated.",
+      "Failed to update module menu position"
+    );
   };
 
   function renderDynamicConfigField(f, m, cfg) {
@@ -998,35 +995,14 @@
   });
 
   window.removeModule = function(id) {
-    moduleRequestsInFlight.add(id);
-    renderModules(renderedModules, true);
-    showModulesFeedback("Removing personal module '" + id + "'...", false);
-
-    fetch("/api/v1/dashboard/modules/remove", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: id })
-    })
-    .then(function(res) {
-      moduleRequestsInFlight.delete(id);
-      return res.text().then(function(text) {
-        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-      });
-    })
-    .then(function(result) {
-      if (!result.ok) {
-        const errorDetail = result.json.message || ("HTTP " + result.status);
-        showModulesFeedback("Failed to remove module: " + errorDetail, true);
-      } else {
-        showModulesFeedback("Personal module '" + id + "' was successfully removed.", false);
-        loadOverview();
-      }
-    })
-    .catch(function(err) {
-      moduleRequestsInFlight.delete(id);
-      renderModules(renderedModules, true);
-      showModulesFeedback("Network error: " + err.message, true);
-    });
+    sendModuleRequest(
+      id,
+      "/api/v1/dashboard/modules/remove",
+      { id: id },
+      "Removing personal module '" + id + "'...",
+      "Personal module '" + id + "' was successfully removed.",
+      "Failed to remove module"
+    );
   };
 
   function clearInstallModuleInputs() {
@@ -1057,31 +1033,22 @@
     installBtn.disabled = true;
     installBtn.textContent = "Installing...";
 
-    fetch("/api/v1/dashboard/modules/install", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    })
-    .then(function(res) {
-      return res.text().then(function(text) {
-        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
+    postJson("/api/v1/dashboard/modules/install", payload)
+      .then(function(result) {
+        installBtn.disabled = false;
+        installBtn.textContent = "Install Module";
+        if (!result.ok) {
+          handleInstallModuleFailure(result);
+        } else {
+          handleInstallModuleSuccess(result.json?.module);
+        }
+      })
+      .catch(function(err) {
+        installBtn.disabled = false;
+        installBtn.textContent = "Install Module";
+        modErrMsg.textContent = "Network error: " + err.message;
+        setMessageVisible(modErrMsg, true);
       });
-    })
-    .then(function(result) {
-      installBtn.disabled = false;
-      installBtn.textContent = "Install Module";
-      if (!result.ok) {
-        handleInstallModuleFailure(result);
-      } else {
-        handleInstallModuleSuccess(result.json?.module);
-      }
-    })
-    .catch(function(err) {
-      installBtn.disabled = false;
-      installBtn.textContent = "Install Module";
-      modErrMsg.textContent = "Network error: " + err.message;
-      setMessageVisible(modErrMsg, true);
-    });
   }
 
   function buildModuleInstallPayload(sourceVal, zipBase64) {
@@ -1301,16 +1268,7 @@
         fallbacks: fallbacksArray
       };
 
-      fetch("/api/v1/dashboard/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      })
-      .then(function(res) {
-        return res.text().then(function(text) {
-          return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-        });
-      })
+      postJson("/api/v1/dashboard/config", payload)
       .then(function(result) {
         if (saveCfgBtn) {
           saveCfgBtn.disabled = false;
@@ -1367,16 +1325,7 @@
         }
       };
 
-      fetch("/api/v1/dashboard/muse-config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      })
-      .then(function(res) {
-        return res.text().then(function(text) {
-          return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-        });
-      })
+      postJson("/api/v1/dashboard/muse-config", payload)
       .then(function(result) {
         if (saveMuseBtn) {
           saveMuseBtn.disabled = false;
@@ -1426,16 +1375,7 @@
         jev_credit_cooldown_secs: cfgJevCooldown?.value ? Number.parseInt(cfgJevCooldown.value, 10) : undefined,
       };
 
-      fetch("/api/v1/dashboard/jev-config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      })
-      .then(function(res) {
-        return res.text().then(function(text) {
-          return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-        });
-      })
+      postJson("/api/v1/dashboard/jev-config", payload)
       .then(function(result) {
         if (saveJevBtn) {
           saveJevBtn.disabled = false;
@@ -1493,16 +1433,7 @@
         label: labelInput?.value.trim() || undefined
       };
 
-      fetch("/api/v1/dashboard/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      })
-      .then(function(res) {
-        return res.text().then(function(text) {
-          return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-        });
-      })
+      postJson("/api/v1/dashboard/accounts", payload)
       .then(function(result) {
         submitBtn.disabled = false;
         submitBtn.textContent = "Add to Account Pool";

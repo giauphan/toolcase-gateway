@@ -149,3 +149,24 @@ pub trait StorageRepository: Send + Sync {
     /// Removes an installed personal module by id.
     fn remove_module(&self, id: &str) -> Result<(), StorageError>;
 }
+
+/// Atomically writes content to a temporary file in the target directory and renames it into place
+/// with 0o600 (owner-only read/write) permissions.
+pub fn write_atomic_0600(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    if !parent.exists() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let tmp = parent.join(format!(
+        ".{}~tmp",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    std::fs::write(&tmp, content)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}

@@ -5,201 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Muse Video Studio — Toolcase Gateway</title>
+<link rel="stylesheet" href="/gateway-ui/studio.css">
 <style>
-:root {
-  --ui-brand: #714b67;
-  --purple: #714b67;
-  --purple-light: #875a7b;
-  --purple-dark: #56394e;
-  --mint: #017e84;
-  --mint-light: #00a09d;
-  --mint-dark: #006064;
-  --bg: #f6f7f9;
-  --surface-1: #ffffff;
-  --surface-2: #f9fafb;
-  --surface-3: #f0f2f5;
-  --text-primary: #1f2937;
-  --text-secondary: #4b5563;
-  --text-muted: #6b7280;
-  --edge: #e5e7eb;
-  --edge-focus: #017e84;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-  --shadow-lg: 0 12px 28px rgba(0,0,0,0.12);
-  --ok: #017e84;
-  --err: #dc2626;
-  --busy: #714b67;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111827;
-    --surface-1: #1f2937;
-    --surface-2: #182234;
-    --surface-3: #131c2b;
-    --text-primary: #f9fafb;
-    --text-secondary: #d1d5db;
-    --text-muted: #9ca3af;
-    --edge: #374151;
-    --edge-focus: #00a09d;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-    --shadow-lg: 0 12px 28px rgba(0,0,0,0.5);
-  }
-}
-body.dark {
-  --bg: #111827;
-  --surface-1: #1f2937;
-  --surface-2: #182234;
-  --surface-3: #131c2b;
-  --text-primary: #f9fafb;
-  --text-secondary: #d1d5db;
-  --text-muted: #9ca3af;
-  --edge: #374151;
-  --edge-focus: #00a09d;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-  --shadow-lg: 0 12px 28px rgba(0,0,0,0.5);
-}
-* { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; }
-body {
-  background: var(--bg);
-  color: var(--text-primary);
-  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-.topbar {
-  background: var(--surface-1);
-  border-bottom: 1px solid var(--edge);
-  height: 54px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  position: sticky;
-  top: 0;
-  z-index: 50;
-}
-.brand-group {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.brand-logo {
-  font-size: 18px;
-  color: var(--purple);
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-}
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-.breadcrumb a {
-  color: var(--text-muted);
-  text-decoration: none;
-  font-weight: 500;
-}
-.breadcrumb a:hover { color: var(--purple); }
-.breadcrumb-sep { font-size: 11px; opacity: 0.6; }
-.breadcrumb-current { color: var(--text-primary); font-weight: 600; }
-.studio-nav {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.studio-nav a {
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 13px;
-  text-decoration: none;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  transition: background .15s ease, color .15s ease;
-}
-.studio-nav a:hover {
-  background: var(--surface-2);
-  color: var(--purple);
-}
-.studio-nav a.active {
-  background: rgba(113, 75, 103, 0.12);
-  color: var(--purple);
-}
-.theme-btn {
-  background: transparent;
-  border: 1px solid var(--edge);
-  color: var(--text-secondary);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  cursor: pointer;
-  font-size: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.theme-btn:hover { border-color: var(--purple); color: var(--purple); }
-.wrap {
-  max-width: 980px;
-  margin: 24px auto;
-  padding: 0 16px 60px;
-}
-.header-box {
-  margin-bottom: 20px;
-}
-.header-box h1 {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0 0 6px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.badge-studio {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  background: var(--purple);
-  color: #fff;
-  padding: 2px 8px;
-  border-radius: 999px;
-  letter-spacing: .05em;
-}
-.header-box p {
-  color: var(--text-secondary);
-  margin: 0;
-  font-size: 14px;
-}
-.card {
-  background: var(--surface-1);
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-lg);
-  padding: 22px;
-  margin-bottom: 20px;
-  box-shadow: var(--shadow-sm);
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-.card-header h2 {
-  font-size: 14px;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--purple);
-  margin: 0;
-  font-weight: 700;
-}
 .turns-bar {
   display: flex;
   gap: 8px;
@@ -282,29 +89,6 @@ input:focus, select:focus, textarea:focus {
 }
 .row { margin-bottom: 16px; }
 .row:last-child { margin-bottom: 0; }
-.pill { display: flex; gap: 8px; flex-wrap: wrap; }
-.chip {
-  cursor: pointer;
-  padding: 6px 14px;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  user-select: none;
-  transition: background .15s ease, color .15s ease, border-color .15s ease;
-}
-.chip:hover {
-  border-color: var(--mint);
-  color: var(--mint);
-  background: var(--surface-1);
-}
-.chip.on {
-  background: var(--purple);
-  border-color: var(--purple);
-  color: #fff;
-}
 .preview {
   background: var(--surface-2);
   border: 1px solid var(--edge);
@@ -349,30 +133,6 @@ input:focus, select:focus, textarea:focus {
   flex-wrap: wrap;
   align-items: center;
 }
-button#go {
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 12px 24px;
-  background: var(--mint);
-  color: #fff;
-  transition: opacity .15s ease, transform .1s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 2px 4px rgba(1, 126, 132, 0.2);
-}
-button#go:hover:not(:disabled) {
-  background: var(--mint-light);
-  transform: translateY(-1px);
-}
-button#go:disabled {
-  opacity: .5;
-  cursor: not-allowed;
-  transform: none;
-}
 .status {
   font-size: 14px;
   font-weight: 600;
@@ -384,17 +144,6 @@ button#go:disabled {
 .status.ok { color: var(--ok); }
 .status.err { color: var(--err); }
 .status.busy { color: var(--busy); }
-.err-box {
-  background: rgba(220, 38, 38, 0.08);
-  border: 1px solid var(--err);
-  border-radius: var(--radius-md);
-  padding: 12px 16px;
-  font-size: 13px;
-  color: var(--err);
-  margin-top: 14px;
-  display: none;
-  white-space: pre-wrap;
-}
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-all; font-size: 12px; color: var(--text-muted); }
 .helper-actions {
   display: flex;
@@ -586,22 +335,10 @@ button#go:disabled {
   </div>
 </main>
 
+<script src="/gateway-ui/studio.js"></script>
 <script>
 (function(){
   "use strict";
-
-  // Theme management
-  var themeToggle = document.getElementById("theme-toggle");
-  var savedTheme = localStorage.getItem("gw_theme");
-  if (savedTheme === "dark") {
-    document.body.classList.add("dark");
-  }
-  if (themeToggle) {
-    themeToggle.addEventListener("click", function(){
-      var isDark = document.body.classList.toggle("dark");
-      localStorage.setItem("gw_theme", isDark ? "dark" : "light");
-    });
-  }
 
   var state={aspect:"9:16",model:"muse-video"};
 

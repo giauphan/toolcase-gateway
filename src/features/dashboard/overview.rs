@@ -41,6 +41,14 @@ pub fn handle_dashboard_asset(
             "application/javascript; charset=utf-8",
             include_str!("../../../assets/ui/dashboard.js"),
         ),
+        "/gateway-ui/studio.css" => (
+            "text/css; charset=utf-8",
+            include_str!("../../../assets/ui/studio.css"),
+        ),
+        "/gateway-ui/studio.js" => (
+            "application/javascript; charset=utf-8",
+            include_str!("../../../assets/ui/studio.js"),
+        ),
         _ => return Ok(false),
     };
     write!(

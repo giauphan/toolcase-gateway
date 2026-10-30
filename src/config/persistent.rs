@@ -262,20 +262,5 @@ pub fn save_persistent_config(
 ) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(config)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let parent = path.parent().unwrap_or(std::path::Path::new("."));
-    if !parent.exists() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    let tmp = parent.join(format!(
-        ".{}~tmp",
-        path.file_name().unwrap_or_default().to_string_lossy()
-    ));
-    std::fs::write(&tmp, &json)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-    }
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    crate::storage::write_atomic_0600(path, &json)
 }
