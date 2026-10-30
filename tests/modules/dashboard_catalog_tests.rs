@@ -215,3 +215,57 @@ fn test_system_catalog_and_one_click_installation() {
     cleanup_module_files("cohere-provider", &state_dir);
     cleanup_module_files("another-cohere", &state_dir);
 }
+
+#[test]
+fn test_system_catalog_decoupled_external_sources_and_schema() {
+    let catalog = toolcase_gateway::gateway::modules::get_system_module_catalog();
+    assert!(!catalog.is_empty(), "system catalog must not be empty");
+
+    for item in &catalog {
+        assert!(!item.id.trim().is_empty(), "module id must not be empty");
+        assert!(
+            !item.name.trim().is_empty(),
+            "module name must not be empty"
+        );
+        assert!(
+            item.namespace.starts_with('/'),
+            "module namespace must start with /"
+        );
+        assert!(
+            !item.capabilities.is_empty(),
+            "module capabilities must not be empty"
+        );
+    }
+
+    // Verify TikTok Creator Studio decoupled adapter in catalog
+    let tiktok_entry = catalog
+        .iter()
+        .find(|c| c.id == "tiktok-studio")
+        .expect("tiktok-studio must be present in system catalog");
+
+    assert_eq!(
+        tiktok_entry.source.as_deref(),
+        Some("https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git"),
+        "tiktok-studio must point to external decoupled git repository"
+    );
+
+    let schema = tiktok_entry
+        .config_schema
+        .as_ref()
+        .expect("config_schema must be present for tiktok-studio");
+
+    let fields = schema["fields"]
+        .as_array()
+        .expect("fields must be an array");
+    assert!(fields.iter().any(|f| f["key"] == "base_url"));
+    assert!(fields.iter().any(|f| f["key"] == "cookie"));
+    assert!(fields.iter().any(|f| f["key"] == "csrf_token"));
+    assert!(fields.iter().any(|f| f["key"] == "enabled"));
+
+    // Verify in-tree starter kit documentation exists
+    let starter_kit_readme = std::path::Path::new("examples/modules/README.md");
+    assert!(
+        starter_kit_readme.is_file(),
+        "examples/modules/README.md must exist to document starter kits vs external repos"
+    );
+}
