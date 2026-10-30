@@ -14,3 +14,8 @@ gateway.log
 tests/__pycache__
 .gw_state
 gateway_config.json
+**/__pycache__/
+*.pyc
+addons/**/config.json
+addons/tiktok-studio/
+addons/facebook-suite/

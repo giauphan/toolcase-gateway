@@ -152,6 +152,39 @@ fn test_scan_and_auto_discover_addons_directory_module() {
 }
 
 #[test]
+fn test_scan_and_auto_discover_in_tree_addons_echo_provider() {
+    let mut reg = ModuleRegistry::new();
+    let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_state).unwrap();
+
+    scan_and_register_modules(&mut reg, &temp_state);
+
+    let desc = reg
+        .get_module("echo-provider")
+        .expect("in-tree addons/echo-provider auto-discovered");
+    assert_eq!(desc.id, "echo-provider");
+    assert_eq!(desc.namespace, "/custom/echo");
+
+    if std::path::Path::new("addons/tiktok-studio/module.json").exists() {
+        let tiktok = reg
+            .get_module("tiktok-studio")
+            .expect("in-tree addons/tiktok-studio auto-discovered");
+        assert_eq!(tiktok.id, "tiktok-studio");
+        assert_eq!(tiktok.namespace, "/custom/tiktok");
+    }
+
+    if std::path::Path::new("addons/facebook-suite/module.json").exists() {
+        let fb = reg
+            .get_module("facebook-suite")
+            .expect("in-tree addons/facebook-suite auto-discovered");
+        assert_eq!(fb.id, "facebook-suite");
+        assert_eq!(fb.namespace, "/custom/facebook");
+    }
+
+    let _ = fs::remove_dir_all(&temp_state);
+}
+
+#[test]
 fn test_install_and_convert_script_without_manifest() {
     let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
     let src_dir = std::env::temp_dir().join(format!("test_raw_repo_{}", uuid::Uuid::new_v4()));
@@ -299,4 +332,24 @@ fn test_relative_entrypoint_resolution_and_canonicalization() {
     cleanup_module_files("relative-test-module", &temp_state);
     let _ = fs::remove_dir_all(&temp_state);
     let _ = fs::remove_dir_all(&src_dir);
+}
+
+#[test]
+fn test_scan_and_auto_discover_facebook_suite_addon() {
+    if !std::path::Path::new("addons/facebook-suite/module.json").exists() {
+        return;
+    }
+    let mut reg = ModuleRegistry::new();
+    let state_dir = std::path::PathBuf::from(".gw_state");
+    scan_and_register_modules(&mut reg, &state_dir);
+
+    let fb = reg
+        .get_module("facebook-suite")
+        .expect("facebook-suite must be auto-discovered from addons/");
+    assert_eq!(fb.id, "facebook-suite");
+    assert_eq!(fb.namespace, "/custom/facebook");
+    assert!(fb.capabilities.contains(&"studio".to_string()));
+    assert!(fb.capabilities.contains(&"upload".to_string()));
+    assert!(fb.capabilities.contains(&"publish".to_string()));
+    assert!(fb.capabilities.contains(&"reels".to_string()));
 }

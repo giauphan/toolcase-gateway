@@ -13,6 +13,7 @@ The gateway includes pre-configured, production-ready provider adapters in its S
 | Module ID | Name | Source / Repo | Capabilities | Namespace |
 | :--- | :--- | :--- | :--- | :--- |
 | `tiktok-studio` | **TikTok Creator Studio Adapter** | [giauphan/TikTok-Creator-Studio-Adapter](https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git) | `video_download`, `items_manage`, `publish`, `studio` | `/custom/tiktok` |
+| `facebook-suite` | **Meta Business Suite / Facebook Creator Studio Adapter** | Catalog Template | `video_upload`, `rupload`, `reels`, `stories`, `publish`, `studio` | `/custom/facebook` |
 | `claude-adapter` | **Anthropic Claude Adapter** | Catalog Template | `chat_completions`, `models`, `streaming` | `/custom/claude` |
 | `groq-fast` | **Groq High-Speed LLM** | Catalog Template | `chat_completions`, `models` | `/custom/groq` |
 | `cohere-provider`| **Cohere Provider Adapter** | Catalog Template | `chat_completions`, `models` | `/custom/cohere` |

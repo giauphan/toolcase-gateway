@@ -69,13 +69,17 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
             "/custom/mistral",
             &["chat_completions", "models"],
         ),
-        catalog_item(
-            "local-echo",
-            "Local Echo Test Module",
-            "Diagnostic echo adapter for local routing testing",
-            "/custom/echo",
-            &["chat_completions"],
-        ),
+        SystemCatalogModule {
+            id: "local-echo".to_string(),
+            name: "Local Echo Test Module".to_string(),
+            description: "Diagnostic echo adapter for local routing testing".to_string(),
+            namespace: "/custom/echo".to_string(),
+            version: "1.0.0".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec!["chat_completions".to_string(), "models".to_string()],
+            source: Some("examples/modules/echo-provider".to_string()),
+            config_schema: None,
+        },
         catalog_item(
             "suite-test",
             "Suite Provider Group",
@@ -133,6 +137,90 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                         "secret": true,
                         "placeholder": "Leave empty to keep existing CSRF token",
                         "description": "TikTok CSRF protection token extracted from x-tt-csrf-token or cookies"
+                    }
+                ]
+            })),
+        },
+        SystemCatalogModule {
+            id: "facebook-suite".to_string(),
+            name: "Meta Business Suite / Facebook Creator Studio Adapter".to_string(),
+            description: "Meta Business Suite / Facebook Creator Studio video management, rupload resumable upload, and Reel/Story publishing adapter".to_string(),
+            namespace: "/custom/facebook".to_string(),
+            version: "1.0.0".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![
+                "video_upload".to_string(),
+                "rupload".to_string(),
+                "reels".to_string(),
+                "stories".to_string(),
+                "publish".to_string(),
+                "studio".to_string(),
+            ],
+            source: None,
+            config_schema: Some(serde_json::json!({
+                "title": "Meta Business Suite Config & HAR Import",
+                "module_id": "facebook-suite",
+                "namespace": "/custom/facebook",
+                "har_endpoint": "/custom/facebook/v1/config/har",
+                "har_hint": "Drop download-facebook.har here or select file (.har, .json) to auto-extract credentials and Comet parameters",
+                "fields": [
+                    {
+                        "key": "base_url",
+                        "label": "Meta Business Base URL",
+                        "type": "text",
+                        "placeholder": "https://business.facebook.com",
+                        "description": "Primary Meta Business Suite upstream URL"
+                    },
+                    {
+                        "key": "enabled",
+                        "label": "Module Status",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Enable or disable Meta Business Suite requests"
+                    },
+                    {
+                        "key": "cookie",
+                        "label": "Session Cookie",
+                        "type": "password",
+                        "secret": true,
+                        "placeholder": "Leave empty to keep existing cookie",
+                        "description": "Facebook authenticated session cookie"
+                    },
+                    {
+                        "key": "fb_dtsg",
+                        "label": "CSRF Token (fb_dtsg)",
+                        "type": "password",
+                        "secret": true,
+                        "placeholder": "Leave empty to keep existing fb_dtsg token",
+                        "description": "Comet anti-CSRF token extracted from HAR or page payload"
+                    },
+                    {
+                        "key": "user_id",
+                        "label": "Facebook User ID (__user)",
+                        "type": "text",
+                        "placeholder": "1000...",
+                        "description": "Authenticated Facebook User ID"
+                    },
+                    {
+                        "key": "actor_id",
+                        "label": "Actor ID (av)",
+                        "type": "text",
+                        "placeholder": "1435...",
+                        "description": "Active acting identity or Page ID"
+                    },
+                    {
+                        "key": "target_id",
+                        "label": "Target Page ID",
+                        "type": "text",
+                        "placeholder": "1435...",
+                        "description": "Default target Facebook Page for uploads and reels"
+                    },
+                    {
+                        "key": "business_id",
+                        "label": "Business ID (__bid)",
+                        "type": "text",
+                        "placeholder": "2567...",
+                        "description": "Associated Meta Business Account ID"
                     }
                 ]
             })),

@@ -53,6 +53,13 @@ toolcase-gateway-rs/
 │   ├── muse-image-generation.md  # Muse image creation, aspect ratios, preview, and download
 │   ├── muse-video-generation.md  # Muse video generation API and job lifecycle
 │   └── MUSE_VIDEO_CURL_TEST.md   # Smoke test commands for Muse video workflows
+├── addons/                       # Auto-discovered local drop-in addons and provider extensions
+│   ├── README.md                 # Addon authoring guide and catalog reference
+│   └── echo-provider/            # Ready-to-run reference starter addon
+├── examples/                     # Reference starter kits and external module guides
+│   └── modules/                  # Extensible module templates and documentation
+│       ├── README.md             # Architecture model (starter kits vs. production addons)
+│       └── echo-provider/        # Reference stdio-stream Python adapter
 ├── plan/
 │   ├── pending/                  # Active requirement plans (must exist before implementation)
 │   └── done/                     # Archived, fully verified and completed plans
