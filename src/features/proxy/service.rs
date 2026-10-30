@@ -92,173 +92,49 @@ impl ProxyService {
         let mut upstream = match OmniRouteAdapter::open_upstream(client, request, config, model) {
             Ok(u) => u,
             Err(e) => {
-                crate::runtime::logger::log_message(
-                    "WARN",
-                    "gateway_proxy",
-                    &format!(
-                        "Upstream connection failed for model '{}' on path {}: {e}",
-                        model, request.path
-                    ),
-                );
-                if !last {
-                    return Ok(None);
-                }
-                crate::runtime::logger::log_message(
-                    "ERROR",
-                    "gateway_proxy",
-                    &format!("All upstream models exhausted; upstream connection error: {e}"),
-                );
-                crate::http::write_error(
-                    client,
-                    502,
-                    "Bad Gateway",
-                    &format!("toolcase-gateway: upstream connection failed: {e}"),
-                )?;
-                return Ok(Some(502));
+                return handle_upstream_error(client, &request.path, model, "connection", last, &e)
             }
         };
 
-        let head = match crate::http::read_response_head(&mut upstream) {
+        let mut head = match crate::http::read_response_head(&mut upstream) {
             Ok(h) => h,
             Err(e) => {
-                crate::runtime::logger::log_message(
-                    "WARN",
-                    "gateway_proxy",
-                    &format!(
-                        "Upstream read head failed for model '{}' on path {}: {e}",
-                        model, request.path
-                    ),
-                );
-                if !last {
-                    return Ok(None);
-                }
-                crate::runtime::logger::log_message(
-                    "ERROR",
-                    "gateway_proxy",
-                    &format!("All upstream models exhausted; upstream read head error: {e}"),
-                );
-                crate::http::write_error(
-                    client,
-                    502,
-                    "Bad Gateway",
-                    &format!("toolcase-gateway: upstream read head failed: {e}"),
-                )?;
-                return Ok(Some(502));
+                return handle_upstream_error(client, &request.path, model, "read head", last, &e)
             }
         };
 
         *last_status = Some(head.status);
         if crate::gateway::retry::is_safe_to_retry(head.status) {
-            let delay = crate::omniroute::calculate_retry_delay(
-                index,
-                config.retry_base_delay_ms,
-                config.max_retry_delay_ms,
-                Some(&head.headers),
-            );
-            crate::runtime::logger::log_message(
-                "WARN",
-                "gateway_proxy",
-                &format!(
-                    "Upstream model '{}' returned HTTP {}; failing over (retry in {}ms)",
-                    model,
-                    head.status,
-                    delay.as_millis()
-                ),
-            );
-            if !last {
-                if !delay.is_zero() {
-                    thread::sleep(delay);
-                }
-                return Ok(None);
-            }
-            crate::runtime::logger::log_message(
-                "ERROR",
-                "gateway_proxy",
-                &format!(
-                    "All upstream models exhausted; final model '{}' returned HTTP {}",
-                    model, head.status
-                ),
-            );
-            crate::http::write_error(
-                client,
-                head.status,
-                &head.reason,
-                &format!("toolcase-gateway: all upstream models exhausted; model \"{model}\" returned HTTP {}", head.status),
-            )?;
-            return Ok(Some(head.status));
+            return handle_retryable_status(client, &head, model, index, last, config);
         }
 
         crate::runtime::logger::log_message(
             "INFO",
             "gateway_proxy",
             &format!(
-                "Upstream model '{}' responded with HTTP {} {} for path {}",
-                model, head.status, head.reason, request.path
+                "Upstream model '{model}' responded with HTTP {} {} for path {}",
+                head.status, head.reason, request.path
             ),
         );
-        let mut head = head;
-        let is_sw = crate::http::header_value(&request.headers, "service-worker")
-            .is_some_and(|v| v.eq_ignore_ascii_case("script"))
-            || request.path.ends_with("/sw.js")
-            || request.path.contains("/sw.js?");
-        let allowed_scope = if is_sw {
-            Some(match prefix {
-                Some(pfx) => format!("{pfx}/"),
-                None => "/".to_string(),
-            })
-        } else {
-            None
-        };
+
+        let allowed_scope = resolve_allowed_service_worker_scope(request, prefix);
 
         if head.status == 304 || head.status == 204 || (100..=199).contains(&head.status) {
             let status = head.status;
-            write!(client, "HTTP/1.1 {status} {}\r\n", head.reason)?;
-            for (name, val) in &head.headers {
-                if name.eq_ignore_ascii_case("content-length")
-                    || name.eq_ignore_ascii_case("transfer-encoding")
-                    || (allowed_scope.is_some()
-                        && name.eq_ignore_ascii_case("service-worker-allowed"))
-                    || crate::http::HOP_BY_HOP
-                        .iter()
-                        .any(|h| name.eq_ignore_ascii_case(h))
-                {
-                    continue;
-                }
-                write!(client, "{name}: {val}\r\n")?;
-            }
-            if let Some(ref scope) = allowed_scope {
-                write!(client, "Service-Worker-Allowed: {scope}\r\n")?;
-            }
-            write!(client, "Connection: close\r\n\r\n")?;
-            client.flush()?;
+            handle_empty_body_forward(client, &head, allowed_scope.as_deref())?;
             return Ok(Some(status));
         }
 
         if let Some(pfx) = prefix {
-            if (300..=399).contains(&head.status) {
-                let target_host = &config.target_host;
-                let target_port = config.target_port;
-                for (name, val) in &mut head.headers {
-                    if name.eq_ignore_ascii_case("location") {
-                        *val = rewrite_location_header(val, pfx, target_host, target_port);
-                    }
-                }
-            }
-            // Mount the upstream web app under the module prefix so its own
-            // paths (/dashboard/providers, /_next/...) never collide with gateway routes.
-            if super::prefix_rewrite::is_rewritable(&head) && request.method != "HEAD" {
-                let body = super::prefix_rewrite::read_full_body(&mut upstream, &head)?;
-                let rewritten = super::prefix_rewrite::rewrite_root_relative(
-                    &String::from_utf8_lossy(&body),
-                    pfx,
-                );
-                let status = head.status;
-                super::prefix_rewrite::write_rewritten(
-                    client,
-                    &head,
-                    rewritten.as_bytes(),
-                    allowed_scope.as_deref(),
-                )?;
+            if let Some(status) = handle_prefix_rewrite(
+                client,
+                &mut upstream,
+                &mut head,
+                request,
+                pfx,
+                config,
+                allowed_scope.as_deref(),
+            )? {
                 return Ok(Some(status));
             }
         }
@@ -374,30 +250,153 @@ impl ProxyService {
     }
 }
 
-/// Rewrites redirect `Location` headers from an upstream service to remain within the mounted module prefix.
-pub fn rewrite_location_header(
-    location: &str,
-    prefix: &str,
-    upstream_host: &str,
-    upstream_port: u16,
-) -> String {
-    let upstream_prefix_http = format!("http://{upstream_host}:{upstream_port}");
-    let upstream_prefix_https = format!("https://{upstream_host}:{upstream_port}");
-    let path = if let Some(stripped) = location.strip_prefix(&upstream_prefix_http) {
-        stripped
-    } else if let Some(stripped) = location.strip_prefix(&upstream_prefix_https) {
-        stripped
-    } else if location.starts_with('/') {
-        location
-    } else {
-        return location.to_string();
-    };
+pub use super::prefix_rewrite::rewrite_location_header;
 
-    if path == "/" || path.is_empty() {
-        format!("{prefix}/dashboard")
-    } else if path.starts_with(prefix) {
-        path.to_string()
-    } else {
-        format!("{prefix}{path}")
+fn handle_upstream_error(
+    client: &mut TcpStream,
+    path: &str,
+    model: &str,
+    phase: &str,
+    last: bool,
+    err: &io::Error,
+) -> io::Result<Option<u16>> {
+    crate::runtime::logger::log_message(
+        "WARN",
+        "gateway_proxy",
+        &format!("Upstream {phase} failed for model '{model}' on path {path}: {err}"),
+    );
+    if !last {
+        return Ok(None);
     }
+    crate::runtime::logger::log_message(
+        "ERROR",
+        "gateway_proxy",
+        &format!("All upstream models exhausted; upstream {phase} error: {err}"),
+    );
+    crate::http::write_error(
+        client,
+        502,
+        "Bad Gateway",
+        &format!("toolcase-gateway: upstream {phase} failed: {err}"),
+    )?;
+    Ok(Some(502))
+}
+
+fn handle_retryable_status(
+    client: &mut TcpStream,
+    head: &crate::http::ResponseHead,
+    model: &str,
+    index: usize,
+    last: bool,
+    config: &Config,
+) -> io::Result<Option<u16>> {
+    let delay = crate::omniroute::calculate_retry_delay(
+        index,
+        config.retry_base_delay_ms,
+        config.max_retry_delay_ms,
+        Some(&head.headers),
+    );
+    crate::runtime::logger::log_message(
+        "WARN",
+        "gateway_proxy",
+        &format!(
+            "Upstream model '{model}' returned HTTP {}; failing over (retry in {}ms)",
+            head.status,
+            delay.as_millis()
+        ),
+    );
+    if !last {
+        if !delay.is_zero() {
+            thread::sleep(delay);
+        }
+        return Ok(None);
+    }
+    crate::runtime::logger::log_message(
+        "ERROR",
+        "gateway_proxy",
+        &format!(
+            "All upstream models exhausted; final model '{model}' returned HTTP {}",
+            head.status
+        ),
+    );
+    crate::http::write_error(
+        client,
+        head.status,
+        &head.reason,
+        &format!(
+            "toolcase-gateway: all upstream models exhausted; model \"{model}\" returned HTTP {}",
+            head.status
+        ),
+    )?;
+    Ok(Some(head.status))
+}
+
+fn resolve_allowed_service_worker_scope(request: &Request, prefix: Option<&str>) -> Option<String> {
+    let is_sw = crate::http::header_value(&request.headers, "service-worker")
+        .is_some_and(|v| v.eq_ignore_ascii_case("script"))
+        || request.path.ends_with("/sw.js")
+        || request.path.contains("/sw.js?");
+    if is_sw {
+        Some(match prefix {
+            Some(pfx) => format!("{pfx}/"),
+            None => "/".to_string(),
+        })
+    } else {
+        None
+    }
+}
+
+fn handle_empty_body_forward(
+    client: &mut TcpStream,
+    head: &crate::http::ResponseHead,
+    allowed_scope: Option<&str>,
+) -> io::Result<()> {
+    let status = head.status;
+    write!(client, "HTTP/1.1 {status} {}\r\n", head.reason)?;
+    for (name, val) in &head.headers {
+        if name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("transfer-encoding")
+            || (allowed_scope.is_some() && name.eq_ignore_ascii_case("service-worker-allowed"))
+            || crate::http::HOP_BY_HOP
+                .iter()
+                .any(|h| name.eq_ignore_ascii_case(h))
+        {
+            continue;
+        }
+        write!(client, "{name}: {val}\r\n")?;
+    }
+    if let Some(scope) = allowed_scope {
+        write!(client, "Service-Worker-Allowed: {scope}\r\n")?;
+    }
+    write!(client, "Connection: close\r\n\r\n")?;
+    client.flush()
+}
+
+fn handle_prefix_rewrite(
+    client: &mut TcpStream,
+    upstream: &mut TcpStream,
+    head: &mut crate::http::ResponseHead,
+    request: &Request,
+    pfx: &str,
+    config: &Config,
+    allowed_scope: Option<&str>,
+) -> io::Result<Option<u16>> {
+    if (300..=399).contains(&head.status) {
+        let target_host = &config.target_host;
+        let target_port = config.target_port;
+        for (name, val) in &mut head.headers {
+            if name.eq_ignore_ascii_case("location") {
+                *val = rewrite_location_header(val, pfx, target_host, target_port);
+            }
+        }
+    }
+    if super::prefix_rewrite::is_rewritable(head) && request.method != "HEAD" {
+        let body = super::prefix_rewrite::read_full_body(upstream, head)?;
+        let rewritten =
+            super::prefix_rewrite::rewrite_root_relative(&String::from_utf8_lossy(&body), pfx);
+        let status = head.status;
+        super::prefix_rewrite::write_rewritten(client, head, rewritten.as_bytes(), allowed_scope)?;
+        return Ok(Some(status));
+    }
+    Ok(None)
 }

@@ -337,6 +337,79 @@ EOF
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
+#[test]
+fn test_personal_module_request_preserves_query_string() {
+    let temp_dir = std::env::temp_dir().join(format!("query_test_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let temp_script = temp_dir.join("run.sh");
+
+    let script = r#"#!/bin/sh
+cat << 'EOF' | python3 - "$@"
+import sys, json
+for line in sys.stdin:
+    if not line.strip(): continue
+    req = json.loads(line)
+    out = {
+        "status": 200,
+        "headers": {"content-type": "application/json"},
+        "body": json.dumps({
+            "req_path": req.get("path", "")
+        })
+    }
+    sys.stdout.write(json.dumps(out) + "\n")
+    sys.stdout.flush()
+EOF
+"#;
+    fs::write(&temp_script, script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&temp_script).unwrap().permissions();
+        perms.set_mode(0o700);
+        let _ = fs::set_permissions(&temp_script, perms);
+    }
+
+    let manifest = PersonalManifest {
+        id: "test-query".to_string(),
+        name: "Test Query Forwarding".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: "/tiktok".to_string(),
+        entrypoint: temp_script.to_string_lossy().to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec!["studio".to_string(), "items".to_string()],
+        config_schema: None,
+        permissions: vec![],
+        group: None,
+    };
+
+    let (mut client, mut server) = match create_stream_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+
+    let req = Request {
+        method: "GET".to_string(),
+        path: "/tiktok/v1/items?cursor=10&count=20".to_string(),
+        headers: vec![],
+        body: vec![],
+    };
+
+    let server_handle = thread::spawn(move || {
+        handle_personal_module_request(&mut server, &req, &manifest, "/v1/items")
+    });
+
+    let head = read_response_head(&mut client).expect("read head");
+    assert_eq!(head.status, 200);
+
+    let mut body = head.buffered_body;
+    let _ = client.read_to_end(&mut body);
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(val["req_path"], "/v1/items?cursor=10&count=20");
+
+    let _ = server_handle.join().unwrap();
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
 fn create_stream_pair() -> Option<(TcpStream, TcpStream)> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
     let addr = listener.local_addr().ok()?;

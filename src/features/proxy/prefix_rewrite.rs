@@ -133,6 +133,34 @@ pub fn write_rewritten(
     client.flush()
 }
 
+/// Rewrites redirect `Location` headers from an upstream service to remain within the mounted module prefix.
+pub fn rewrite_location_header(
+    location: &str,
+    prefix: &str,
+    upstream_host: &str,
+    upstream_port: u16,
+) -> String {
+    let upstream_prefix_http = format!("http://{upstream_host}:{upstream_port}");
+    let upstream_prefix_https = format!("https://{upstream_host}:{upstream_port}");
+    let path = if let Some(stripped) = location.strip_prefix(&upstream_prefix_http) {
+        stripped
+    } else if let Some(stripped) = location.strip_prefix(&upstream_prefix_https) {
+        stripped
+    } else if location.starts_with('/') {
+        location
+    } else {
+        return location.to_string();
+    };
+
+    if path == "/" || path.is_empty() {
+        format!("{prefix}/dashboard")
+    } else if path.starts_with(prefix) {
+        path.to_string()
+    } else {
+        format!("{prefix}{path}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::rewrite_root_relative;

@@ -160,16 +160,16 @@ fn parse_or_synthesize_manifest(
                         .or_else(|| Some(cat.protocol.clone())),
                     branch: payload.branch.clone(),
                 };
-                let mut m = install_module(
+                if let Ok(mut m) = install_module(
                     crate::gateway::installer::resolve_source(src),
                     opts,
                     &state_dir,
-                )
-                .map_err(|e| format!("Catalog install from {src} failed: {e}"))?;
-                if m.config_schema.is_none() {
-                    m.config_schema = cat.config_schema.clone();
+                ) {
+                    if m.config_schema.is_none() {
+                        m.config_schema = cat.config_schema.clone();
+                    }
+                    return Ok((m, true));
                 }
-                return Ok((m, true));
             }
             let ep = resolve_entrypoint_path(payload.entrypoint.clone(), &cat.id);
             let group = if cat.id == "suite-test" {

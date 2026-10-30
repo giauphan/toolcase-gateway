@@ -6,27 +6,22 @@ use std::net::TcpStream;
 const MAX_REWRITE_WINDOW: usize = 1024 * 1024;
 pub const MAX_STREAM_BYTES: usize = 128 * 1024 * 1024; // 128 MB maximum streamed bytes guard
 
-pub fn stream_response(
-    client: &mut TcpStream,
-    upstream: &mut TcpStream,
-    head: ResponseHead,
-    request_body: &[u8],
-) -> io::Result<()> {
-    if head.status == 304 || head.status == 204 || (100..=199).contains(&head.status) {
-        write!(client, "HTTP/1.1 {} {}\r\n", head.status, head.reason)?;
-        for (name, value) in &head.headers {
-            if name.eq_ignore_ascii_case("content-length")
-                || name.eq_ignore_ascii_case("transfer-encoding")
-                || HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
-            {
-                continue;
-            }
-            write!(client, "{name}: {value}\r\n")?;
+fn write_empty_body_response(client: &mut TcpStream, head: &ResponseHead) -> io::Result<()> {
+    write!(client, "HTTP/1.1 {} {}\r\n", head.status, head.reason)?;
+    for (name, value) in &head.headers {
+        if name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("transfer-encoding")
+            || HOP_BY_HOP.iter().any(|h| name.eq_ignore_ascii_case(h))
+        {
+            continue;
         }
-        write!(client, "Connection: close\r\n\r\n")?;
-        return client.flush();
+        write!(client, "{name}: {value}\r\n")?;
     }
+    write!(client, "Connection: close\r\n\r\n")?;
+    client.flush()
+}
 
+fn write_chunked_response_headers(client: &mut TcpStream, head: &ResponseHead) -> io::Result<()> {
     write!(client, "HTTP/1.1 {} {}\r\n", head.status, head.reason)?;
     for (name, value) in &head.headers {
         if name.eq_ignore_ascii_case("content-length")
@@ -41,61 +36,114 @@ pub fn stream_response(
     write!(
         client,
         "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
-    )?;
+    )
+}
+
+fn pump_chunked_input(
+    upstream: &mut TcpStream,
+    buffered: &mut Vec<u8>,
+    output: &mut Vec<u8>,
+    total_streamed: &mut usize,
+) -> io::Result<bool> {
+    let decoded = read_one_chunk(upstream, buffered)?;
+    let Some(decoded) = decoded else {
+        return Ok(false);
+    };
+    *total_streamed = total_streamed.saturating_add(decoded.len());
+    if *total_streamed > MAX_STREAM_BYTES {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "stream exceeded maximum byte budget",
+        ));
+    }
+    output.extend_from_slice(&decoded);
+    Ok(true)
+}
+
+fn pump_fixed_input(
+    upstream: &mut TcpStream,
+    buffered: &mut Vec<u8>,
+    remaining: &mut Option<usize>,
+    output: &mut Vec<u8>,
+    total_streamed: &mut usize,
+) -> io::Result<bool> {
+    if *remaining == Some(0) {
+        return Ok(false);
+    }
+    if buffered.is_empty() {
+        let mut temp = [0u8; 8192];
+        let count = upstream.read(&mut temp)?;
+        if count == 0 {
+            return Ok(false);
+        }
+        buffered.extend_from_slice(&temp[..count]);
+    }
+    let take = remaining.map_or(buffered.len(), |n| n.min(buffered.len()));
+    *total_streamed = total_streamed.saturating_add(take);
+    if *total_streamed > MAX_STREAM_BYTES {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "stream exceeded maximum byte budget",
+        ));
+    }
+    output.extend(buffered.drain(..take));
+    if let Some(n) = remaining {
+        *n -= take;
+    }
+    Ok(true)
+}
+
+fn flush_rewrite_window(
+    client: &mut TcpStream,
+    output: &mut Vec<u8>,
+    request_body: &[u8],
+) -> io::Result<()> {
+    if let Some(end) = output.iter().rposition(|b| *b == b'\n') {
+        let rest = output.split_off(end + 1);
+        write_chunk(client, output, request_body)?;
+        *output = rest;
+    } else if output.len() > MAX_REWRITE_WINDOW {
+        write_chunk(client, output, request_body)?;
+        output.clear();
+    }
+    Ok(())
+}
+
+pub fn stream_response(
+    client: &mut TcpStream,
+    upstream: &mut TcpStream,
+    head: ResponseHead,
+    request_body: &[u8],
+) -> io::Result<()> {
+    if head.status == 304 || head.status == 204 || (100..=199).contains(&head.status) {
+        return write_empty_body_response(client, &head);
+    }
+
+    write_chunked_response_headers(client, &head)?;
 
     let mut total_streamed: usize = 0;
     let mut buffered = head.buffered_body;
     let chunked = is_chunked(&head.headers);
-    let length = header_value(&head.headers, "content-length").and_then(|v| v.parse().ok());
-    let mut remaining = length;
+    let mut remaining = header_value(&head.headers, "content-length").and_then(|v| v.parse().ok());
     let mut output = Vec::with_capacity(8192);
     loop {
-        if chunked {
-            let decoded = read_one_chunk(upstream, &mut buffered)?;
-            let Some(decoded) = decoded else { break };
-            total_streamed = total_streamed.saturating_add(decoded.len());
-            if total_streamed > MAX_STREAM_BYTES {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    "stream exceeded maximum byte budget",
-                ));
-            }
-            output.extend_from_slice(&decoded);
-        } else if remaining == Some(0) {
-            break;
+        let has_more = if chunked {
+            pump_chunked_input(upstream, &mut buffered, &mut output, &mut total_streamed)?
         } else {
-            if buffered.is_empty() {
-                let mut temp = [0u8; 8192];
-                let count = upstream.read(&mut temp)?;
-                if count == 0 {
-                    break;
-                }
-                buffered.extend_from_slice(&temp[..count]);
-            }
-            let take = remaining.map_or(buffered.len(), |n| n.min(buffered.len()));
-            total_streamed = total_streamed.saturating_add(take);
-            if total_streamed > MAX_STREAM_BYTES {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    "stream exceeded maximum byte budget",
-                ));
-            }
-            output.extend(buffered.drain(..take));
-            if let Some(n) = &mut remaining {
-                *n -= take;
-            }
+            pump_fixed_input(
+                upstream,
+                &mut buffered,
+                &mut remaining,
+                &mut output,
+                &mut total_streamed,
+            )?
+        };
+
+        if !has_more {
+            break;
         }
-        // Only flush up to the last newline: a `"name":"..."` pair split across
-        // two reads would otherwise escape rewriting. A body with no newline is
-        // flushed once it exceeds the rewrite window so memory stays bounded.
-        if let Some(end) = output.iter().rposition(|b| *b == b'\n') {
-            let rest = output.split_off(end + 1);
-            write_chunk(client, &output, request_body)?;
-            output = rest;
-        } else if output.len() > MAX_REWRITE_WINDOW {
-            write_chunk(client, &output, request_body)?;
-            output.clear();
-        }
+
+        flush_rewrite_window(client, &mut output, request_body)?;
     }
     write_chunk(client, &output, request_body)?;
     client.write_all(b"0\r\n\r\n")

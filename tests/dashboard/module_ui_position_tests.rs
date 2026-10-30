@@ -129,3 +129,155 @@ fn test_automatic_module_ui_config_and_standalone_page() {
     let _ = fs::remove_file(&tmp_env);
     let _ = fs::remove_file(&store.config_file);
 }
+
+#[test]
+fn test_tiktok_creator_studio_adapter_alias_and_config_sync() {
+    let tmp_env =
+        std::env::temp_dir().join(format!("test_mod_tiktok_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    let manifest = toolcase_gateway::gateway::modules::PersonalManifest {
+        id: "TikTok-Creator-Studio-Adapter".to_string(),
+        name: "TikTok Creator Studio Adapter".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: "/tiktok".to_string(),
+        entrypoint: "/tmp/adapter.py".to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec![
+            "studio".to_string(),
+            "items".to_string(),
+            "download".to_string(),
+            "publish".to_string(),
+            "upload".to_string(),
+            "chat_completions".to_string(),
+            "models".to_string(),
+        ],
+        config_schema: Some(serde_json::json!({
+            "module_id": "tiktok-studio",
+            "namespace": "/custom/tiktok",
+            "fields": [
+                {
+                    "key": "base_url",
+                    "label": "Base URL",
+                    "type": "url",
+                    "secret": false,
+                    "default": "https://creator.tiktok.com"
+                },
+                {
+                    "key": "cookie",
+                    "label": "Session Cookie",
+                    "type": "password",
+                    "secret": true
+                }
+            ],
+            "har_endpoint": "/custom/tiktok/v1/config/har"
+        })),
+        permissions: vec![],
+        group: None,
+    };
+
+    store
+        .module_registry()
+        .write()
+        .unwrap()
+        .register_personal_module(manifest)
+        .expect("register personal module");
+
+    // 1. GET module config by exact ID
+    let (head1, body1) = request_gateway(
+        "GET",
+        "/api/v1/dashboard/modules/config?id=TikTok-Creator-Studio-Adapter",
+        b"",
+        &store,
+    );
+    assert_eq!(head1.status, 200);
+    let json1: serde_json::Value = serde_json::from_slice(&body1).unwrap();
+    assert_eq!(json1["id"], "TikTok-Creator-Studio-Adapter");
+    // Verify normalized har_endpoint matching current namespace
+    assert_eq!(
+        json1["config_schema"]["har_endpoint"],
+        "/tiktok/v1/config/har"
+    );
+
+    // 2. GET module config by catalog alias (tiktok-studio)
+    let (head2, body2) = request_gateway(
+        "GET",
+        "/api/v1/dashboard/modules/config?id=tiktok-studio",
+        b"",
+        &store,
+    );
+    assert_eq!(head2.status, 200);
+    let json2: serde_json::Value = serde_json::from_slice(&body2).unwrap();
+    assert_eq!(json2["id"], "TikTok-Creator-Studio-Adapter");
+
+    // 3. GET module config by namespace alias (tiktok)
+    let (head3, body3) = request_gateway(
+        "GET",
+        "/api/v1/dashboard/modules/config?id=tiktok",
+        b"",
+        &store,
+    );
+    assert_eq!(head3.status, 200);
+    let json3: serde_json::Value = serde_json::from_slice(&body3).unwrap();
+    assert_eq!(json3["id"], "TikTok-Creator-Studio-Adapter");
+
+    // 4. Standalone UI routes (/modules/TikTok-Creator-Studio-Adapter/config and /tiktok-config)
+    let (h_page1, b_page1) = request_gateway(
+        "GET",
+        "/modules/TikTok-Creator-Studio-Adapter/config",
+        b"",
+        &store,
+    );
+    assert_eq!(h_page1.status, 200);
+    assert!(h_page1
+        .headers
+        .iter()
+        .any(|(k, v)| k.eq_ignore_ascii_case("cache-control") && v.contains("no-cache")));
+    assert!(String::from_utf8_lossy(&b_page1).contains("Module UI Configuration"));
+
+    let (h_page2, _) = request_gateway("GET", "/tiktok-config", b"", &store);
+    assert_eq!(h_page2.status, 200);
+
+    // 5. POST module config via alias 'tiktok-studio' and update settings
+    let update_payload = serde_json::json!({
+        "id": "tiktok-studio",
+        "config": {
+            "base_url": "https://custom-creator.tiktok.com",
+            "cookie": "sessionid=tiktok_secret_val_12345",
+            "enabled": false
+        }
+    });
+    let (h_post, b_post) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/config",
+        &serde_json::to_vec(&update_payload).unwrap(),
+        &store,
+    );
+    assert_eq!(h_post.status, 200);
+    let post_json: serde_json::Value = serde_json::from_slice(&b_post).unwrap();
+    assert_eq!(post_json["ok"], true);
+    assert_eq!(post_json["module_status"], "disabled");
+    assert_eq!(
+        post_json["config"]["base_url"],
+        "https://custom-creator.tiktok.com"
+    );
+    assert_eq!(post_json["config"]["masked_cookie"], "sessio...2345");
+
+    // 6. Verify effective module config
+    let effective = store
+        .module_registry()
+        .read()
+        .unwrap()
+        .get_effective_module_config("TikTok-Creator-Studio-Adapter");
+    assert_eq!(
+        effective.get("base_url").and_then(|v| v.as_str()),
+        Some("https://custom-creator.tiktok.com")
+    );
+    assert_eq!(
+        effective.get("cookie").and_then(|v| v.as_str()),
+        Some("sessionid=tiktok_secret_val_12345")
+    );
+
+    let _ = fs::remove_file(&tmp_env);
+    let _ = fs::remove_file(&store.config_file);
+}

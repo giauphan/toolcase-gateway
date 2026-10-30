@@ -58,12 +58,15 @@ pub fn handle_jev_models_catalog(
     };
     let base_url = config.jev_base_url.trim_end_matches('/');
     let target_url = format!("{base_url}/api/v1/models/");
-    let agent_config = ureq::Agent::config_builder()
+    let is_loopback = base_url.contains("127.0.0.1") || base_url.contains("localhost");
+    let mut agent_builder = ureq::Agent::config_builder()
         .timeout_global(config.io_timeout)
         .max_redirects(0)
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(agent_config);
+        .http_status_as_error(false);
+    if is_loopback {
+        agent_builder = agent_builder.proxy(None);
+    }
+    let agent = ureq::Agent::new_with_config(agent_builder.build());
     let mut req = agent.get(&target_url);
     if let Some(account) = pool.next_account() {
         req = req.header("Authorization", format!("Bearer {}", account.api_key));

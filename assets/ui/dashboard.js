@@ -248,79 +248,81 @@
     filterModules();
   }
 
-  if (listModeBtn) listModeBtn.onclick = function() { setModuleViewMode("list"); };
-  if (cardModeBtn) cardModeBtn.onclick = function() { setModuleViewMode("card"); };
+  function initToolbarAndNavigation() {
+    if (listModeBtn) listModeBtn.onclick = function() { setModuleViewMode("list"); };
+    if (cardModeBtn) cardModeBtn.onclick = function() { setModuleViewMode("card"); };
 
-  // Provider tabs wiring
-  document.querySelectorAll(".tabline .tab").forEach(function(btn) {
-    btn.addEventListener("click", function() {
-      if (btn.dataset.provider) {
-        switchProviderTab(btn.dataset.provider);
-      }
+    // Provider tabs wiring
+    document.querySelectorAll(".tabline .tab").forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        if (btn.dataset.provider) {
+          switchProviderTab(btn.dataset.provider);
+        }
+      });
     });
-  });
 
-  // Theme toggle
-  const themebtn = byId("themebtn");
-  if (themebtn) {
-    themebtn.onclick = function() {
-      document.body.classList.toggle("dark");
-      const isDark = document.body.classList.contains("dark");
-      try {
-        localStorage.setItem("tg_theme", isDark ? "dark" : "light");
-      } catch (_) {}
-    };
-  }
-
-  // Restore saved theme
-  try {
-    if (localStorage.getItem("tg_theme") === "dark") {
-      document.body.classList.add("dark");
+    // Theme toggle
+    const themebtn = byId("themebtn");
+    if (themebtn) {
+      themebtn.onclick = function() {
+        document.body.classList.toggle("dark");
+        const isDark = document.body.classList.contains("dark");
+        try {
+          localStorage.setItem("tg_theme", isDark ? "dark" : "light");
+        } catch (_) {}
+      };
     }
-  } catch (_) {}
 
-  // Mobile drawer button
-  const menubtn = byId("menubtn");
-  if (menubtn) {
-    menubtn.onclick = function() {
-      const sidebar = byId("sidebar");
-      if (sidebar) {
-        sidebar.classList.toggle("open");
-        const isOpen = sidebar.classList.contains("open");
-        menubtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    // Restore saved theme
+    try {
+      if (localStorage.getItem("tg_theme") === "dark") {
+        document.body.classList.add("dark");
       }
-    };
-  }
+    } catch (_) {}
 
-  // Apps button
-  const appsbtn = byId("appsbtn");
-  if (appsbtn) {
-    appsbtn.onclick = function() {
-      window.location.hash = "catalog";
-      navigateTo("catalog");
-    };
-  }
+    // Mobile drawer button
+    const menubtn = byId("menubtn");
+    if (menubtn) {
+      menubtn.onclick = function() {
+        const sidebar = byId("sidebar");
+        if (sidebar) {
+          sidebar.classList.toggle("open");
+          const isOpen = sidebar.classList.contains("open");
+          menubtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        }
+      };
+    }
 
-  // Custom module button in catalog
-  if (customInstallBtn && customInstallDetails) {
-    customInstallBtn.onclick = function() {
-      customInstallDetails.open = true;
-      customInstallDetails.scrollIntoView({ behavior: "smooth" });
-    };
-  }
+    // Apps button
+    const appsbtn = byId("appsbtn");
+    if (appsbtn) {
+      appsbtn.onclick = function() {
+        window.location.hash = "catalog";
+        navigateTo("catalog");
+      };
+    }
 
-  // Top Search with ⌘ K shortcut
-  const topsearch = byId("topsearch");
-  if (topsearch) {
-    topsearch.addEventListener("keydown", function(e) {
-      if (e.key === "Enter") {
-        const val = topsearch.value.trim();
-        if (modulesSearch) modulesSearch.value = val;
-        window.location.hash = "modules";
-        navigateTo("modules");
-        filterModules();
-      }
-    });
+    // Custom module button in catalog
+    if (customInstallBtn && customInstallDetails) {
+      customInstallBtn.onclick = function() {
+        customInstallDetails.open = true;
+        customInstallDetails.scrollIntoView({ behavior: "smooth" });
+      };
+    }
+
+    // Top Search with ⌘ K shortcut
+    const topsearch = byId("topsearch");
+    if (topsearch) {
+      topsearch.addEventListener("keydown", function(e) {
+        if (e.key === "Enter") {
+          const val = topsearch.value.trim();
+          if (modulesSearch) modulesSearch.value = val;
+          window.location.hash = "modules";
+          navigateTo("modules");
+          filterModules();
+        }
+      });
+    }
   }
 
   document.addEventListener("keydown", function(e) {
@@ -365,27 +367,26 @@
     }
 
     const tabBtn = e.target.closest(".tabline .tab");
-    if (tabBtn && tabBtn.dataset.provider) {
+    if (tabBtn?.dataset?.provider) {
       switchProviderTab(tabBtn.dataset.provider);
       return;
     }
 
     const moveBtn = e.target.closest(".module-move");
-    if (moveBtn && moveBtn.dataset.moduleId && moveBtn.dataset.direction) {
+    if (moveBtn?.dataset?.moduleId && moveBtn?.dataset?.direction) {
       window.updateModulePosition(moveBtn.dataset.moduleId, { direction: moveBtn.dataset.direction });
-      return;
     }
   });
 
   document.addEventListener("change", function(e) {
     const posSelect = e.target.closest(".module-pos-select");
-    if (posSelect && posSelect.dataset.moduleId) {
+    if (posSelect?.dataset?.moduleId) {
       window.updateModulePosition(posSelect.dataset.moduleId, { menu_position: posSelect.value });
       return;
     }
 
     const harInput = e.target.closest(".dynamic-har-file");
-    if (harInput && harInput.files && harInput.files[0] && harInput.dataset.harEndpoint) {
+    if (harInput?.files?.[0] && harInput.dataset.harEndpoint) {
       const file = harInput.files[0];
       const modId = harInput.dataset.moduleId || "module";
       file.text().then(function(rawText) {
@@ -398,7 +399,7 @@
       .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, json: j }; }); })
       .then(function(res) {
         if (!res.ok) {
-          showToast((res.json.error && res.json.error.message) || res.json.message || "HAR import failed", true);
+          showToast(res.json.error?.message || res.json.message || "HAR import failed", true);
         } else {
           showToast(res.json.message || ("Imported HAR for " + modId), false);
           loadOverview();
@@ -421,7 +422,8 @@
     }
   });
 
-  if (moduleActionDialog) {
+  function initModuleActionDialog() {
+    if (!moduleActionDialog) return;
     moduleActionDialog.addEventListener("close", function() {
       const action = pendingModuleAction;
       pendingModuleAction = null;
@@ -514,6 +516,31 @@
     moduleDetailDialog.showModal();
   }
 
+  function renderModuleActions(m, isBuiltin, isEnabled, isBusy) {
+    const busyAttr = isBusy ? " disabled" : "";
+    const toggleAction = isEnabled ? "false" : "true";
+    const toggleLabel = isEnabled ? "Disable" : "Enable";
+    const toggleBtn = "<button class=\"btn module-toggle\" data-module-id=\"" + escapeHtml(m.id) + "\" data-enable=\"" + toggleAction + "\"" + busyAttr + ">" + toggleLabel + "</button>";
+    const tabTarget = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
+    const cfgUrl = m.config_url || ("/modules/" + m.id + "/config");
+    const curPos = m.menu_position || "providers";
+    const posSelect = " <select class=\"field module-pos-select\" data-module-id=\"" + escapeHtml(m.id) + "\" aria-label=\"Menu position for " + escapeHtml(m.name) + "\"" + busyAttr + ">" +
+      "<option value=\"providers\"" + (curPos === "providers" ? " selected" : "") + ">Menu: Providers</option>" +
+      "<option value=\"sidebar\"" + (curPos === "sidebar" ? " selected" : "") + ">Menu: Sidebar</option>" +
+      "<option value=\"studios\"" + (curPos === "studios" ? " selected" : "") + ">Menu: Studios</option>" +
+      "<option value=\"hidden\"" + (curPos === "hidden" ? " selected" : "") + ">Menu: Hidden</option>" +
+    "</select>";
+    const orderBtns = " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"up\" title=\"Move up in menu\"" + busyAttr + ">↑</button>" +
+      " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
+    const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
+      " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
+    let removeBtn = "";
+    if (!isBuiltin) {
+      removeBtn = " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
+    }
+    return toggleBtn + configBtns + posSelect + orderBtns + removeBtn;
+  }
+
   function renderModules(modules, isFiltered) {
     renderedModules = modules;
     if (modulesCountBadge && !isFiltered) {
@@ -530,31 +557,6 @@
         modulesCardsWrap.innerHTML = "<div class=\"empty-hint ui-grid-full\">" + emptyMsg + "</div>";
       }
       return;
-    }
-
-    function renderModuleActions(m, isBuiltin, isEnabled, isBusy) {
-      const busyAttr = isBusy ? " disabled" : "";
-      const toggleAction = isEnabled ? "false" : "true";
-      const toggleLabel = isEnabled ? "Disable" : "Enable";
-      const toggleBtn = "<button class=\"btn module-toggle\" data-module-id=\"" + escapeHtml(m.id) + "\" data-enable=\"" + toggleAction + "\"" + busyAttr + ">" + toggleLabel + "</button>";
-      const tabTarget = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
-      const cfgUrl = m.config_url || ("/modules/" + m.id + "/config");
-      const curPos = m.menu_position || "providers";
-      const posSelect = " <select class=\"field module-pos-select\" data-module-id=\"" + escapeHtml(m.id) + "\" aria-label=\"Menu position for " + escapeHtml(m.name) + "\"" + busyAttr + ">" +
-        "<option value=\"providers\"" + (curPos === "providers" ? " selected" : "") + ">Menu: Providers</option>" +
-        "<option value=\"sidebar\"" + (curPos === "sidebar" ? " selected" : "") + ">Menu: Sidebar</option>" +
-        "<option value=\"studios\"" + (curPos === "studios" ? " selected" : "") + ">Menu: Studios</option>" +
-        "<option value=\"hidden\"" + (curPos === "hidden" ? " selected" : "") + ">Menu: Hidden</option>" +
-      "</select>";
-      const orderBtns = " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"up\" title=\"Move up in menu\"" + busyAttr + ">↑</button>" +
-        " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
-      const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
-        " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
-      let removeBtn = "";
-      if (!isBuiltin) {
-        removeBtn = " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
-      }
-      return toggleBtn + configBtns + posSelect + orderBtns + removeBtn;
     }
 
     // Render Table Mode
@@ -643,7 +645,8 @@
   }
 
   // Catalog grid install click handler
-  if (catalogGrid) {
+  function initCatalogGrid() {
+    if (!catalogGrid) return;
     catalogGrid.addEventListener("click", function(ev) {
       const btn = ev.target.closest(".catalog-install-btn");
       if (!btn) return;
@@ -723,7 +726,7 @@
   window.updateModulePosition = function(id, opts) {
     moduleRequestsInFlight.add(id);
     renderModules(renderedModules, true);
-    const payload = Object.assign({ id: id }, opts || {});
+    const payload = { id: id, ...(opts || {}) };
 
     fetch("/api/v1/dashboard/modules/position", {
       method: "POST",
@@ -752,6 +755,59 @@
       showModulesFeedback("Network error: " + err.message, true);
     });
   };
+
+  function renderDynamicConfigField(f, m, cfg) {
+    const key = f.key;
+    const label = f.label || key;
+    const type = f.type || "text";
+    const isSecret = Boolean(f.secret || type === "password");
+    const inputId = "dyn-cfg-" + m.id + "-" + key;
+    if (isSecret) {
+      const masked = cfg["masked_" + key] || "";
+      return "<div class=\"field-group formgroup\">" +
+        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+        "<input type=\"password\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"password\" autocomplete=\"off\" placeholder=\"Leave empty to keep existing\">" +
+        "<div class=\"hint\">" + escapeHtml(masked ? ("Current: " + masked) : "Current: not set") + "</div>" +
+      "</div>";
+    }
+    if (type === "boolean") {
+      const boolVal = cfg[key] !== undefined ? Boolean(cfg[key]) : (f.default !== false);
+      return "<div class=\"field-group formgroup\">" +
+        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+        "<select id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"boolean\">" +
+          "<option value=\"true\"" + (boolVal ? " selected" : "") + ">Enabled</option>" +
+          "<option value=\"false\"" + (!boolVal ? " selected" : "") + ">Disabled</option>" +
+        "</select>" +
+      "</div>";
+    }
+    if (type === "number") {
+      let numVal = 30;
+      if (cfg[key] != null) {
+        numVal = cfg[key];
+      } else if (f.default != null) {
+        numVal = f.default;
+      }
+      return "<div class=\"field-group formgroup\">" +
+        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+        "<input type=\"number\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"number\" value=\"" + escapeHtml(numVal) + "\">" +
+      "</div>";
+    }
+    const strVal = cfg[key] != null ? String(cfg[key]) : "";
+    return "<div class=\"field-group formgroup\">" +
+      "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+      "<input type=\"text\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"text\" value=\"" + escapeHtml(strVal) + "\" placeholder=\"" + escapeHtml(f.placeholder || "") + "\">" +
+    "</div>";
+  }
+
+  function resolveDynamicHarEndpoint(schema, m) {
+    if (!schema.har_endpoint) {
+      return "";
+    }
+    if (schema.har_endpoint.startsWith(m.namespace)) {
+      return schema.har_endpoint;
+    }
+    return m.namespace.replace(/\/$/, "") + "/v1/config/har";
+  }
 
   function renderDynamicProviderMenus(modules, moduleConfigs) {
     const visibleModules = (modules || []).filter(function(m) {
@@ -835,54 +891,16 @@
       });
 
       dynamicPanelsContainer.innerHTML = dynamicModules.map(function(m) {
-        const cfg = (moduleConfigs && moduleConfigs[m.id]) || {};
+        const cfg = moduleConfigs?.[m.id] || {};
         const schema = m.config_schema || {};
         const fields = schema.fields || [];
         const isCurrent = currentTab === m.id;
         const cfgUrl = m.config_url || ("/modules/" + m.id + "/config");
         const fieldsHtml = fields.map(function(f) {
-          const key = f.key;
-          const label = f.label || key;
-          const type = f.type || "text";
-          const isSecret = Boolean(f.secret || type === "password");
-          const inputId = "dyn-cfg-" + m.id + "-" + key;
-          if (isSecret) {
-            const masked = cfg["masked_" + key] || "";
-            return "<div class=\"field-group formgroup\">" +
-              "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
-              "<input type=\"password\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"password\" autocomplete=\"off\" placeholder=\"Leave empty to keep existing\">" +
-              "<div class=\"hint\">" + escapeHtml(masked ? ("Current: " + masked) : "Current: not set") + "</div>" +
-            "</div>";
-          }
-          if (type === "boolean") {
-            const boolVal = cfg[key] !== undefined ? Boolean(cfg[key]) : (f.default !== false);
-            return "<div class=\"field-group formgroup\">" +
-              "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
-              "<select id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"boolean\">" +
-                "<option value=\"true\"" + (boolVal ? " selected" : "") + ">Enabled</option>" +
-                "<option value=\"false\"" + (!boolVal ? " selected" : "") + ">Disabled</option>" +
-              "</select>" +
-            "</div>";
-          }
-          if (type === "number") {
-            const numVal = cfg[key] != null ? cfg[key] : (f.default != null ? f.default : 30);
-            return "<div class=\"field-group formgroup\">" +
-              "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
-              "<input type=\"number\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"number\" value=\"" + escapeHtml(numVal) + "\">" +
-            "</div>";
-          }
-          const strVal = cfg[key] != null ? String(cfg[key]) : "";
-          return "<div class=\"field-group formgroup\">" +
-            "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
-            "<input type=\"text\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"text\" value=\"" + escapeHtml(strVal) + "\" placeholder=\"" + escapeHtml(f.placeholder || "") + "\">" +
-          "</div>";
+          return renderDynamicConfigField(f, m, cfg);
         }).join("");
 
-        const resolvedHarEndpoint = schema.har_endpoint
-          ? (schema.har_endpoint.startsWith(m.namespace)
-              ? schema.har_endpoint
-              : (m.namespace.replace(/\/$/, "") + "/v1/config/har"))
-          : "";
+        const resolvedHarEndpoint = resolveDynamicHarEndpoint(schema, m);
         const harHtml = resolvedHarEndpoint
           ? ("<div class=\"field-group formgroup\">" +
               "<label for=\"dyn-har-" + escapeHtml(m.id) + "\">Or Import HAR Capture (.har / .json)</label>" +
@@ -917,8 +935,8 @@
     const modId = dynForm.dataset.moduleId;
     if (!modId) return;
     const harInput = dynForm.querySelector(".dynamic-har-file");
-    const harFile = harInput && harInput.files && harInput.files[0];
-    if (harFile && harInput.dataset.harEndpoint) {
+    const harFile = harInput?.files?.[0];
+    if (harFile && harInput?.dataset.harEndpoint) {
       harFile.text().then(function(rawText) {
         return fetch(harInput.dataset.harEndpoint, {
           method: "POST",
@@ -929,9 +947,9 @@
       .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, json: j }; }); })
       .then(function(res) {
         if (!res.ok) {
-          showToast((res.json.error && res.json.error.message) || res.json.message || "HAR import failed", true);
+          showToast(res.json?.error?.message || res.json?.message || "HAR import failed", true);
         } else {
-          showToast(res.json.message || ("Imported HAR for " + modId), false);
+          showToast(res.json?.message || ("Imported HAR for " + modId), false);
           loadOverview();
         }
       })
@@ -949,7 +967,7 @@
       const k = inp.dataset.key;
       const t = inp.dataset.type;
       if (t === "password") {
-        if (inp.value && inp.value.trim()) cfg[k] = inp.value.trim();
+        if (inp.value?.trim()) cfg[k] = inp.value.trim();
       } else if (t === "boolean") {
         cfg[k] = inp.value === "true";
       } else if (t === "number") {
@@ -1011,8 +1029,33 @@
     });
   };
 
+  function clearInstallModuleInputs() {
+    if (modSource) modSource.value = "";
+    if (modZipFile) modZipFile.value = "";
+    if (modId) modId.value = "";
+    if (modName) modName.value = "";
+    if (modNamespace) modNamespace.value = "";
+    if (modEntrypoint) modEntrypoint.value = "";
+    if (modCaps) modCaps.value = "";
+  }
+
+  function handleInstallModuleSuccess(moduleData) {
+    const modIdText = moduleData?.id || "installed";
+    modOkMsg.textContent = "Success! Module '" + modIdText + "' registered and ready.";
+    setMessageVisible(modOkMsg, true);
+    clearInstallModuleInputs();
+    loadOverview();
+  }
+
+  function handleInstallModuleFailure(result) {
+    const errorDetail = result.json?.message || ("HTTP " + result.status);
+    modErrMsg.textContent = "Installation error: " + errorDetail;
+    setMessageVisible(modErrMsg, true);
+  }
+
   // Custom module install form
-  if (installForm) {
+  function initCustomInstallForm() {
+    if (!installForm) return;
     installForm.addEventListener("submit", function(e) {
       e.preventDefault();
       setMessageVisible(modOkMsg, false);
@@ -1057,20 +1100,9 @@
           installBtn.disabled = false;
           installBtn.textContent = "Install Module";
           if (!result.ok) {
-            const errorDetail = result.json.message || ("HTTP " + result.status);
-            modErrMsg.textContent = "Installation error: " + errorDetail;
-            setMessageVisible(modErrMsg, true);
+            handleInstallModuleFailure(result);
           } else {
-            modOkMsg.textContent = "Success! Module '" + (result.json.module ? result.json.module.id : "installed") + "' registered and ready.";
-            setMessageVisible(modOkMsg, true);
-            if (modSource) modSource.value = "";
-            if (modZipFile) modZipFile.value = "";
-            if (modId) modId.value = "";
-            if (modName) modName.value = "";
-            if (modNamespace) modNamespace.value = "";
-            if (modEntrypoint) modEntrypoint.value = "";
-            if (modCaps) modCaps.value = "";
-            loadOverview();
+            handleInstallModuleSuccess(result.json?.module);
           }
         })
         .catch(function(err) {
@@ -1100,6 +1132,107 @@
     });
   }
 
+  function updateOverviewCards(config, providers) {
+    const omni = providers.omniroute || {};
+    const jev = providers.jev || {};
+    const orJev = providers.openrouter_jev || {};
+    const muse = providers.museai || {};
+    const approval = muse.approval || {};
+
+    // Update Overview Cards
+    if (omniTarget) omniTarget.textContent = (omni.target_host || config.target_host || "127.0.0.1") + ":" + (omni.target_port || config.target_port || "20128");
+    if (omniDesc) omniDesc.textContent = "Model: " + (omni.default_model || config.default_model || "gpt-5.6-sol");
+
+    const jevAccountsCount = (jev.accounts || []).length;
+    if (jevStatus) {
+      const suffix = jevAccountsCount === 1 ? "" : "s";
+      jevStatus.textContent = jevAccountsCount > 0 ? `${jevAccountsCount} account${suffix}` : "Configured";
+    }
+    if (jevDesc) jevDesc.textContent = "Base URL: " + (config.jev_base_url || "https://api.jev.ai");
+
+    const orAccountsCount = (orJev.accounts || []).length;
+    if (openrouterStatus) {
+      const suffix = orAccountsCount === 1 ? "" : "s";
+      const fallback = orJev.enabled ? "Enabled" : "Disabled";
+      openrouterStatus.textContent = orAccountsCount > 0 ? `${orAccountsCount} browser/key account${suffix}` : fallback;
+    }
+    if (openrouterDesc) openrouterDesc.textContent = "Model: " + (config.jev_openrouter_model || "anthropic/claude-3.5-sonnet");
+
+    if (museStatus) museStatus.textContent = muse.configured ? "Configured" : "Default Config";
+    if (museDesc) museDesc.textContent = "Approval Mode: " + (approval.mode || "off");
+  }
+
+  function populateProviderConfigForms(config, providers) {
+    const orJev = providers.openrouter_jev || {};
+    const muse = providers.museai || {};
+    const approval = muse.approval || {};
+
+    // OmniRoute Form
+    if (cfgHost) cfgHost.value = config.target_host || "127.0.0.1";
+    if (cfgPort) cfgPort.value = config.target_port || 20128;
+    if (cfgDefaultModel) cfgDefaultModel.value = config.default_model || "gpt-5.6-sol";
+    if (cfgTimeout) cfgTimeout.value = config.io_timeout_secs || 120;
+    if (cfgFallbacks) cfgFallbacks.value = (config.fallbacks || []).join(", ");
+
+    // Jev Form
+    if (cfgJevBase) cfgJevBase.value = config.jev_base_url || "https://api.jev.ai";
+    if (cfgJevOrBase) cfgJevOrBase.value = config.jev_openrouter_base_url || "https://openrouter.ai/api/v1";
+    if (cfgJevOrModel) cfgJevOrModel.value = config.jev_openrouter_model || "anthropic/claude-3.5-sonnet";
+    if (cfgJevOrFallbackModels) cfgJevOrFallbackModels.value = (config.jev_openrouter_fallback_models || []).join(", ");
+    if (cfgJevOrEnabled) cfgJevOrEnabled.value = (config.jev_openrouter_enabled !== false) ? "true" : "false";
+    if (cfgJevCooldown) {
+      const cooldown = orJev.credit_cooldown_secs != null ? orJev.credit_cooldown_secs : config.jev_credit_cooldown_secs;
+      cfgJevCooldown.value = cooldown != null ? cooldown : 300;
+    }
+
+    // Muse Form
+    if (cfgMuseBase) cfgMuseBase.value = config.museai_base_url || "https://muse.ai";
+    if (cfgMuseWs) cfgMuseWs.value = config.museai_ws_url || "wss://vm-438.metaaivm.com/";
+    if (cfgMuseVmid) cfgMuseVmid.value = config.museai_vm_id || "vm-438";
+    if (hintToken) hintToken.textContent = muse.masked_access_token ? ("Current: " + muse.masked_access_token) : "Current: not set";
+    if (hintNotary) hintNotary.textContent = muse.masked_notary_token ? ("Current: " + muse.masked_notary_token) : "Current: not set";
+    if (hintCookie) hintCookie.textContent = muse.masked_cookie ? ("Current: " + muse.masked_cookie) : "Current: not set";
+    if (cfgMuseVideoPrompt) cfgMuseVideoPrompt.value = config.default_video_prompt || "";
+    if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = approval.mode || "off";
+    if (cfgMuseApprovalTimeout) cfgMuseApprovalTimeout.value = approval.timeout_secs || 30;
+    if (cfgMuseApprovalDestinations) cfgMuseApprovalDestinations.value = (approval.allowed_destinations || []).join(", ");
+    if (cfgMuseApprovalTypes) cfgMuseApprovalTypes.value = (approval.allowed_types || []).join(", ");
+  }
+
+  function renderOverviewAccountsTable(providers) {
+    const jev = providers.jev || {};
+    const orJev = providers.openrouter_jev || {};
+    const rows = [];
+    (jev.accounts || []).forEach(function(acc) {
+      rows.push({ provider: "Jev Native", label: acc.label || "default", secret: acc.masked_key, type: "API Key" });
+    });
+    (orJev.accounts || []).forEach(function(acc) {
+      const isCookie = Boolean(acc.masked_cookie);
+      rows.push({
+        provider: "OpenRouter (Jev)",
+        label: acc.label || "default",
+        secret: isCookie ? acc.masked_cookie : acc.masked_api_key,
+        type: isCookie ? "Session Cookie" : "API Key"
+      });
+    });
+
+    if (countBadge) countBadge.textContent = rows.length + " account" + (rows.length === 1 ? "" : "s");
+    if (tableBody) {
+      if (!rows.length) {
+        tableBody.innerHTML = "<tr><td colspan=\"4\" class=\"empty-hint\">No accounts registered in pool. Add keys below.</td></tr>";
+      } else {
+        tableBody.innerHTML = rows.map(function(r) {
+          return "<tr>" +
+            "<td><strong>" + escapeHtml(r.provider) + "</strong></td>" +
+            "<td>" + escapeHtml(r.label) + "</td>" +
+            "<td><code>" + escapeHtml(r.secret) + "</code></td>" +
+            "<td><span class=\"pill gray\">" + escapeHtml(r.type) + "</span></td>" +
+          "</tr>";
+        }).join("");
+      }
+    }
+  }
+
   // Load Overview Data
   function loadOverview() {
     fetch("/api/v1/dashboard/overview")
@@ -1107,95 +1240,9 @@
       .then(function(data) {
         const config = data.config || {};
         const providers = data.providers || {};
-        const omni = providers.omniroute || {};
-        const jev = providers.jev || {};
-        const orJev = providers.openrouter_jev || {};
-        const muse = providers.museai || {};
-        const approval = muse.approval || {};
-
-        // Update Overview Cards
-        if (omniTarget) omniTarget.textContent = (omni.target_host || config.target_host || "127.0.0.1") + ":" + (omni.target_port || config.target_port || "20128");
-        if (omniDesc) omniDesc.textContent = "Model: " + (omni.default_model || config.default_model || "gpt-5.6-sol");
-
-        const jevAccountsCount = (jev.accounts || []).length;
-        if (jevStatus) {
-          const suffix = jevAccountsCount === 1 ? "" : "s";
-          jevStatus.textContent = jevAccountsCount > 0 ? `${jevAccountsCount} account${suffix}` : "Configured";
-        }
-        if (jevDesc) jevDesc.textContent = "Base URL: " + (config.jev_base_url || "https://api.jev.ai");
-
-        const orAccountsCount = (orJev.accounts || []).length;
-        if (openrouterStatus) {
-          const suffix = orAccountsCount === 1 ? "" : "s";
-          const fallback = orJev.enabled ? "Enabled" : "Disabled";
-          openrouterStatus.textContent = orAccountsCount > 0 ? `${orAccountsCount} browser/key account${suffix}` : fallback;
-        }
-        if (openrouterDesc) openrouterDesc.textContent = "Model: " + (config.jev_openrouter_model || "anthropic/claude-3.5-sonnet");
-
-        if (museStatus) museStatus.textContent = muse.configured ? "Configured" : "Default Config";
-        if (museDesc) museDesc.textContent = "Approval Mode: " + (approval.mode || "off");
-
-        // OmniRoute Form
-        if (cfgHost) cfgHost.value = config.target_host || "127.0.0.1";
-        if (cfgPort) cfgPort.value = config.target_port || 20128;
-        if (cfgDefaultModel) cfgDefaultModel.value = config.default_model || "gpt-5.6-sol";
-        if (cfgTimeout) cfgTimeout.value = config.io_timeout_secs || 120;
-        if (cfgFallbacks) cfgFallbacks.value = (config.fallbacks || []).join(", ");
-
-        // Jev Form
-        if (cfgJevBase) cfgJevBase.value = config.jev_base_url || "https://api.jev.ai";
-        if (cfgJevOrBase) cfgJevOrBase.value = config.jev_openrouter_base_url || "https://openrouter.ai/api/v1";
-        if (cfgJevOrModel) cfgJevOrModel.value = config.jev_openrouter_model || "anthropic/claude-3.5-sonnet";
-        if (cfgJevOrFallbackModels) cfgJevOrFallbackModels.value = (config.jev_openrouter_fallback_models || []).join(", ");
-        if (cfgJevOrEnabled) cfgJevOrEnabled.value = (config.jev_openrouter_enabled !== false) ? "true" : "false";
-        if (cfgJevCooldown) {
-          const cooldown = orJev.credit_cooldown_secs != null ? orJev.credit_cooldown_secs : config.jev_credit_cooldown_secs;
-          cfgJevCooldown.value = cooldown != null ? cooldown : 300;
-        }
-
-        // Muse Form
-        if (cfgMuseBase) cfgMuseBase.value = config.museai_base_url || "https://muse.ai";
-        if (cfgMuseWs) cfgMuseWs.value = config.museai_ws_url || "wss://vm-438.metaaivm.com/";
-        if (cfgMuseVmid) cfgMuseVmid.value = config.museai_vm_id || "vm-438";
-        if (hintToken) hintToken.textContent = muse.masked_access_token ? ("Current: " + muse.masked_access_token) : "Current: not set";
-        if (hintNotary) hintNotary.textContent = muse.masked_notary_token ? ("Current: " + muse.masked_notary_token) : "Current: not set";
-        if (hintCookie) hintCookie.textContent = muse.masked_cookie ? ("Current: " + muse.masked_cookie) : "Current: not set";
-        if (cfgMuseVideoPrompt) cfgMuseVideoPrompt.value = config.default_video_prompt || "";
-        if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = approval.mode || "off";
-        if (cfgMuseApprovalTimeout) cfgMuseApprovalTimeout.value = approval.timeout_secs || 30;
-        if (cfgMuseApprovalDestinations) cfgMuseApprovalDestinations.value = (approval.allowed_destinations || []).join(", ");
-        if (cfgMuseApprovalTypes) cfgMuseApprovalTypes.value = (approval.allowed_types || []).join(", ");
-
-        // Accounts Table
-        const rows = [];
-        (jev.accounts || []).forEach(function(acc) {
-          rows.push({ provider: "Jev Native", label: acc.label || "default", secret: acc.masked_key, type: "API Key" });
-        });
-        (orJev.accounts || []).forEach(function(acc) {
-          const isCookie = Boolean(acc.masked_cookie);
-          rows.push({
-            provider: "OpenRouter (Jev)",
-            label: acc.label || "default",
-            secret: isCookie ? acc.masked_cookie : acc.masked_api_key,
-            type: isCookie ? "Session Cookie" : "API Key"
-          });
-        });
-
-        if (countBadge) countBadge.textContent = rows.length + " account" + (rows.length === 1 ? "" : "s");
-        if (tableBody) {
-          if (!rows.length) {
-            tableBody.innerHTML = "<tr><td colspan=\"4\" class=\"empty-hint\">No accounts registered in pool. Add keys below.</td></tr>";
-          } else {
-            tableBody.innerHTML = rows.map(function(r) {
-              return "<tr>" +
-                "<td><strong>" + escapeHtml(r.provider) + "</strong></td>" +
-                "<td>" + escapeHtml(r.label) + "</td>" +
-                "<td><code>" + escapeHtml(r.secret) + "</code></td>" +
-                "<td><span class=\"pill gray\">" + escapeHtml(r.type) + "</span></td>" +
-              "</tr>";
-            }).join("");
-          }
-        }
+        updateOverviewCards(config, providers);
+        populateProviderConfigForms(config, providers);
+        renderOverviewAccountsTable(providers);
 
         // Modules & Catalog
         allModules = data.modules || [];
@@ -1209,7 +1256,8 @@
   }
 
   // OmniRoute Form Submission
-  if (cfgForm) {
+  function initOmniRouteForm() {
+    if (!cfgForm) return;
     cfgForm.addEventListener("submit", function(e) {
       e.preventDefault();
       setMessageVisible(cfgOkMsg, false);
@@ -1264,7 +1312,8 @@
   }
 
   // Muse Form Submission
-  if (museForm) {
+  function initMuseForm() {
+    if (!museForm) return;
     museForm.addEventListener("submit", function(e) {
       e.preventDefault();
       setMessageVisible(museOkMsg, false);
@@ -1332,7 +1381,8 @@
   }
 
   // Jev Form Submission
-  if (jevConfigForm) {
+  function initJevConfigForm() {
+    if (!jevConfigForm) return;
     jevConfigForm.addEventListener("submit", function(e) {
       e.preventDefault();
       setMessageVisible(jevOkMsg, false);
@@ -1387,7 +1437,8 @@
   }
 
   // Accounts Form Submission
-  if (addForm) {
+  function initAddAccountForm() {
+    if (!addForm) return;
     addForm.addEventListener("submit", function(ev) {
       ev.preventDefault();
       setMessageVisible(okMsg, false);
@@ -1461,6 +1512,14 @@
     },
     start: function() {
       document.documentElement.classList.add("ui-shell-ready");
+      initToolbarAndNavigation();
+      initModuleActionDialog();
+      initCatalogGrid();
+      initCustomInstallForm();
+      initOmniRouteForm();
+      initMuseForm();
+      initJevConfigForm();
+      initAddAccountForm();
       this.syncHashNavigation();
       window.addEventListener("hashchange", this.syncHashNavigation.bind(this));
       loadOverview();

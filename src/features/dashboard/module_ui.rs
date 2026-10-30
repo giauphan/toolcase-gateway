@@ -206,6 +206,55 @@ pub fn handle_get_module_config(
     write_json_ok(client, &resp)
 }
 
+fn apply_builtin_module_config_updates(
+    store: &ConfigStore,
+    resolved_id: &str,
+    config: &serde_json::Map<String, serde_json::Value>,
+) {
+    match resolved_id {
+        "omniroute" => {
+            let mut conf = store.write_guard();
+            if let Some(m) = config.get("default_model").and_then(|v| v.as_str()) {
+                if !m.trim().is_empty() {
+                    conf.default_model = m.trim().to_string();
+                }
+            }
+        }
+        "jev" => {
+            let mut conf = store.write_guard();
+            if let Some(base) = config.get("base_url").and_then(|v| v.as_str()) {
+                if !base.trim().is_empty() {
+                    conf.jev_base_url = base.trim().to_string();
+                }
+            }
+            if let Some(m) = config.get("default_model").and_then(|v| v.as_str()) {
+                if !m.trim().is_empty() {
+                    conf.jev_openrouter_model = m.trim().to_string();
+                }
+            }
+        }
+        "muse" => {
+            let mut conf = store.write_guard();
+            if let Some(base) = config.get("base_url").and_then(|v| v.as_str()) {
+                if !base.trim().is_empty() {
+                    conf.museai_base_url = base.trim().to_string();
+                }
+            }
+            if let Some(k) = config.get("api_key").and_then(|v| v.as_str()) {
+                if !k.trim().is_empty() {
+                    conf.museai_access_token = k.trim().to_string();
+                }
+            }
+            if let Some(c) = config.get("cookie").and_then(|v| v.as_str()) {
+                if !c.trim().is_empty() {
+                    conf.museai_cookie = c.trim().to_string();
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn handle_update_module_config(
     client: &mut TcpStream,
     body: &[u8],
@@ -245,43 +294,7 @@ pub fn handle_update_module_config(
         }
     }
 
-    if resolved_id == "omniroute" {
-        let mut conf = store.write_guard();
-        if let Some(m) = payload.config.get("default_model").and_then(|v| v.as_str()) {
-            if !m.trim().is_empty() {
-                conf.default_model = m.trim().to_string();
-            }
-        }
-    } else if resolved_id == "jev" {
-        let mut conf = store.write_guard();
-        if let Some(base) = payload.config.get("base_url").and_then(|v| v.as_str()) {
-            if !base.trim().is_empty() {
-                conf.jev_base_url = base.trim().to_string();
-            }
-        }
-        if let Some(m) = payload.config.get("default_model").and_then(|v| v.as_str()) {
-            if !m.trim().is_empty() {
-                conf.jev_openrouter_model = m.trim().to_string();
-            }
-        }
-    } else if resolved_id == "muse" {
-        let mut conf = store.write_guard();
-        if let Some(base) = payload.config.get("base_url").and_then(|v| v.as_str()) {
-            if !base.trim().is_empty() {
-                conf.museai_base_url = base.trim().to_string();
-            }
-        }
-        if let Some(k) = payload.config.get("api_key").and_then(|v| v.as_str()) {
-            if !k.trim().is_empty() {
-                conf.museai_access_token = k.trim().to_string();
-            }
-        }
-        if let Some(c) = payload.config.get("cookie").and_then(|v| v.as_str()) {
-            if !c.trim().is_empty() {
-                conf.museai_cookie = c.trim().to_string();
-            }
-        }
-    }
+    apply_builtin_module_config_updates(store, &resolved_id, &payload.config);
 
     if let Err(e) = guard.update_module_config(&resolved_id, payload.config.clone()) {
         return write_error(client, 400, "Bad Request", &e.to_string());
@@ -312,11 +325,13 @@ pub fn handle_update_module_config(
     }
 
     let merged_cfg = builtin_masked_config(&resolved_id, store, masked);
+    let status = desc.as_ref().map(|d| d.status);
     let resp = serde_json::json!({
         "ok": true,
         "status": "ok",
         "id": resolved_id,
         "message": format!("Module '{}' configuration updated and saved.", resolved_id),
+        "module_status": status,
         "module": desc,
         "config": merged_cfg,
     });
