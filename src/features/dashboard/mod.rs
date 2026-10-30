@@ -1,9 +1,16 @@
+mod accounts;
 mod jev;
+mod module_ui;
 mod modules;
 mod muse;
+mod overview;
 mod service;
 
 pub use jev::handle_update_jev_config;
+pub use module_ui::{
+    handle_get_module_config, handle_module_config_page, handle_module_config_page_for_id,
+    handle_set_module_position, handle_update_module_config,
+};
 pub use modules::{
     handle_install_personal_module, handle_remove_personal_module, handle_set_module_state,
 };

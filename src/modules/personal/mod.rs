@@ -208,9 +208,14 @@ fn dispatch_stdio(
         .take()
         .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "Failed to open child stdin"))?;
 
+    let full_subpath = match request.path.split_once('?') {
+        Some((_, q)) if !q.is_empty() && !subpath.contains('?') => format!("{subpath}?{q}"),
+        _ => subpath.to_string(),
+    };
+
     let payload = serde_json::json!({
         "method": request.method,
-        "path": subpath,
+        "path": full_subpath,
         "headers": request.headers,
         "body": String::from_utf8_lossy(&request.body),
     });
@@ -326,7 +331,12 @@ fn dispatch_local_http(
 ) -> io::Result<u16> {
     let base_url = manifest.entrypoint.trim_end_matches('/');
     let clean_sub = subpath.trim_start_matches('/');
-    let target_url = format!("{base_url}/{clean_sub}");
+    let target_url = match request.path.split_once('?') {
+        Some((_, q)) if !q.is_empty() && !clean_sub.contains('?') => {
+            format!("{base_url}/{clean_sub}?{q}")
+        }
+        _ => format!("{base_url}/{clean_sub}"),
+    };
 
     let agent_config = ureq::Agent::config_builder()
         .timeout_global(Some(DEFAULT_MODULE_TIMEOUT))

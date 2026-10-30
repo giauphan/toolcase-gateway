@@ -10,29 +10,29 @@ The gateway coordinates six cohesive subsystems behind an admission controller a
 
 ```mermaid
 flowchart TD
-    Client[Client Request] --> Adm[Admission Controller & Quota Guard]
-    Adm --> Parser[HTTP Framing & Header Parser]
-    Parser --> Router{Route Dispatcher\nsrc/routes/}
+    Client["Client Request"] --> Adm["Admission Controller & Quota Guard"]
+    Adm --> Parser["HTTP Framing & Header Parser"]
+    Parser --> Router{"Route Dispatcher (src/routes/)"}
 
-    Router -->|/dashboard\n/api/v1/dashboard/*| Dash[Dashboard & Config Engine\nsrc/features/dashboard/]
-    Router -->|/mcp\n/mcp/sse| MCP[Model Context Protocol Engine\nsrc/api/mcp/]
-    Router -->|/jev/*, /jev-ai/*| Jev[Jev AI Decision Provider\nsrc/modules/builtins/jev/]
-    Router -->|/muse-ai/*, /video-template\n/muse-config| Muse[Muse AI CVM Subsystem\nsrc/museai/]
-    Router -->|/modules/*, /custom/*\n/api/v1/modules/*| Mod[Dynamic Modules & Groups\nsrc/modules/personal/]
-    Router -->|/omniroute, /v1/*\nUnclaimed paths| Omni[OmniRoute Upstream Proxy\nsrc/omniroute.rs]
+    Router -->|"/dashboard, /api/v1/dashboard/*"| Dash["Dashboard & Config Engine (src/features/dashboard/)"]
+    Router -->|"/mcp, /mcp/sse"| MCP["Model Context Protocol Engine (src/api/mcp/)"]
+    Router -->|"/jev/*, /jev-ai/*"| Jev["Jev AI Decision Provider (src/modules/builtins/jev/)"]
+    Router -->|"/muse-ai/*, /video-template, /muse-config"| Muse["Muse AI CVM Subsystem (src/museai/)"]
+    Router -->|"/modules/*, /custom/*"| Mod["Dynamic Modules & Groups (src/modules/personal/)"]
+    Router -->|"/omniroute, /v1/*"| Omni["OmniRoute Upstream Proxy (src/omniroute.rs)"]
 
-    Dash --> Storage[(Standalone JSON Store\ngateway_config.json)]
-    Dash & Mod --> SQLite[(Encrypted SQLite DB\nAES-256-GCM Storage)]
-    Jev --> JevPool[Account Pool & Round-Robin Rotation]
-    JevPool --> JevUpstream[Jev Decision API / OpenRouter]
+    Dash --> Storage[("Standalone JSON Store (gateway_config.json)")]
+    Dash & Mod --> SQLite[("Encrypted SQLite DB (AES-256-GCM Storage)")]
+    Jev --> JevPool["Account Pool & Round-Robin Rotation"]
+    JevPool --> JevUpstream["Jev Decision API / OpenRouter"]
 
-    Muse --> Noise[Noise_XX CVM WebSocket]
-    Muse --> Sentinel[Muse Sentinel Auto-Approval Coordinator]
-    Muse --> VideoLifecycle[Video Generation & Job Store]
+    Muse --> Noise["Noise_XX CVM WebSocket"]
+    Muse --> Sentinel["Muse Sentinel Auto-Approval Coordinator"]
+    Muse --> VideoLifecycle["Video Generation & Job Store"]
 
-    Omni --> Candidates[Candidate Model Planner]
-    Candidates --> Rewriter[Tool-Name Case Rewriter]
-    Rewriter --> LLMUpstream[OpenAI-Compatible Upstream]
+    Omni --> Candidates["Candidate Model Planner"]
+    Candidates --> Rewriter["Tool-Name Case Rewriter"]
+    Rewriter --> LLMUpstream["OpenAI-Compatible Upstream"]
 ```
 
 ---
@@ -81,6 +81,9 @@ Dispatch in `src/routes/` is **exclusive and fail-closed**: a request matching a
 | `/muse-ai/v1/config` | Muse Config | `GET` | Effective masked Muse configuration snapshot |
 | `/muse-ai/v1/config/har` | Muse Config | `POST` | DevTools HAR capture upload and credential extraction |
 | `/muse-config` | Muse Config UI | `GET` | Web interface for DevTools HAR upload and import |
+| `/modules/{id}/config` | Module Auto-UI Config | `GET` | Automatic schema-driven configuration & UI position page for any module |
+| `/api/v1/dashboard/modules/position` | Dashboard Module UI | `POST` | Update module menu placement (`providers`, `sidebar`, `studios`, `hidden`) and order |
+| `/api/v1/dashboard/modules/config` | Dashboard Module UI | `GET`, `POST` | Read or update per-module configuration with secret masking |
 | `/video-template[/<name>]` | Video Studio UI | `GET` | Interactive video generation studio and template viewer |
 | *All unclaimed paths* | OmniRoute Proxy | Any | Generic reverse proxy forwarding with model failover |
 

@@ -2,6 +2,8 @@ use crate::config::Config;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod purge;
+pub use purge::*;
 mod registry;
 pub use registry::*;
 mod remote;

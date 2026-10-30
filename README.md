@@ -1,6 +1,6 @@
 # toolcase-gateway
 
-**A zero-async Rust reverse proxy and multi-provider sidecar for OpenAI-compatible LLMs, Jev AI Decision APIs, and Muse AI Confidential VMs.**
+**A zero-async Rust reverse proxy and multi-provider sidecar for OpenAI-compatible LLMs, Jev AI Decision APIs, Muse AI Confidential VMs, and extensible personal provider modules.**
 
 `toolcase-gateway` sits between clients (agent runners, editor extensions, CLIs, SDKs) and diverse upstream AI engines. It solves everyday operational challenges across hosted providers:
 
@@ -9,11 +9,12 @@
 3. **Prism OpenAI Adaptation** — Transparently acts as an OpenAI `/v1/chat/completions` endpoint backed by Prism (including transparent `reasoning_effort` and token injection).
 4. **Jev AI Decision API & OpenRouter Failover Pool** — Routes structured decision evaluations (`/jev/v1/systemone`, `/jev/v1/decisions`) and executes a structured 4-tier failover cascade (`Direct Jev -> Jev OpenRouter API Key -> OpenRouter Different Decision -> OpenRouter Browser Cookie`) with round-robin rotation and automatic cooldown demotion on credit caps (`401, 402, 403, 429`).
 5. **Muse AI CVM, Image & Video Generation** — Connects directly to Muse Confidential VMs via Noise XX encrypted WebSockets, supports text-to-image synthesis with configurable aspect ratios (`/muse-ai/v1/create-image`), text-to-video synthesis (`/muse-ai/v1/create-video`), interactive web studios (`/image-template`, `/video-template`), and provides headless Sentinel auto-approvals.
-6. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/dashboard` that saves settings and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
-7. **Model Context Protocol (MCP) Control Plane** — Full native MCP implementation supporting 3 transports (`stdio`, `SSE`, and `Streamable HTTP`) enabling agentic tools to inspect modules, manage lifecycle, and query system health.
-8. **Extensible Modular Architecture** — WordPress/Odoo-style dynamic module plugins (`.gw_state/modules/<id>/`), declarative manifests, GitHub/ZIP remote installation, and prefix routing isolation.
-9. **Hardware-Safe Encrypted Storage** — AES-256-GCM envelope encryption and blind indexing powered by embedded SQLite alongside atomic POSIX `0600` files.
-10. **Automated Dependency Security** — Continuous Dependabot monitoring for both Cargo crates and GitHub Actions workflows.
+6. **TikTok Creator Studio Module (External Catalog Plugin)** — Installable from [`giauphan/TikTok-Creator-Studio-Adapter`](https://github.com/giauphan/TikTok-Creator-Studio-Adapter) via the System Module Catalog (`/custom/tiktok`) with automatic UI configuration (`/modules/tiktok-studio/config`) and drag-and-drop HAR credential import.
+7. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/dashboard` (plus `/muse-config` and automatic `/modules/<id>/config`) that saves settings, module UI menu positions, and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
+8. **Model Context Protocol (MCP) Control Plane** — Full native MCP implementation supporting 3 transports (`stdio`, `SSE`, and `Streamable HTTP`) enabling agentic tools to inspect modules, manage lifecycle, and query system health.
+9. **Extensible Modular Architecture** — WordPress/Odoo-style dynamic module plugins (`.gw_state/modules/<id>/`), declarative manifests, GitHub/ZIP remote installation, and prefix routing isolation.
+10. **Hardware-Safe Encrypted Storage** — AES-256-GCM envelope encryption and blind indexing powered by embedded SQLite alongside atomic POSIX `0600` files.
+11. **Automated Dependency Security** — Continuous Dependabot monitoring for both Cargo crates and GitHub Actions workflows.
 
 Zero heavy async runtimes (`tokio` forbidden; standard library blocking networking only) and `#![forbid(unsafe_code)]`.
 
@@ -28,8 +29,9 @@ Zero heavy async runtimes (`tokio` forbidden; standard library blocking networki
 - [Model Context Protocol (MCP)](#model-context-protocol-mcp-control-plane)
 - [Provider Integrations](#provider-integrations)
   - [Prism OpenAI](#prism-openai)
-  - [Jev AI Decision API](#jev-ai-decision-api)
+  - [Jev AI Decision API](#jev-ai-decision-api--openrouter-failover)
   - [Muse AI Subsystem](#muse-ai-subsystem)
+  - [TikTok Creator Studio](#tiktok-creator-studio)
 - [Configuration](#configuration)
 - [Security Model](#security-model)
 - [Documentation](#documentation)
@@ -41,19 +43,19 @@ Zero heavy async runtimes (`tokio` forbidden; standard library blocking networki
 ## How it works
 
 ```mermaid
-graph TD
+flowchart TD
     Client["Client / IDE / Agent"] --> Gateway["toolcase-gateway (127.0.0.1:20130)"]
-    Gateway --> Dispatcher{"Canonical Dispatcher<br>(src/routes/)"}
-    
-    Dispatcher -->|"/dashboard", "/api/v1/dashboard/*"| Dashboard["Dashboard UI & REST API"]
-    Dispatcher -->|"/mcp", "/mcp/sse"| MCP["MCP Control Plane (stdio/SSE/HTTP)"]
-    Dispatcher -->|"/omniroute", "/v1/chat/completions"| OmniRoute["OmniRoute: Failover & Casing Repair"]
+    Gateway --> Dispatcher{"Canonical Dispatcher (src/routes/)"}
+
+    Dispatcher -->|"/dashboard, /api/v1/dashboard/*"| Dashboard["Dashboard UI & REST API"]
+    Dispatcher -->|"/mcp, /mcp/sse"| MCP["MCP Control Plane (stdio/SSE/HTTP)"]
+    Dispatcher -->|"/omniroute, /v1/chat/completions"| OmniRoute["OmniRoute: Failover & Casing Repair"]
     Dispatcher -->|"/jev/v1/*"| Jev["Jev Decision Engine: Account Pool"]
     Dispatcher -->|"/muse-ai/v1/*"| Muse["Muse CVM: Noise WS & Sentinel"]
-    Dispatcher -->|"/modules/*", "/custom/*"| Modules["Personal Modules & Groups"]
-    
+    Dispatcher -->|"/modules/*, /custom/*"| Modules["Personal Modules & Groups"]
+
     Dashboard --> Disk[("gateway_config.json (0600)")]
-    Dashboard & Modules --> SQLite[("Encrypted SQLite DB<br>(AES-256-GCM)")]
+    Dashboard & Modules --> SQLite[("Encrypted SQLite DB (AES-256-GCM)")]
     OmniRoute --> UpstreamLLM["External LLM Upstream"]
     Jev --> UpstreamJev["External Jev Upstream"]
     Muse --> UpstreamMuse["External Muse CVM"]
@@ -253,6 +255,30 @@ curl -X POST http://127.0.0.1:20130/muse-ai/v1/create-image?wait=true \
 Or open the interactive Image Studio UI in a browser at `http://127.0.0.1:20130/image-template`.
 
 See [`docs/muse-image-generation.md`](docs/muse-image-generation.md) for full image generation documentation.
+
+### TikTok Creator Studio
+
+Available as a self-contained external module in [`https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git`](https://github.com/giauphan/TikTok-Creator-Studio-Adapter) and pre-listed in the Gateway's System Module Catalog (`tiktok-studio`).
+
+Install with 1 click from `/dashboard#module-catalog` or via API, then configure via the automatic UI config at `http://127.0.0.1:20130/modules/tiktok-studio/config` (or `/dashboard#provider-settings` → **TikTok Creator Studio Adapter**):
+
+```sh
+# 1. Install from the System Module Catalog (or GitHub source)
+curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
+  -H "Content-Type: application/json" \
+  -d '{"id":"tiktok-studio"}'
+
+# 2. Import credentials directly from a DevTools HAR capture
+curl -X POST http://127.0.0.1:20130/custom/tiktok/v1/config/har \
+  -H "Content-Type: application/json" \
+  --data-binary @target/download-tiktok.har
+
+# 3. List creator videos and engagement stats
+curl "http://127.0.0.1:20130/custom/tiktok/v1/items?count=10"
+
+# 4. Resolve direct watermark-free CDN download URL
+curl "http://127.0.0.1:20130/custom/tiktok/v1/download?item_id=7488016605237675526"
+```
 
 ---
 

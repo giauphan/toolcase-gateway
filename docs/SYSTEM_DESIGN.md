@@ -12,23 +12,23 @@ Use this document as an authoritative architectural map before modifying code.
 It orchestrates six primary subsystems:
 
 ```mermaid
-graph TD
+flowchart TD
     Client["Client (Agent / IDE / curl)"] --> Listener["Gateway Listener (127.0.0.1:20130)"]
     Listener --> Dispatcher["Canonical Dispatcher (src/routes/)"]
-    
-    Dispatcher -->|"/dashboard"<br>"/api/v1/dashboard/*"| Dashboard["Dashboard Subsystem<br>(src/features/dashboard)"]
-    Dispatcher -->|"/mcp"<br>"/mcp/sse"| MCPSubsystem["MCP Control Plane<br>(src/api/mcp)"]
-    Dispatcher -->|"/v1/chat/completions"<br>"/v1/models"| OmniRoute["OmniRoute Proxy<br>(src/omniroute.rs)"]
-    Dispatcher -->|"/jev/v1/*"<br>"/jev-ai/v1/*"| JevSubsystem["Jev Decision Subsystem<br>(src/modules/builtins/jev)"]
-    Dispatcher -->|"/muse-ai/v1/*"<br>"/muse-config"| MuseSubsystem["Muse AI Subsystem<br>(src/museai)"]
-    Dispatcher -->|"/modules/*"<br>"/custom/*"| ModuleSubsystem["Dynamic Modules & Groups<br>(src/modules/personal)"]
-    Dispatcher -->|"/video/v1/*"<br>"/video-template"| VideoStudio["Video Studio Subsystem<br>(src/features/video)"]
 
-    Dashboard --> Storage[("Persistent Storage<br>gateway_config.json (0600)")]
-    Dashboard & ModuleSubsystem --> SQLite[("Encrypted SQLite DB<br>(AES-256-GCM)")]
-    OmniRoute --> UpstreamLLM["External LLM Upstream<br>(Prism / OpenAI / DeepSeek)"]
-    JevSubsystem --> UpstreamJev["External Jev Upstream<br>(jev-ai.org / OpenRouter)"]
-    MuseSubsystem --> UpstreamMuse["External Muse CVM<br>(Noise XX / Sentinel)"]
+    Dispatcher -->|"/dashboard, /api/v1/dashboard/*"| Dashboard["Dashboard Subsystem (src/features/dashboard)"]
+    Dispatcher -->|"/mcp, /mcp/sse"| MCPSubsystem["MCP Control Plane (src/api/mcp)"]
+    Dispatcher -->|"/v1/chat/completions, /v1/models"| OmniRoute["OmniRoute Proxy (src/omniroute.rs)"]
+    Dispatcher -->|"/jev/v1/*, /jev-ai/v1/*"| JevSubsystem["Jev Decision Subsystem (src/modules/builtins/jev)"]
+    Dispatcher -->|"/muse-ai/v1/*, /muse-config"| MuseSubsystem["Muse AI Subsystem (src/museai)"]
+    Dispatcher -->|"/modules/*, /custom/*"| ModuleSubsystem["Dynamic Modules & Groups (src/modules/personal)"]
+    Dispatcher -->|"/video/v1/*, /video-template"| VideoStudio["Video Studio Subsystem (src/features/video)"]
+
+    Dashboard --> Storage[("Persistent Storage gateway_config.json (0600)")]
+    Dashboard & ModuleSubsystem --> SQLite[("Encrypted SQLite DB (AES-256-GCM)")]
+    OmniRoute --> UpstreamLLM["External LLM Upstream (Prism / OpenAI / DeepSeek)"]
+    JevSubsystem --> UpstreamJev["External Jev Upstream (jev-ai.org / OpenRouter)"]
+    MuseSubsystem --> UpstreamMuse["External Muse CVM (Noise XX / Sentinel)"]
     ModuleSubsystem --> Subprocesses["External Subprocesses / HTTP Adapters"]
 ```
 
@@ -66,22 +66,23 @@ Every change to the codebase must maintain these foundational invariants:
 ```mermaid
 flowchart TD
     A["Client Connects"] --> B["main: accept TcpStream"]
-    B --> C{"Check ACTIVE vs<br>GW_MAX_CONNECTIONS"}
+    B --> C{"Check ACTIVE vs GW_MAX_CONNECTIONS"}
     C -->|"Exceeded"| D["Write 503 Service Unavailable & Close"]
     C -->|"Permitted"| E["Configure Socket Timeouts (GW_IO_TIMEOUT_SECS)"]
     E --> F["Spawn Worker Thread (std::thread::spawn)"]
     F --> G["Read Request Head (MAX_HEAD_BYTES: 64 KB)"]
-    G --> H{"Check Global In-Flight Bytes vs<br>GW_MAX_IN_FLIGHT_REQUEST_BYTES"}
+    G --> H{"Check Global In-Flight Bytes vs GW_MAX_IN_FLIGHT_REQUEST_BYTES"}
     H -->|"Exceeded"| I["Write 503 In-Flight Limit & Drain"]
     H -->|"Permitted"| J["Read Request Body (MAX_REQUEST_BYTES: 64 MB)"]
-    J --> K["Route Dispatcher (src/routes.rs)"]
+    J --> K["Route Dispatcher (src/routes/)"]
     K --> L{"Match Route"}
     L -->|"Dashboard / Config"| M["Execute Dashboard Service"]
     L -->|"Jev Decision API"| N["Execute Jev Pool Failover"]
     L -->|"Muse AI / Noise"| O["Execute Muse Service / Sentinel"]
+    L -->|"Personal Module"| T["Execute Personal Module Subprocess / HTTP"]
     L -->|"Video Studio"| P["Execute Video Task Service"]
     L -->|"Proxy Fallback"| Q["Execute OmniRoute Proxy"]
-    M & N & O & P & Q --> R["Flush Chunked / JSON Response"]
+    M & N & O & T & P & Q --> R["Flush Chunked / JSON Response"]
     R --> S["Close Connection & Decrement ACTIVE Counter"]
 ```
 
@@ -171,9 +172,9 @@ Provides operator management without editing raw configuration files:
 The codebase enforces strict test verification across all layers:
 
 ```mermaid
-graph LR
-    Unit["Unit Tests<br>(Framing, Casing, Config)"] --> Integration["Subsystem Integration<br>(Routes, Dashboard, Jev, Muse)"]
-    Integration --> QualityGates["Quality Gates<br>(fmt, clippy, test, release)"]
+flowchart LR
+    Unit["Unit Tests (Framing, Casing, Config, Ports)"] --> Integration["Subsystem Integration (Routes, Dashboard, Jev, Muse, Modules)"]
+    Integration --> QualityGates["Quality Gates (fmt, clippy, test, release)"]
 ```
 
 - **Gateway Tests** (`tests/gateway.rs`): Request framing, HTTP validation, header injection prevention, response chunking.

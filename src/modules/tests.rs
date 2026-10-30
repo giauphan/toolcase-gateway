@@ -21,6 +21,8 @@ fn test_default_registry_has_builtins() {
     assert_eq!(jev.kind, ModuleKind::BuiltIn);
     assert!(jev.providers.is_some());
     assert_eq!(jev.providers.as_ref().unwrap().len(), 2);
+
+    assert!(reg.get_module("tiktok").is_none());
 }
 
 #[test]
@@ -369,4 +371,53 @@ fn test_sub_provider_requires_valid_non_root_subpath() {
             "Expected subpath '{subpath}' to be rejected as invalid"
         );
     }
+}
+
+#[test]
+fn test_module_ui_position_and_auto_config() {
+    let mut reg = ModuleRegistry::new();
+    let list = reg.list_modules();
+    assert_eq!(list[0].id, "omniroute");
+    assert_eq!(list[1].id, "muse");
+    assert_eq!(list[2].id, "jev");
+
+    // Move jev up above muse
+    let moved = reg.move_module_order("jev", "up").unwrap();
+    assert!(moved.menu_order < reg.get_module("muse").unwrap().menu_order);
+
+    // Pin jev to sidebar with order 5 (first)
+    let updated = reg
+        .set_module_position("jev", Some("sidebar".to_string()), Some(5))
+        .unwrap();
+    assert_eq!(updated.menu_position, "sidebar");
+    assert_eq!(updated.menu_order, 5);
+    assert_eq!(reg.list_modules()[0].id, "jev");
+
+    // Reject invalid menu_position
+    assert!(reg
+        .set_module_position("jev", Some("invalid_pos".to_string()), None)
+        .is_err());
+
+    // Update module config and verify secret masking
+    let mut cfg = serde_json::Map::new();
+    cfg.insert(
+        "base_url".to_string(),
+        serde_json::Value::String("https://api.example.com".to_string()),
+    );
+    cfg.insert(
+        "api_key".to_string(),
+        serde_json::Value::String("sk-secret-value-123456".to_string()),
+    );
+    reg.update_module_config("jev", cfg).unwrap();
+
+    let masked = reg.get_masked_module_config("jev");
+    assert_eq!(
+        masked.get("base_url").and_then(|v| v.as_str()),
+        Some("https://api.example.com")
+    );
+    assert_eq!(
+        masked.get("masked_api_key").and_then(|v| v.as_str()),
+        Some("sk-sec...3456")
+    );
+    assert!(masked.get("api_key").is_none());
 }

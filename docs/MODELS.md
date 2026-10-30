@@ -26,13 +26,13 @@ Toolcase Gateway exposes multi-provider model routing, translating client reques
 Different model families serve distinct architectural paradigms and cannot be interchanged across route types:
 
 ```mermaid
-graph TD
+flowchart TD
     Client["Client Request"] --> Router{"Inspect Model & Path"}
-    
-    Router -->|"Model: gpt-5.6-sol*<br>Route: /v1/chat/completions"| OmniRoute["OmniRoute Proxy<br>(Prism / OpenAI)"]
-    Router -->|"Model: muse<br>Route: /muse-ai/v1/chat/completions or /v1/chat/completions"| MuseChat["Muse CVM Chat<br>(Noise XX WebSocket)"]
-    Router -->|"Model: muse-video / gen-*<br>Route: /muse-ai/v1/create-video"| MuseVideo["Muse Video Studio<br>(Durable Job Tracking)"]
-    Router -->|"Model: jev-1.13 / decisions<br>Route: /jev/v1/systemone"| JevEngine["Jev Decision Engine<br>(Account Pool & OpenRouter Cascade)"]
+
+    Router -->|"Model: gpt-5.6-sol* | Route: /v1/chat/completions"| OmniRoute["OmniRoute Proxy (Prism / OpenAI)"]
+    Router -->|"Model: muse | Route: /muse-ai/v1/chat/completions"| MuseChat["Muse CVM Chat (Noise XX WebSocket)"]
+    Router -->|"Model: muse-video / gen-* | Route: /muse-ai/v1/create-video"| MuseVideo["Muse Video Studio (Durable Job Tracking)"]
+    Router -->|"Model: jev-1.13 / decisions | Route: /jev/v1/systemone"| JevEngine["Jev Decision Engine (Account Pool & OpenRouter Cascade)"]
 ```
 
 ### Routing Rules

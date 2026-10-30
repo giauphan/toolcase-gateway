@@ -1,8 +1,9 @@
 //! Authoritative registry for built-in and dynamically installed modules.
 
 use super::manifest::{
-    ModuleDescriptor, ModuleError, ModuleKind, ModuleStatus, PersonalManifest,
-    SubProviderDescriptor,
+    builtin_ui_defaults, default_menu_position, default_module_config_schema,
+    normalize_module_config_schema, ModuleDescriptor, ModuleError, ModuleKind, ModuleStatus,
+    PersonalManifest, SubProviderDescriptor,
 };
 use super::validation::{
     validate_module_id, validate_module_namespace, validate_module_protocol, validate_sub_providers,
@@ -12,8 +13,9 @@ use std::collections::HashMap;
 /// Registry of authoritative built-in and dynamically installed personal modules.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleRegistry {
-    modules: HashMap<String, ModuleDescriptor>,
-    personal_manifests: HashMap<String, PersonalManifest>,
+    pub(super) modules: HashMap<String, ModuleDescriptor>,
+    pub(super) personal_manifests: HashMap<String, PersonalManifest>,
+    pub(super) module_configs: HashMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 fn sub_provider(id: &str, name: &str, subpath: &str, caps: &[&str]) -> SubProviderDescriptor {
@@ -32,6 +34,7 @@ impl ModuleRegistry {
         let mut registry = Self {
             modules: HashMap::new(),
             personal_manifests: HashMap::new(),
+            module_configs: HashMap::new(),
         };
 
         registry.register_builtin(
@@ -100,17 +103,26 @@ impl ModuleRegistry {
         capabilities: Vec<String>,
         providers: Option<Vec<SubProviderDescriptor>>,
     ) {
+        let clean_ns = namespace.trim_end_matches('/').to_string();
+        let (order, icon, desc, config_url, tab, schema) = builtin_ui_defaults(id, name, &clean_ns);
         self.modules.insert(
             id.to_string(),
             ModuleDescriptor {
                 id: id.to_string(),
                 name: name.to_string(),
-                namespace: namespace.trim_end_matches('/').to_string(),
+                namespace: clean_ns,
                 kind: ModuleKind::BuiltIn,
                 status: ModuleStatus::Enabled,
                 capabilities,
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
                 providers,
+                menu_position: default_menu_position(),
+                menu_order: order,
+                icon: Some(icon),
+                description: Some(desc),
+                config_url: Some(config_url),
+                settings_tab: Some(tab),
+                config_schema: schema,
             },
         );
     }
@@ -118,13 +130,13 @@ impl ModuleRegistry {
     /// Validates and registers an out-of-tree personal module manifest.
     pub fn register_personal_module(
         &mut self,
-        manifest: PersonalManifest,
+        mut manifest: PersonalManifest,
     ) -> Result<(), ModuleError> {
-        let id = manifest.id.trim();
-        validate_module_id(id, &self.modules)?;
+        let id = manifest.id.trim().to_string();
+        validate_module_id(&id, &self.modules)?;
 
-        let ns = manifest.namespace.trim().trim_end_matches('/');
-        validate_module_namespace(ns, &manifest.namespace, id, &self.modules)?;
+        let ns = manifest.namespace.trim().trim_end_matches('/').to_string();
+        validate_module_namespace(&ns, &manifest.namespace, &id, &self.modules)?;
 
         validate_module_protocol(&manifest.protocol, &manifest.entrypoint)?;
 
@@ -159,19 +171,37 @@ impl ModuleRegistry {
             None
         };
 
+        let next_order = 100 + (self.personal_manifests.len() as i32) * 10;
+        let schema = manifest
+            .config_schema
+            .take()
+            .map(|s| normalize_module_config_schema(s, &id, &ns))
+            .unwrap_or_else(|| default_module_config_schema(&id, &manifest.name, &ns));
+        manifest.config_schema = Some(schema.clone());
         let desc = ModuleDescriptor {
-            id: id.to_string(),
+            id: id.clone(),
             name: manifest.name.clone(),
-            namespace: ns.to_string(),
+            namespace: ns.clone(),
             kind: ModuleKind::Personal,
             status: ModuleStatus::Enabled,
             capabilities: manifest.capabilities.clone(),
             version: Some(manifest.version.clone()),
             providers: sub_providers,
+            menu_position: default_menu_position(),
+            menu_order: next_order,
+            icon: Some("◫".to_string()),
+            description: Some(format!(
+                "Personal module '{}' routed at {}",
+                manifest.name, ns
+            )),
+            config_url: Some(format!("/modules/{id}/config")),
+            settings_tab: Some(id.clone()),
+            config_schema: Some(schema),
         };
 
-        self.modules.insert(id.to_string(), desc);
-        self.personal_manifests.insert(id.to_string(), manifest);
+        self.modules.insert(id.clone(), desc);
+        self.personal_manifests.insert(id.clone(), manifest);
+        self.sync_module_config_from_disk(&id);
         Ok(())
     }
 
@@ -305,10 +335,14 @@ impl ModuleRegistry {
         matched
     }
 
-    /// Returns a list of all registered module descriptors.
+    /// Returns a list of all registered module descriptors ordered by `(menu_order, id)`.
     pub fn list_modules(&self) -> Vec<ModuleDescriptor> {
         let mut list: Vec<ModuleDescriptor> = self.modules.values().cloned().collect();
-        list.sort_by(|a, b| a.id.cmp(&b.id));
+        list.sort_by(|a, b| {
+            a.menu_order
+                .cmp(&b.menu_order)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         list
     }
 

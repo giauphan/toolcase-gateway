@@ -227,17 +227,9 @@
       tab.setAttribute("aria-selected", active ? "true" : "false");
     });
 
-    const panels = {
-      omni: byId("panel-omni"),
-      jev: byId("panel-jev"),
-      muse: byId("panel-muse"),
-    };
-
-    Object.keys(panels).forEach(function(pKey) {
-      if (panels[pKey]) {
-        const isCurrent = pKey === providerId;
-        panels[pKey].classList.toggle("is-hidden", !isCurrent);
-      }
+    document.querySelectorAll(".provider-panel").forEach(function(panel) {
+      const isCurrent = panel.id === ("panel-" + providerId);
+      panel.classList.toggle("is-hidden", !isCurrent);
     });
   }
 
@@ -369,6 +361,55 @@
     const detailBtn = e.target.closest(".module-detail");
     if (detailBtn) {
       showModuleDetail(detailBtn.dataset.moduleId);
+      return;
+    }
+
+    const tabBtn = e.target.closest(".tabline .tab");
+    if (tabBtn && tabBtn.dataset.provider) {
+      switchProviderTab(tabBtn.dataset.provider);
+      return;
+    }
+
+    const moveBtn = e.target.closest(".module-move");
+    if (moveBtn && moveBtn.dataset.moduleId && moveBtn.dataset.direction) {
+      window.updateModulePosition(moveBtn.dataset.moduleId, { direction: moveBtn.dataset.direction });
+      return;
+    }
+  });
+
+  document.addEventListener("change", function(e) {
+    const posSelect = e.target.closest(".module-pos-select");
+    if (posSelect && posSelect.dataset.moduleId) {
+      window.updateModulePosition(posSelect.dataset.moduleId, { menu_position: posSelect.value });
+      return;
+    }
+
+    const harInput = e.target.closest(".dynamic-har-file");
+    if (harInput && harInput.files && harInput.files[0] && harInput.dataset.harEndpoint) {
+      const file = harInput.files[0];
+      const modId = harInput.dataset.moduleId || "module";
+      file.text().then(function(rawText) {
+        return fetch(harInput.dataset.harEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: rawText
+        });
+      })
+      .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, json: j }; }); })
+      .then(function(res) {
+        if (!res.ok) {
+          showToast((res.json.error && res.json.error.message) || res.json.message || "HAR import failed", true);
+        } else {
+          showToast(res.json.message || ("Imported HAR for " + modId), false);
+          loadOverview();
+        }
+      })
+      .catch(function(err) {
+        showToast("HAR import failed: " + err.message, true);
+      })
+      .finally(function() {
+        harInput.value = "";
+      });
     }
   });
 
@@ -445,11 +486,15 @@
 
     const providers = module.providers?.length
       ? module.providers.map(function(p) {
-          return "<li><strong>" + escapeHtml(p.id) + "</strong> (" + escapeHtml(p.kind || "provider") + ") · " +
-            "<code>" + escapeHtml(p.prefix || module.namespace) + "</code> · " +
+          const subRoute = p.prefix || (module.namespace.replace(/\/$/, "") + (p.subpath || ""));
+          return "<li><strong>" + escapeHtml(p.id) + "</strong> (" + escapeHtml(p.name || p.kind || "provider") + ") · " +
+            "<code>" + escapeHtml(subRoute) + "</code> · " +
             "<span class=\"pill " + (p.status === "enabled" ? "good" : "gray") + "\">" + escapeHtml(p.status) + "</span></li>";
         }).join("")
       : "<li>No nested sub-providers</li>";
+
+    const tabTarget = module.settings_tab || (module.id === "omniroute" ? "omni" : module.id);
+    const cfgUrl = module.config_url || ("/modules/" + module.id + "/config");
 
     moduleDetailContent.innerHTML =
       "<div class=\"formgroup\">" +
@@ -460,6 +505,10 @@
         "<div><strong>Status:</strong> <span class=\"pill " + (module.status === "enabled" ? "good" : "gray") + "\">" + escapeHtml(module.status) + "</span></div>" +
         "<div><strong>Capabilities:</strong><br>" + capabilities + "</div>" +
         "<div><strong>Nested Providers:</strong><ul>" + providers + "</ul></div>" +
+        "<div class=\"btns\" style=\"margin-top:12px;\">" +
+          "<a class=\"btn primary btn-primary\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Configure in Provider Settings</a> " +
+          "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config ↗</a>" +
+        "</div>" +
       "</div>";
 
     moduleDetailDialog.showModal();
@@ -488,11 +537,24 @@
       const toggleAction = isEnabled ? "false" : "true";
       const toggleLabel = isEnabled ? "Disable" : "Enable";
       const toggleBtn = "<button class=\"btn module-toggle\" data-module-id=\"" + escapeHtml(m.id) + "\" data-enable=\"" + toggleAction + "\"" + busyAttr + ">" + toggleLabel + "</button>";
+      const tabTarget = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
+      const cfgUrl = m.config_url || ("/modules/" + m.id + "/config");
+      const curPos = m.menu_position || "providers";
+      const posSelect = " <select class=\"field module-pos-select\" data-module-id=\"" + escapeHtml(m.id) + "\" aria-label=\"Menu position for " + escapeHtml(m.name) + "\"" + busyAttr + ">" +
+        "<option value=\"providers\"" + (curPos === "providers" ? " selected" : "") + ">Menu: Providers</option>" +
+        "<option value=\"sidebar\"" + (curPos === "sidebar" ? " selected" : "") + ">Menu: Sidebar</option>" +
+        "<option value=\"studios\"" + (curPos === "studios" ? " selected" : "") + ">Menu: Studios</option>" +
+        "<option value=\"hidden\"" + (curPos === "hidden" ? " selected" : "") + ">Menu: Hidden</option>" +
+      "</select>";
+      const orderBtns = " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"up\" title=\"Move up in menu\"" + busyAttr + ">↑</button>" +
+        " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
+      const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
+        " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
       let removeBtn = "";
       if (!isBuiltin) {
         removeBtn = " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
       }
-      return toggleBtn + removeBtn;
+      return toggleBtn + configBtns + posSelect + orderBtns + removeBtn;
     }
 
     // Render Table Mode
@@ -554,15 +616,23 @@
     }
 
     catalogGrid.innerHTML = catalog.map(function(item) {
-      const isInstalled = allModules.some(function(m) { return m.id === item.id; });
+      const isInstalled = allModules.some(function(m) {
+        return m.id === item.id
+          || (m.namespace && item.namespace && m.namespace.toLowerCase() === item.namespace.toLowerCase())
+          || (item.id === "tiktok-studio" && (m.namespace === "/tiktok" || m.id.toLowerCase().includes("tiktok")));
+      });
       const caps = (item.capabilities || []).map(function(c) {
         return "<span class=\"cap\">" + escapeHtml(c) + "</span>";
       }).join(" ");
 
+      const sourceHtml = item.source
+        ? ("<br><span class=\"hint\">Repo: <code>" + escapeHtml(item.source) + "</code></span>")
+        : "";
+
       return "<div class=\"card catalogitem\">" +
         "<span class=\"pill gray\">Catalog template</span>" +
         "<div class=\"catalogtitle\">" + escapeHtml(item.name) + "</div>" +
-        "<div class=\"catalogdesc\">" + escapeHtml(item.description) + "<br><code>" + escapeHtml(item.namespace) + "</code><br>" + caps + "</div>" +
+        "<div class=\"catalogdesc\">" + escapeHtml(item.description) + "<br><code>" + escapeHtml(item.namespace) + "</code>" + sourceHtml + "<br>" + caps + "</div>" +
         "<div class=\"minirow\">" +
           (isInstalled
             ? "<span class=\"pill good\">Installed</span>"
@@ -649,6 +719,265 @@
       showModulesFeedback("Network error: " + err.message, true);
     });
   };
+
+  window.updateModulePosition = function(id, opts) {
+    moduleRequestsInFlight.add(id);
+    renderModules(renderedModules, true);
+    const payload = Object.assign({ id: id }, opts || {});
+
+    fetch("/api/v1/dashboard/modules/position", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    .then(function(res) {
+      moduleRequestsInFlight.delete(id);
+      return res.text().then(function(text) {
+        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
+      });
+    })
+    .then(function(result) {
+      if (!result.ok) {
+        const errorDetail = result.json.message || ("HTTP " + result.status);
+        showModulesFeedback("Failed to update module menu position: " + errorDetail, true);
+        renderModules(renderedModules, true);
+      } else {
+        showModulesFeedback("Module '" + id + "' menu position updated.", false);
+        loadOverview();
+      }
+    })
+    .catch(function(err) {
+      moduleRequestsInFlight.delete(id);
+      renderModules(renderedModules, true);
+      showModulesFeedback("Network error: " + err.message, true);
+    });
+  };
+
+  function renderDynamicProviderMenus(modules, moduleConfigs) {
+    const visibleModules = (modules || []).filter(function(m) {
+      return (m.menu_position || "providers") !== "hidden";
+    });
+
+    // 1. Overview Provider Modules list
+    const overviewList = byId("overview-provider-list");
+    if (overviewList && visibleModules.length) {
+      overviewList.innerHTML = visibleModules.map(function(m) {
+        const tabKey = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
+        const icon = m.icon || "◫";
+        const kindLabel = m.kind === "builtin" ? "Built-in" : "Personal";
+        const desc = m.description || ("Routed at " + m.namespace);
+        return "<a class=\"provider-row\" data-go=\"providers\" href=\"#provider-settings\" data-tab=\"" + escapeHtml(tabKey) + "\">" +
+          "<div class=\"provider-icon\" aria-hidden=\"true\">" + escapeHtml(icon) + "</div>" +
+          "<div class=\"provider-main\">" +
+            "<div class=\"provider-name\">" + escapeHtml(m.name) + " <span class=\"pill gray\">" + escapeHtml(kindLabel) + "</span></div>" +
+            "<div class=\"provider-desc\">" + escapeHtml(desc) + "</div>" +
+          "</div>" +
+          "<div class=\"provider-cta\" aria-hidden=\"true\">›</div>" +
+        "</a>";
+      }).join("");
+    }
+
+    // 2. Sidebar Pinned Modules
+    const sidebarPinned = byId("sidebar-pinned-modules");
+    if (sidebarPinned) {
+      const pinned = (modules || []).filter(function(m) {
+        return m.menu_position === "sidebar";
+      });
+      if (!pinned.length) {
+        sidebarPinned.innerHTML = "";
+      } else {
+        sidebarPinned.innerHTML = "<div class=\"sidebar-label ui-sidebar-label\">PINNED PROVIDERS</div>" +
+          pinned.map(function(m) {
+            const tabKey = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
+            const icon = m.icon || "◫";
+            return "<a class=\"navitem ui-nav-link\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabKey) + "\" href=\"#provider-settings\">" +
+              "<span class=\"navicon\" aria-hidden=\"true\">" + escapeHtml(icon) + "</span>" +
+              "<span>" + escapeHtml(m.name) + "</span>" +
+            "</a>";
+          }).join("");
+      }
+    }
+
+    // 3. Provider Settings Tabs & Automatic Module UI Config Panels
+    const tabline = byId("provider-tabline");
+    const dynamicPanelsContainer = byId("dynamic-provider-panels");
+    if (tabline && dynamicPanelsContainer) {
+      const activeTabEl = tabline.querySelector(".tab.active");
+      const currentTab = activeTabEl ? activeTabEl.dataset.provider : "omni";
+
+      // Remove previously generated dynamic tabs
+      tabline.querySelectorAll(".tab[data-dynamic='true']").forEach(function(el) {
+        el.remove();
+      });
+
+      const builtinTabMap = {
+        omniroute: byId("tab-omni"),
+        jev: byId("tab-jev"),
+        muse: byId("tab-muse"),
+      };
+
+      const dynamicModules = [];
+      (modules || []).forEach(function(m) {
+        if (builtinTabMap[m.id]) {
+          tabline.appendChild(builtinTabMap[m.id]);
+        } else {
+          const btn = document.createElement("button");
+          btn.className = "tab" + (currentTab === m.id ? " active" : "");
+          btn.dataset.provider = m.id;
+          btn.dataset.dynamic = "true";
+          btn.setAttribute("role", "tab");
+          btn.setAttribute("aria-selected", currentTab === m.id ? "true" : "false");
+          btn.id = "tab-" + m.id;
+          btn.textContent = m.name || m.id;
+          tabline.appendChild(btn);
+          dynamicModules.push(m);
+        }
+      });
+
+      dynamicPanelsContainer.innerHTML = dynamicModules.map(function(m) {
+        const cfg = (moduleConfigs && moduleConfigs[m.id]) || {};
+        const schema = m.config_schema || {};
+        const fields = schema.fields || [];
+        const isCurrent = currentTab === m.id;
+        const cfgUrl = m.config_url || ("/modules/" + m.id + "/config");
+        const fieldsHtml = fields.map(function(f) {
+          const key = f.key;
+          const label = f.label || key;
+          const type = f.type || "text";
+          const isSecret = Boolean(f.secret || type === "password");
+          const inputId = "dyn-cfg-" + m.id + "-" + key;
+          if (isSecret) {
+            const masked = cfg["masked_" + key] || "";
+            return "<div class=\"field-group formgroup\">" +
+              "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+              "<input type=\"password\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"password\" autocomplete=\"off\" placeholder=\"Leave empty to keep existing\">" +
+              "<div class=\"hint\">" + escapeHtml(masked ? ("Current: " + masked) : "Current: not set") + "</div>" +
+            "</div>";
+          }
+          if (type === "boolean") {
+            const boolVal = cfg[key] !== undefined ? Boolean(cfg[key]) : (f.default !== false);
+            return "<div class=\"field-group formgroup\">" +
+              "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+              "<select id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"boolean\">" +
+                "<option value=\"true\"" + (boolVal ? " selected" : "") + ">Enabled</option>" +
+                "<option value=\"false\"" + (!boolVal ? " selected" : "") + ">Disabled</option>" +
+              "</select>" +
+            "</div>";
+          }
+          if (type === "number") {
+            const numVal = cfg[key] != null ? cfg[key] : (f.default != null ? f.default : 30);
+            return "<div class=\"field-group formgroup\">" +
+              "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+              "<input type=\"number\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"number\" value=\"" + escapeHtml(numVal) + "\">" +
+            "</div>";
+          }
+          const strVal = cfg[key] != null ? String(cfg[key]) : "";
+          return "<div class=\"field-group formgroup\">" +
+            "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+            "<input type=\"text\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"text\" value=\"" + escapeHtml(strVal) + "\" placeholder=\"" + escapeHtml(f.placeholder || "") + "\">" +
+          "</div>";
+        }).join("");
+
+        const resolvedHarEndpoint = schema.har_endpoint
+          ? (schema.har_endpoint.startsWith(m.namespace)
+              ? schema.har_endpoint
+              : (m.namespace.replace(/\/$/, "") + "/v1/config/har"))
+          : "";
+        const harHtml = resolvedHarEndpoint
+          ? ("<div class=\"field-group formgroup\">" +
+              "<label for=\"dyn-har-" + escapeHtml(m.id) + "\">Or Import HAR Capture (.har / .json)</label>" +
+              "<input type=\"file\" id=\"dyn-har-" + escapeHtml(m.id) + "\" class=\"dynamic-har-file\" data-module-id=\"" + escapeHtml(m.id) + "\" data-har-endpoint=\"" + escapeHtml(resolvedHarEndpoint) + "\" accept=\".har,.json\">" +
+              "<div class=\"hint\">" + escapeHtml(schema.har_hint || ("Posts HAR to " + resolvedHarEndpoint)) + "</div>" +
+            "</div>")
+          : "";
+
+        return "<div class=\"provider-panel" + (isCurrent ? "" : " is-hidden") + "\" id=\"panel-" + escapeHtml(m.id) + "\" role=\"tabpanel\" aria-labelledby=\"tab-" + escapeHtml(m.id) + "\">" +
+          "<div class=\"card-header\">" +
+            "<h2>" + escapeHtml(m.name) + " Configuration</h2>" +
+            "<span class=\"tag ok\"><code>" + escapeHtml(m.namespace) + "</code></span>" +
+          "</div>" +
+          "<p class=\"card-sub\">Automatic UI configuration for module <code>" + escapeHtml(m.id) + "</code>. Secrets are masked and persisted securely.</p>" +
+          "<form class=\"dynamic-module-config-form\" data-module-id=\"" + escapeHtml(m.id) + "\">" +
+            "<div class=\"grid-2 formgrid\">" + fieldsHtml + "</div>" +
+            harHtml +
+            "<div class=\"btns\">" +
+              "<button type=\"submit\" class=\"btn primary btn-primary\">Save " + escapeHtml(m.name) + " Settings</button>" +
+              "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config (" + escapeHtml(cfgUrl) + ") ↗</a>" +
+            "</div>" +
+          "</form>" +
+        "</div>";
+      }).join("");
+    }
+  }
+
+  document.addEventListener("submit", function(e) {
+    const dynForm = e.target.closest(".dynamic-module-config-form");
+    if (!dynForm) return;
+    e.preventDefault();
+    const modId = dynForm.dataset.moduleId;
+    if (!modId) return;
+    const harInput = dynForm.querySelector(".dynamic-har-file");
+    const harFile = harInput && harInput.files && harInput.files[0];
+    if (harFile && harInput.dataset.harEndpoint) {
+      harFile.text().then(function(rawText) {
+        return fetch(harInput.dataset.harEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: rawText
+        });
+      })
+      .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, json: j }; }); })
+      .then(function(res) {
+        if (!res.ok) {
+          showToast((res.json.error && res.json.error.message) || res.json.message || "HAR import failed", true);
+        } else {
+          showToast(res.json.message || ("Imported HAR for " + modId), false);
+          loadOverview();
+        }
+      })
+      .catch(function(err) {
+        showToast("HAR import failed: " + err.message, true);
+      })
+      .finally(function() {
+        if (harInput) harInput.value = "";
+      });
+      return;
+    }
+
+    const cfg = {};
+    dynForm.querySelectorAll("[data-key]").forEach(function(inp) {
+      const k = inp.dataset.key;
+      const t = inp.dataset.type;
+      if (t === "password") {
+        if (inp.value && inp.value.trim()) cfg[k] = inp.value.trim();
+      } else if (t === "boolean") {
+        cfg[k] = inp.value === "true";
+      } else if (t === "number") {
+        const n = Number(inp.value);
+        if (!Number.isNaN(n)) cfg[k] = n;
+      } else {
+        cfg[k] = inp.value.trim();
+      }
+    });
+
+    fetch("/api/v1/dashboard/modules/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: modId, config: cfg })
+    })
+    .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, json: j }; }); })
+    .then(function(res) {
+      if (!res.ok) {
+        showToast(res.json.message || "Failed to save module config", true);
+      } else {
+        showToast(res.json.message || ("Saved configuration for " + modId), false);
+        loadOverview();
+      }
+    })
+    .catch(function(err) {
+      showToast("Network error: " + err.message, true);
+    });
+  });
 
   window.removeModule = function(id) {
     moduleRequestsInFlight.add(id);
@@ -870,6 +1199,7 @@
 
         // Modules & Catalog
         allModules = data.modules || [];
+        renderDynamicProviderMenus(allModules, data.module_configs || {});
         filterModules();
         renderCatalog(data.catalog || []);
       })
@@ -1124,8 +1454,10 @@
   const GatewayConsole = {
     syncHashNavigation: function() {
       const hash = window.location.hash;
+      const raw = (hash || "").replace(/^#/, "").trim().toLowerCase();
       const targetKey = normalizeRoute(hash);
-      navigateTo(targetKey);
+      const tab = raw === "muse-settings" ? "muse" : undefined;
+      navigateTo(targetKey, tab);
     },
     start: function() {
       document.documentElement.classList.add("ui-shell-ready");

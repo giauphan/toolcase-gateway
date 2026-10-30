@@ -122,6 +122,34 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_remove_personal_module(c, b, store)
             })
         }
+        "/api/v1/dashboard/modules/position" => {
+            handle_post(client, request, "dashboard modules/position", |c, b| {
+                crate::features::dashboard::handle_set_module_position(c, b, store)
+            })
+        }
+        "/api/v1/dashboard/modules/config" => {
+            if request.method.eq_ignore_ascii_case("get") {
+                crate::features::dashboard::handle_get_module_config(client, &request.path, store)
+                    .map(|_| Some(200))
+            } else {
+                handle_post(client, request, "dashboard modules/config", |c, b| {
+                    crate::features::dashboard::handle_update_module_config(c, b, store)
+                })
+            }
+        }
+        p if p == "/tiktok-config"
+            || (p.starts_with("/modules/")
+                && (p.ends_with("/config")
+                    || p.ends_with("/settings")
+                    || p.ends_with("/config-page"))) =>
+        {
+            handle_get(
+                client,
+                request,
+                "module config page",
+                crate::features::dashboard::handle_module_config_page,
+            )
+        }
         _ => Ok(None),
     }
 }

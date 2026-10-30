@@ -124,6 +124,12 @@ impl ConfigStore {
             if let Some(ref enabled_map) = persistent.enabled_modules {
                 reg.apply_enablement_map(enabled_map);
             }
+            if let Some(ref pos_map) = persistent.module_positions {
+                reg.apply_module_positions(pos_map);
+            }
+            if let Some(ref cfg_map) = persistent.module_configs {
+                reg.apply_module_configs(cfg_map);
+            }
         } else {
             let state_dir = crate::gateway::installer::get_state_dir();
             crate::gateway::installer::scan_and_register_modules(&mut reg, &state_dir);
@@ -217,6 +223,8 @@ impl ConfigStore {
         }
         persistent.enabled_modules = Some(map);
         persistent.personal_modules = Some(reg.export_personal_manifests());
+        persistent.module_positions = Some(reg.export_module_positions());
+        persistent.module_configs = Some(reg.export_module_configs());
         drop(reg);
         save_persistent_config(&self.config_file, &persistent)
     }

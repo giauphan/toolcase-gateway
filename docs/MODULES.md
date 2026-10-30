@@ -328,3 +328,42 @@ AI agents and editor extensions can orchestrate the platform module lifecycle au
 | `gateway_install_personal_module` | `{"source": "string", "source_type": "dir\|zip\|github"}` | Installs and registers an out-of-tree module from disk, ZIP, or remote GitHub repository |
 | `gateway_remove_personal_module` | `{"module_id": "string"}` | Uninstalls and purges an installed module directory from disk |
 | `gateway_get_system_metrics` | *(none)* | Returns live platform telemetry, memory usage, active connections, and module counters |
+
+---
+
+## 9. Built-in & External Catalog Modules
+
+Toolcase Gateway bundles three built-in core modules (`omniroute`, `muse`, `jev`) and a System Module Catalog of 1-click installable external modules (such as `tiktok-studio` hosted at [`https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git`](https://github.com/giauphan/TikTok-Creator-Studio-Adapter)):
+
+| Module ID | Kind | Namespace | Capabilities | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `omniroute` | Built-in | `/ominroute`, `/omniroute` | `chat_completions`, `models`, `failover` | Core OpenAI-compatible reverse proxy with casing repair and multi-model failover. |
+| `muse` | Built-in | `/muse-ai` | `chat`, `models`, `video`, `image` | Multi-modal AI provider with WebSocket streaming, image generation, and video rendering pipelines. |
+| `jev` | Built-in | `/jev` | `decisions`, `models` | High-throughput multi-tier decision engine and OpenRouter failover provider. |
+| `tiktok-studio` | External Catalog | `/custom/tiktok` | `video_download`, `items_manage`, `publish`, `studio` | TikTok Creator Studio adapter installed from [`giauphan/TikTok-Creator-Studio-Adapter`](https://github.com/giauphan/TikTok-Creator-Studio-Adapter). |
+
+### 9.1 External Module Example: TikTok Creator Studio (`tiktok-studio`)
+
+The TikTok Creator Studio Adapter lives in its own dedicated repository (`https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git`) and is registered in the Gateway's System Module Catalog (`src/modules/catalog.rs`):
+
+- **1-Click Install**: Install from `/dashboard#module-catalog` or `POST /api/v1/dashboard/modules/install` with `{"id": "tiktok-studio"}` (or `"source": "https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git"`).
+- **Automatic UI Config**: Accessible at `GET /modules/tiktok-studio/config` (or `/dashboard#provider-settings` → **TikTok Creator Studio Adapter** tab) and the module's own self-contained UI at `GET /custom/tiktok/ui`.
+- **Module Endpoints** (mounted under `/custom/tiktok`):
+  - `GET /custom/tiktok/v1/status` & `GET/POST /custom/tiktok/v1/config` — Module status and credential persistence (`module_config.json`, `0600`).
+  - `POST /custom/tiktok/v1/config/har` — Ingests `download-tiktok.har` to extract `base_url`, `cookie`, and `tt-csrf-token`.
+  - `GET /custom/tiktok/v1/items` — Paginated creator video listings and engagement counters.
+  - `GET /custom/tiktok/v1/download?item_id=<id>` — Direct watermark-free CDN video download URL resolution.
+
+### 9.2 Automatic Module UI Configuration & Dynamic Dashboard Menu Positioning
+
+Every built-in and personal module registered in `ModuleRegistry` automatically gets:
+
+1. **Dynamic Dashboard Provider Menus & Tabs**:
+   - The Dashboard **Overview** (`Provider modules`), **Sidebar** (`PINNED PROVIDERS`), **Provider Settings** tabs (`.tabline`), and **Installed Modules** table are dynamically driven by `ModuleDescriptor` metadata (`menu_position`, `menu_order`, `icon`, `description`, `config_url`, `settings_tab`, `config_schema`).
+   - Installing any personal or catalog module automatically creates a configuration tab and schema-driven settings form in `/dashboard#provider-settings`.
+2. **Standalone Automatic UI Configuration Page (`/modules/<id>/config`)**:
+   - Visiting `GET /modules/<id>/config` (or `/modules/<id>/settings` / `/modules/<id>/config-page`) for any registered module serves `assets/module-config.html`, rendering form controls from the module's `config_schema` alongside Dashboard UI menu placement controls.
+3. **Dashboard Module Position & Config REST API**:
+   - `POST /api/v1/dashboard/modules/position` — Updates a module's UI placement (`"menu_position": "providers" | "sidebar" | "studios" | "overview" | "hidden"`) and priority order (`"menu_order": 10` or `"direction": "up" | "down"`), persisted to `gateway_config.json` (`module_positions`).
+   - `GET /api/v1/dashboard/modules/config?id=<id>` — Returns the module's `config_schema`, UI position metadata, and current configuration with all secret fields (`api_key`, `cookie`, `token`, `csrf_token`, etc.) masked.
+   - `POST /api/v1/dashboard/modules/config` — Updates per-module configuration and UI menu position, persisted to `gateway_config.json` (`module_configs`).

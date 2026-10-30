@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Gateway Dashboard — Provider &amp; Pipeline Control</title>
-<link rel="stylesheet" href="/gateway-ui/dashboard.css">
-<script defer src="/gateway-ui/dashboard.js"></script>
+<link rel="stylesheet" href="/gateway-ui/dashboard.css?v=2">
+<script defer src="/gateway-ui/dashboard.js?v=2"></script>
 </head>
 <body>
 <a class="ui-skip-link" href="#dashboard-main">Skip to main content</a>
@@ -70,6 +70,7 @@
         <span class="navicon" aria-hidden="true">⚙</span>
         <span>Settings</span>
       </a>
+      <div id="sidebar-pinned-modules"></div>
     </nav>
     <div class="sidebar-foot">
       <span>Odoo-inspired management console</span><br>
@@ -137,7 +138,7 @@
             </div>
             <a class="link" data-go="providers" href="#provider-settings">View all →</a>
           </div>
-          <div class="provider-list">
+          <div class="provider-list" id="overview-provider-list">
             <a class="provider-row" data-go="providers" href="#provider-settings" data-tab="omni">
               <div class="provider-icon" aria-hidden="true">◎</div>
               <div class="provider-main">
@@ -371,13 +372,13 @@
       </div>
 
       <div class="card">
-        <div class="tabline" role="tablist" aria-label="Provider configuration tabs">
+        <div class="tabline" id="provider-tabline" role="tablist" aria-label="Provider configuration tabs">
           <button class="tab active" data-provider="omni" role="tab" aria-selected="true" id="tab-omni">OmniRoute Proxy</button>
           <button class="tab" data-provider="jev" role="tab" aria-selected="false" id="tab-jev">Jev &amp; OpenRouter</button>
           <button class="tab" data-provider="muse" role="tab" aria-selected="false" id="tab-muse">Muse AI Subsystem Configuration</button>
         </div>
 
-        <div class="padding">
+        <div class="padding" id="provider-panels-container">
           <!-- OMNIROUTE PANEL -->
           <div class="provider-panel" id="panel-omni" role="tabpanel" aria-labelledby="tab-omni">
             <div class="card-header">
@@ -544,6 +545,7 @@
               <div class="err-box" id="muse-err-msg"></div>
             </form>
           </div>
+          <div id="dynamic-provider-panels"></div>
         </div>
       </div>
     </section>

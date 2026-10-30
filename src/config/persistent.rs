@@ -69,6 +69,12 @@ pub struct PersistentConfig {
     pub enabled_modules: Option<std::collections::HashMap<String, bool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub personal_modules: Option<Vec<crate::gateway::modules::PersonalManifest>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_positions:
+        Option<std::collections::HashMap<String, crate::gateway::modules::ModuleUiPosition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_configs:
+        Option<std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>>>,
 }
 
 impl PersistentConfig {
@@ -117,6 +123,8 @@ impl PersistentConfig {
             muse_approval_timeout_secs: Some(config.muse_approval.approval_timeout_secs),
             enabled_modules: None,
             personal_modules: None,
+            module_positions: None,
+            module_configs: None,
         }
     }
 

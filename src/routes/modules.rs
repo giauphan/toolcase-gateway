@@ -170,6 +170,15 @@ pub fn dispatch_module_route(
             if let Some(manifest) = personal_manifest.as_ref() {
                 let sub_id = sub_prov.as_ref().map(|p| p.id.as_str());
                 let status = dispatch_personal(client, request, manifest, &subpath, sub_id)?;
+                if request.method.eq_ignore_ascii_case("post")
+                    && (200..300).contains(&status)
+                    && subpath.contains("config")
+                {
+                    if let Ok(mut guard) = store.module_registry().write() {
+                        guard.sync_module_config_from_disk(&desc.id);
+                    }
+                    let _ = store.save_to_persistent_file();
+                }
                 return Ok(Some(status));
             }
             Ok(None)

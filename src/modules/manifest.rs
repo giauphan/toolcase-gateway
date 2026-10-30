@@ -117,6 +117,87 @@ pub struct SubProviderDescriptor {
     pub status: ModuleStatus,
 }
 
+/// Persisted Dashboard UI menu position and ordering metadata for a module.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleUiPosition {
+    #[serde(default = "default_menu_position")]
+    pub menu_position: String,
+    #[serde(default = "default_menu_order")]
+    pub menu_order: i32,
+}
+
+impl Default for ModuleUiPosition {
+    fn default() -> Self {
+        Self {
+            menu_position: default_menu_position(),
+            menu_order: default_menu_order(),
+        }
+    }
+}
+
+pub fn default_menu_position() -> String {
+    "providers".to_string()
+}
+
+pub fn default_menu_order() -> i32 {
+    100
+}
+
+pub fn is_valid_menu_position(pos: &str) -> bool {
+    matches!(
+        pos.trim().to_ascii_lowercase().as_str(),
+        "providers" | "sidebar" | "studios" | "overview" | "hidden"
+    )
+}
+
+/// Generates a default automatic UI configuration schema for a module.
+pub fn default_module_config_schema(id: &str, name: &str, namespace: &str) -> serde_json::Value {
+    serde_json::json!({
+        "title": format!("{name} Configuration"),
+        "module_id": id,
+        "namespace": namespace,
+        "fields": [
+            {
+                "key": "base_url",
+                "label": "Upstream Base URL",
+                "type": "text",
+                "placeholder": "https://api.example.com",
+                "description": "Primary upstream HTTP endpoint for this module"
+            },
+            {
+                "key": "api_key",
+                "label": "API Key / Bearer Token",
+                "type": "password",
+                "secret": true,
+                "placeholder": "Leave empty to keep existing secret",
+                "description": "Authentication token passed to upstream requests"
+            },
+            {
+                "key": "cookie",
+                "label": "Session Cookie",
+                "type": "password",
+                "secret": true,
+                "placeholder": "Leave empty to keep existing cookie",
+                "description": "Optional browser session cookie header"
+            },
+            {
+                "key": "default_model",
+                "label": "Default Model / Target",
+                "type": "text",
+                "placeholder": id,
+                "description": "Default model identifier or target profile"
+            },
+            {
+                "key": "timeout_secs",
+                "label": "Request Timeout (seconds)",
+                "type": "number",
+                "default": 30,
+                "description": "Maximum execution time in seconds"
+            }
+        ]
+    })
+}
+
 /// Public descriptor of an installed module or module group.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleDescriptor {
@@ -130,4 +211,145 @@ pub struct ModuleDescriptor {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub providers: Option<Vec<SubProviderDescriptor>>,
+    #[serde(default = "default_menu_position")]
+    pub menu_position: String,
+    #[serde(default = "default_menu_order")]
+    pub menu_order: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_tab: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<serde_json::Value>,
+}
+
+pub fn builtin_ui_defaults(
+    id: &str,
+    name: &str,
+    namespace: &str,
+) -> (
+    i32,
+    String,
+    String,
+    String,
+    String,
+    Option<serde_json::Value>,
+) {
+    match id {
+        "omniroute" => (
+            10,
+            "◎".to_string(),
+            "OpenAI-compatible proxy · model fallback and casing repair".to_string(),
+            "/modules/omniroute/config".to_string(),
+            "omni".to_string(),
+            Some(default_module_config_schema(id, name, namespace)),
+        ),
+        "muse" => (
+            20,
+            "✦".to_string(),
+            "Chat completions, image and video pipeline with Sentinel approvals".to_string(),
+            "/muse-config".to_string(),
+            "muse".to_string(),
+            Some(default_module_config_schema(id, name, namespace)),
+        ),
+        "jev" => (
+            30,
+            "◇".to_string(),
+            "Decision API, pooled multi-account rotation and failover".to_string(),
+            "/modules/jev/config".to_string(),
+            "jev".to_string(),
+            Some(default_module_config_schema(id, name, namespace)),
+        ),
+        _ => (
+            50,
+            "◫".to_string(),
+            format!("{name} built-in gateway module"),
+            format!("/modules/{id}/config"),
+            id.to_string(),
+            Some(default_module_config_schema(id, name, namespace)),
+        ),
+    }
+}
+
+pub fn is_secret_config_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.contains("key")
+        || lower.contains("token")
+        || lower.contains("cookie")
+        || lower.contains("secret")
+        || lower.contains("password")
+        || lower.contains("csrf")
+}
+
+/// Normalizes a module's `config_schema` so `module_id`, `namespace`, and `har_endpoint`
+/// always reflect the installed module identifier and route prefix.
+pub fn normalize_module_config_schema(
+    schema: serde_json::Value,
+    id: &str,
+    namespace: &str,
+) -> serde_json::Value {
+    let clean_ns = namespace.trim().trim_end_matches('/');
+    let serde_json::Value::Object(mut obj) = schema else {
+        return schema;
+    };
+
+    let prev_ns = obj
+        .get("namespace")
+        .and_then(serde_json::Value::as_str)
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .unwrap_or_default();
+
+    obj.insert(
+        "module_id".to_string(),
+        serde_json::Value::String(id.to_string()),
+    );
+    obj.insert(
+        "namespace".to_string(),
+        serde_json::Value::String(clean_ns.to_string()),
+    );
+
+    if let Some(har_ep) = obj
+        .get("har_endpoint")
+        .and_then(serde_json::Value::as_str)
+        .map(|s| s.trim().to_string())
+    {
+        let updated_har = if !prev_ns.is_empty() && har_ep.starts_with(&prev_ns) {
+            format!("{clean_ns}{}", &har_ep[prev_ns.len()..])
+        } else if har_ep.ends_with("/v1/config/har") && !har_ep.starts_with(clean_ns) {
+            format!("{clean_ns}/v1/config/har")
+        } else if har_ep.ends_with("/config/har") && !har_ep.starts_with(clean_ns) {
+            format!("{clean_ns}/config/har")
+        } else {
+            har_ep
+        };
+        obj.insert(
+            "har_endpoint".to_string(),
+            serde_json::Value::String(updated_har),
+        );
+    }
+
+    serde_json::Value::Object(obj)
+}
+
+pub fn mask_config_map(
+    raw: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut out = serde_json::Map::new();
+    for (k, v) in raw {
+        if is_secret_config_key(k) {
+            if let Some(s) = v.as_str() {
+                let t = s.trim();
+                let masked = crate::features::dashboard::mask_key(t);
+                out.insert(format!("masked_{k}"), serde_json::Value::String(masked));
+                out.insert(format!("has_{k}"), serde_json::Value::Bool(!t.is_empty()));
+            }
+        } else {
+            out.insert(k.clone(), v.clone());
+        }
+    }
+    out
 }

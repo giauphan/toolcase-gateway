@@ -366,36 +366,23 @@ pub fn request_museai_chat_completion(
         }
     }
 
-    if let Some(ref raw_url) = video_url {
-        crate::runtime::logger::log_message(
-            "INFO",
-            "museai_chat",
-            &format!("Resolved video artifact URL: {raw_url}"),
-        );
-        cache_vm_media(
-            &mut socket,
-            &mut session,
-            raw_url,
-            active_stream_id.max(2) + 1,
-            job_id_hint.as_deref(),
-            false,
-        );
-    }
-
-    if let Some(ref raw_url) = image_url {
-        crate::runtime::logger::log_message(
-            "INFO",
-            "museai_chat",
-            &format!("Resolved image artifact URL: {raw_url}"),
-        );
-        cache_vm_media(
-            &mut socket,
-            &mut session,
-            raw_url,
-            active_stream_id.max(2) + 1,
-            job_id_hint.as_deref(),
-            true,
-        );
+    for (raw_url, is_image) in [(&video_url, false), (&image_url, true)] {
+        if let Some(ref url) = raw_url {
+            let kind = if is_image { "image" } else { "video" };
+            crate::runtime::logger::log_message(
+                "INFO",
+                "museai_chat",
+                &format!("Resolved {kind} artifact URL: {url}"),
+            );
+            cache_vm_media(
+                &mut socket,
+                &mut session,
+                url,
+                active_stream_id.max(2) + 1,
+                job_id_hint.as_deref(),
+                is_image,
+            );
+        }
     }
 
     let created = SystemTime::now()

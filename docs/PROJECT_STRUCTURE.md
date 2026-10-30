@@ -35,8 +35,10 @@ toolcase-gateway-rs/
 │   └── workflows/                # CI and build workflows
 ├── assets/                       # Embedded HTML/CSS/JS frontend assets
 │   ├── dashboard.html            # Runtime Configuration Dashboard UI
-│   ├── muse_config.html          # Legacy Muse HAR configuration UI
-│   ├── video_template.html       # Video Studio template UI
+│   ├── module-config.html        # Automatic schema-driven Module UI Configuration (/modules/<id>/config)
+│   ├── muse-config.html          # Muse HAR configuration UI (/muse-config)
+│   ├── image-template.html       # Image Studio template UI (/image-template)
+│   ├── video-template.html       # Video Studio template UI (/video-template)
 │   └── ui/                       # Dashboard CSS and JS modules
 ├── docs/                         # Canonical project documentation suite
 │   ├── ARCHITECTURE.md           # Routing architecture, canonical table, and lifecycle
@@ -98,6 +100,7 @@ toolcase-gateway-rs/
 │   │   ├── registry.rs           # Thread-safe module registry and route prefix index
 │   │   ├── validation.rs         # Module ID, namespace, and entrypoint validators
 │   │   ├── builtins/             # Core built-in provider modules (Jev, Muse, OmniRoute)
+│   │   ├── ui_config.rs          # Dynamic UI menu positioning and automatic module config storage
 │   │   └── personal/             # Out-of-tree personal modules and subprocess runners
 │   │
 │   ├── museai/                   # Muse AI Subsystem (<450 lines/module)
@@ -183,7 +186,8 @@ toolcase-gateway-rs/
 │   ├── video_template/           # Video template test modules
 │   │   └── video_template_tests.rs # Template page serving and parameter extraction
 │   ├── config.rs                 # Environment and configuration unit/integration tests
-│   ├── log_rotation.rs           # Multi-stream logger, ZIP compression, rotation tests
+│   ├── logger.rs                 # Multi-stream logger entry point (tests/logger/*.rs <400 lines)
+│   ├── modules.rs                # Module installer & registry entry point (tests/modules/*.rs <400 lines)
 │   └── routes_contract.rs        # Full contract test verifying all canonical routes
 ```
 

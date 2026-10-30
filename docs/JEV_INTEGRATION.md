@@ -235,14 +235,14 @@ flowchart TD
     Req["Incoming Jev Request (/jev/v1/systemone)"] --> Pick["JevAccountPool: Select Next Account (Round-Robin)"]
     Pick --> Send["Forward to Jev Upstream (https://jev-ai.org)"]
     Send --> Eval{"Upstream HTTP Status"}
-    
+
     Eval -->|"200 OK"| Success["Return Response to Client"]
-    Eval -->|"401 / 402 / 403 / 429<br>(Account / Credit Exhaustion)"| Failover{"More Accounts in Pool?"}
+    Eval -->|"401 / 402 / 403 / 429 (Account / Credit Exhaustion)"| Failover{"More Accounts in Pool?"}
     Failover -->|"Yes"| NextAcc["Select Next Account Candidate"] --> Send
     Failover -->|"No"| Cascade["Cascade to OpenRouter Tiers"]
-    
-    Eval -->|"499 / 502 / 503 / 504<br>(Transient Upstream Error)"| Retry["Retry with Exponential Backoff"] --> Send
-    Eval -->|"400 / 404 / 413 / 422<br>(Malformed Payload)"| ReturnDirect["Return Status to Client (No Account Failover)"]
+
+    Eval -->|"499 / 502 / 503 / 504 (Transient Upstream Error)"| Retry["Retry with Exponential Backoff"] --> Send
+    Eval -->|"400 / 404 / 413 / 422 (Malformed Payload)"| ReturnDirect["Return Status to Client (No Account Failover)"]
 ```
 
 - **Round-Robin Rotation**: Distributes requests evenly across all configured accounts to maximize available free credit allowances (e.g. Jev AI Tools daily allowances, Space welcome credits).

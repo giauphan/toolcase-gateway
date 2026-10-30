@@ -135,15 +135,42 @@ fn resolve_entrypoint_path(payload_entrypoint: Option<String>, id: &str) -> Stri
 fn parse_or_synthesize_manifest(
     body: &[u8],
     payload: &InstallPayload,
-) -> Result<PersonalManifest, String> {
+) -> Result<(PersonalManifest, bool), String> {
     if let Ok(m) = serde_json::from_slice::<PersonalManifest>(body) {
-        return Ok(m);
+        return Ok((m, false));
     }
     if let Some(target_id) = payload.id.as_deref().or(payload.namespace.as_deref()) {
         if let Some(cat) = crate::gateway::modules::get_system_module_catalog()
             .into_iter()
             .find(|c| c.id == target_id || c.namespace == target_id)
         {
+            if let Some(ref src) = cat.source {
+                let state_dir = get_state_dir();
+                let opts = InstallOptions {
+                    id: Some(cat.id.clone()),
+                    name: Some(cat.name.clone()),
+                    namespace: payload
+                        .namespace
+                        .clone()
+                        .or_else(|| Some(cat.namespace.clone())),
+                    entrypoint: payload.entrypoint.clone(),
+                    protocol: payload
+                        .protocol
+                        .clone()
+                        .or_else(|| Some(cat.protocol.clone())),
+                    branch: payload.branch.clone(),
+                };
+                let mut m = install_module(
+                    crate::gateway::installer::resolve_source(src),
+                    opts,
+                    &state_dir,
+                )
+                .map_err(|e| format!("Catalog install from {src} failed: {e}"))?;
+                if m.config_schema.is_none() {
+                    m.config_schema = cat.config_schema.clone();
+                }
+                return Ok((m, true));
+            }
             let ep = resolve_entrypoint_path(payload.entrypoint.clone(), &cat.id);
             let group = if cat.id == "suite-test" {
                 Some(crate::gateway::modules::ModuleGroupManifest {
@@ -166,18 +193,21 @@ fn parse_or_synthesize_manifest(
             } else {
                 None
             };
-            return Ok(PersonalManifest {
-                id: cat.id,
-                name: cat.name,
-                version: cat.version,
-                namespace: cat.namespace,
-                entrypoint: ep,
-                protocol: cat.protocol,
-                capabilities: cat.capabilities,
-                config_schema: None,
-                permissions: Vec::new(),
-                group,
-            });
+            return Ok((
+                PersonalManifest {
+                    id: cat.id,
+                    name: cat.name,
+                    version: cat.version,
+                    namespace: cat.namespace,
+                    entrypoint: ep,
+                    protocol: cat.protocol,
+                    capabilities: cat.capabilities,
+                    config_schema: cat.config_schema,
+                    permissions: Vec::new(),
+                    group,
+                },
+                false,
+            ));
         }
     }
     let Some(ref ns) = payload.namespace else {
@@ -204,18 +234,21 @@ fn parse_or_synthesize_manifest(
         .protocol
         .clone()
         .unwrap_or_else(|| "stdio-stream".to_string());
-    Ok(PersonalManifest {
-        id,
-        name,
-        version: "0.1.0".to_string(),
-        namespace: ns.clone(),
-        entrypoint,
-        protocol,
-        capabilities: vec!["chat_completions".to_string(), "models".to_string()],
-        config_schema: None,
-        permissions: Vec::new(),
-        group: None,
-    })
+    Ok((
+        PersonalManifest {
+            id,
+            name,
+            version: "0.1.0".to_string(),
+            namespace: ns.clone(),
+            entrypoint,
+            protocol,
+            capabilities: vec!["chat_completions".to_string(), "models".to_string()],
+            config_schema: None,
+            permissions: Vec::new(),
+            group: None,
+        },
+        false,
+    ))
 }
 
 pub fn handle_set_module_state(
@@ -279,8 +312,8 @@ pub fn handle_install_personal_module(
     store: &ConfigStore,
 ) -> io::Result<()> {
     let payload = serde_json::from_slice::<InstallPayload>(body).unwrap_or_default();
-    let installed_from_source = payload.source.is_some() || payload.zip_base64.is_some();
-    let manifest = if installed_from_source {
+    let has_direct_source = payload.source.is_some() || payload.zip_base64.is_some();
+    let (manifest, installed_from_source) = if has_direct_source {
         let source = if let Some(ref s) = payload.source {
             crate::gateway::installer::resolve_source(s)
         } else if let Some(ref b64) = payload.zip_base64 {
@@ -302,12 +335,12 @@ pub fn handle_install_personal_module(
         };
         let state_dir = get_state_dir();
         match install_module(source, opts, &state_dir) {
-            Ok(m) => m,
+            Ok(m) => (m, true),
             Err(e) => return write_error(client, 400, "Bad Request", &e.to_string()),
         }
     } else {
         match parse_or_synthesize_manifest(body, &payload) {
-            Ok(m) => m,
+            Ok(res) => res,
             Err(e) => return write_error(client, 400, "Bad Request", &e),
         }
     };
@@ -329,7 +362,9 @@ pub fn handle_install_personal_module(
 
     if !installed_from_source {
         let target_dir = get_state_dir().join("modules").join(&id);
-        let _ = generate_module_adapter_script(&target_dir);
+        if !target_dir.join("run.sh").is_file() {
+            let _ = generate_module_adapter_script(&target_dir);
+        }
         let _ = std::fs::write(
             target_dir.join("module.json"),
             serde_json::to_string_pretty(&manifest).unwrap_or_default(),

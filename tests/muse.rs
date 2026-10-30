@@ -4,8 +4,14 @@ mod common;
 #[path = "muse/chat_stream_tests.rs"]
 mod chat_stream_tests;
 
+#[path = "muse/chat_stream_edge_tests.rs"]
+mod chat_stream_edge_tests;
+
 #[path = "muse/video_tests.rs"]
 mod video_tests;
+
+#[path = "muse/video_polling_tests.rs"]
+mod video_polling_tests;
 
 #[path = "muse/threads_tests.rs"]
 mod threads_tests;
@@ -27,6 +33,9 @@ mod approval_integration_tests;
 
 #[path = "muse/chat_continuation_tests.rs"]
 mod chat_continuation_tests;
+
+#[path = "muse/chat_continuation_recovery_tests.rs"]
+mod chat_continuation_recovery_tests;
 
 #[path = "muse/image_tests.rs"]
 mod image_tests;

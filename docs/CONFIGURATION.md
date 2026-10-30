@@ -23,7 +23,7 @@ When the gateway initializes and handles requests, configuration resolves in the
 1. **Built-in Defaults**: Hardcoded safe fallbacks in `Config::default()`.
 2. **Environment & `.env`**: Read on initial boot.
 3. **Persistent Config Store (`gateway_config.json`)**: If the JSON file exists on disk, its defined keys overlay the boot configuration.
-4. **Live In-Memory State (`ConfigStore`)**: Changes submitted via `/api/v1/dashboard/config`, `/api/v1/dashboard/muse-config`, or `/api/v1/dashboard/accounts` take effect immediately without process restart and are committed atomically to `gateway_config.json`.
+4. **Live In-Memory State (`ConfigStore`)**: Changes submitted via `/api/v1/dashboard/config`, `/api/v1/dashboard/muse-config`, `/api/v1/dashboard/modules/config`, `/api/v1/dashboard/modules/position`, or `/api/v1/dashboard/accounts` take effect immediately without process restart and are committed atomically to `gateway_config.json`.
 
 ---
 
@@ -144,7 +144,19 @@ To prevent process race conditions, credential theft, and corruption of the deve
   "muse_approval_prefer_allow_once": true,
   "muse_approval_allow_always": false,
   "muse_approval_max_decisions": 5,
-  "muse_approval_timeout_secs": 45
+  "muse_approval_timeout_secs": 45,
+  "module_positions": {
+    "jev": {
+      "menu_position": "sidebar",
+      "menu_order": 5
+    }
+  },
+  "module_configs": {
+    "tiktok-studio": {
+      "base_url": "https://www.tiktok.com",
+      "enabled": true
+    }
+  }
 }
 ```
 
@@ -178,5 +190,6 @@ http://127.0.0.1:20130/dashboard
 ```
 
 - **Gateway Configuration**: Adjust upstream OmniRoute host, port, default model, I/O timeout, and fallback model chains.
-- **Muse AI Subsystem**: Configure REST and WebSocket endpoints, VM ID, bearer tokens, session cookies, default video prompt, and Sentinel auto-approval rules. Leaving credential fields blank preserves currently active tokens.
+- **Muse AI Subsystem**: Configure REST and WebSocket endpoints, VM ID, bearer tokens, session cookies, default video prompt, and Sentinel auto-approval rules (or import a DevTools HAR at `/muse-config`). Leaving credential fields blank preserves currently active tokens.
+- **Automatic Module UI Configuration & Menu Placement**: Configure any installed or catalog module via `/modules/<id>/config` or from its dynamically generated tab in `/dashboard#provider-settings`, and control its Dashboard menu placement (`providers`, `sidebar`, `studios`, `hidden`) and order (`↑` / `↓`).
 - **Provider Account Pool**: View active Jev AI accounts with descriptive labels and masked keys. Paste new keys (comma- or newline-separated) with optional labels (using the dedicated Label input or inline `label:key` / `label=key` syntax) to dynamically expand the round-robin rotation pool without restarting the server. Custom labels persist to standalone JSON configuration.
