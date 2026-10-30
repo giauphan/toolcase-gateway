@@ -302,6 +302,8 @@ impl ModuleRegistry {
                 &["/jev", "/jev-ai"]
             } else if desc.id == "muse" {
                 &["/muse-ai", "/v1/images/generations", "/video/v1/providers"]
+            } else if desc.id == "tiktok-studio" || desc.id == "TikTok-Creator-Studio-Adapter" {
+                &["/custom/tiktok", "/tiktok"]
             } else {
                 std::slice::from_ref(&ns_str)
             };
