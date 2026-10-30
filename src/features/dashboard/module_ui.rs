@@ -206,6 +206,53 @@ pub fn handle_get_module_config(
     write_json_ok(client, &resp)
 }
 
+fn get_trimmed_config_str<'a>(
+    config: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<&'a str> {
+    config
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn apply_omniroute_builtin_config(
+    conf: &mut crate::config::Config,
+    config: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(m) = get_trimmed_config_str(config, "default_model") {
+        conf.default_model = m.to_string();
+    }
+}
+
+fn apply_jev_builtin_config(
+    conf: &mut crate::config::Config,
+    config: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(base) = get_trimmed_config_str(config, "base_url") {
+        conf.jev_base_url = base.to_string();
+    }
+    if let Some(m) = get_trimmed_config_str(config, "default_model") {
+        conf.jev_openrouter_model = m.to_string();
+    }
+}
+
+fn apply_muse_builtin_config(
+    conf: &mut crate::config::Config,
+    config: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(base) = get_trimmed_config_str(config, "base_url") {
+        conf.museai_base_url = base.to_string();
+    }
+    if let Some(k) = get_trimmed_config_str(config, "api_key") {
+        conf.museai_access_token = k.to_string();
+    }
+    if let Some(c) = get_trimmed_config_str(config, "cookie") {
+        conf.museai_cookie = c.to_string();
+    }
+}
+
 fn apply_builtin_module_config_updates(
     store: &ConfigStore,
     resolved_id: &str,
@@ -214,42 +261,15 @@ fn apply_builtin_module_config_updates(
     match resolved_id {
         "omniroute" => {
             let mut conf = store.write_guard();
-            if let Some(m) = config.get("default_model").and_then(|v| v.as_str()) {
-                if !m.trim().is_empty() {
-                    conf.default_model = m.trim().to_string();
-                }
-            }
+            apply_omniroute_builtin_config(&mut conf, config);
         }
         "jev" => {
             let mut conf = store.write_guard();
-            if let Some(base) = config.get("base_url").and_then(|v| v.as_str()) {
-                if !base.trim().is_empty() {
-                    conf.jev_base_url = base.trim().to_string();
-                }
-            }
-            if let Some(m) = config.get("default_model").and_then(|v| v.as_str()) {
-                if !m.trim().is_empty() {
-                    conf.jev_openrouter_model = m.trim().to_string();
-                }
-            }
+            apply_jev_builtin_config(&mut conf, config);
         }
         "muse" => {
             let mut conf = store.write_guard();
-            if let Some(base) = config.get("base_url").and_then(|v| v.as_str()) {
-                if !base.trim().is_empty() {
-                    conf.museai_base_url = base.trim().to_string();
-                }
-            }
-            if let Some(k) = config.get("api_key").and_then(|v| v.as_str()) {
-                if !k.trim().is_empty() {
-                    conf.museai_access_token = k.trim().to_string();
-                }
-            }
-            if let Some(c) = config.get("cookie").and_then(|v| v.as_str()) {
-                if !c.trim().is_empty() {
-                    conf.museai_cookie = c.trim().to_string();
-                }
-            }
+            apply_muse_builtin_config(&mut conf, config);
         }
         _ => {}
     }

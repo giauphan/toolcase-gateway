@@ -35,8 +35,8 @@
   .badge {
     padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
   }
-  .badge-ok { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); }
-  .badge-idle { background: rgba(148, 163, 184, 0.2); color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.4); }
+  .badge-ok { background: #064e3b; color: #a7f3d0; border: 1px solid #059669; }
+  .badge-idle { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
   .field-group { margin-bottom: 16px; }
@@ -58,8 +58,8 @@
   .btn-secondary { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; }
   .btn-secondary:hover { background: #334155; }
   .msg { margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: 0.86rem; display: none; }
-  .msg-ok { display: block; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #a7f3d0; }
-  .msg-err { display: block; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #fecaca; }
+  .msg-ok { display: block; background: #064e3b; border: 1px solid #059669; color: #ecfdf5; }
+  .msg-err { display: block; background: #7f1d1d; border: 1px solid #dc2626; color: #fef2f2; }
   code { background: #0d1017; padding: 2px 6px; border-radius: 4px; color: #38bdf8; font-size: 0.84rem; }
 </style>
 </head>
@@ -178,53 +178,51 @@
     formMsg.className = "msg " + (isErr ? "msg-err" : "msg-ok");
   }
 
-  function renderFieldGroup(field, configValues, stateRef) {
+  function renderSecretField(field, inputId, label, desc, configValues, stateRef) {
     const key = field.key;
-    const label = field.label || key;
-    const type = field.type || "text";
-    const isSecret = Boolean(field.secret || type === "password");
+    const placeholder = field.placeholder || "Leave empty to retain existing";
+    const maskedVal = configValues["masked_" + key] || "";
+    if (maskedVal) stateRef.hasConfigured = true;
+    const secretHint = maskedVal ? ("Current: " + maskedVal) : "Current: not set";
+    return "<div class=\"field-group\">" +
+      "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+      "<input type=\"password\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"password\" autocomplete=\"off\" placeholder=\"" + escapeHtml(placeholder) + "\">" +
+      "<div class=\"hint\">" + escapeHtml(secretHint) + (desc ? (" · " + escapeHtml(desc)) : "") + "</div>" +
+    "</div>";
+  }
+
+  function renderBooleanField(field, inputId, label, desc, configValues) {
+    const key = field.key;
+    const cur = configValues[key] !== undefined ? Boolean(configValues[key]) : (field.default !== false);
+    return "<div class=\"field-group\">" +
+      "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+      "<select id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"boolean\">" +
+        "<option value=\"true\"" + (cur ? " selected" : "") + ">Enabled (true)</option>" +
+        "<option value=\"false\"" + (!cur ? " selected" : "") + ">Disabled (false)</option>" +
+      "</select>" +
+      (desc ? ("<div class=\"hint\">" + escapeHtml(desc) + "</div>") : "") +
+    "</div>";
+  }
+
+  function renderNumberField(field, inputId, label, desc, configValues, stateRef) {
+    const key = field.key;
+    let cur = 30;
+    if (configValues[key] !== undefined) {
+      cur = configValues[key];
+      stateRef.hasConfigured = true;
+    } else if (field.default !== undefined) {
+      cur = field.default;
+    }
+    return "<div class=\"field-group\">" +
+      "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+      "<input type=\"number\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"number\" value=\"" + escapeHtml(cur) + "\">" +
+      (desc ? ("<div class=\"hint\">" + escapeHtml(desc) + "</div>") : "") +
+    "</div>";
+  }
+
+  function renderTextField(field, inputId, label, desc, configValues, stateRef) {
+    const key = field.key;
     const placeholder = field.placeholder || "";
-    const desc = field.description || "";
-    const inputId = "field-" + key;
-
-    if (isSecret) {
-      const maskedVal = configValues["masked_" + key] || "";
-      if (maskedVal) stateRef.hasConfigured = true;
-      const secretHint = maskedVal ? ("Current: " + maskedVal) : "Current: not set";
-      return "<div class=\"field-group\">" +
-        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
-        "<input type=\"password\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"password\" autocomplete=\"off\" placeholder=\"" + escapeHtml(placeholder || "Leave empty to retain existing") + "\">" +
-        "<div class=\"hint\">" + escapeHtml(secretHint) + (desc ? (" · " + escapeHtml(desc)) : "") + "</div>" +
-      "</div>";
-    }
-
-    if (type === "boolean") {
-      const cur = configValues[key] !== undefined ? Boolean(configValues[key]) : (field.default !== false);
-      return "<div class=\"field-group\">" +
-        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
-        "<select id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"boolean\">" +
-          "<option value=\"true\"" + (cur ? " selected" : "") + ">Enabled (true)</option>" +
-          "<option value=\"false\"" + (!cur ? " selected" : "") + ">Disabled (false)</option>" +
-        "</select>" +
-        (desc ? ("<div class=\"hint\">" + escapeHtml(desc) + "</div>") : "") +
-      "</div>";
-    }
-
-    if (type === "number") {
-      let cur = 30;
-      if (configValues[key] !== undefined) {
-        cur = configValues[key];
-        stateRef.hasConfigured = true;
-      } else if (field.default !== undefined) {
-        cur = field.default;
-      }
-      return "<div class=\"field-group\">" +
-        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
-        "<input type=\"number\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"number\" value=\"" + escapeHtml(cur) + "\">" +
-        (desc ? ("<div class=\"hint\">" + escapeHtml(desc) + "</div>") : "") +
-      "</div>";
-    }
-
     const curVal = configValues[key] !== undefined ? String(configValues[key]) : "";
     if (curVal) stateRef.hasConfigured = true;
     return "<div class=\"field-group\">" +
@@ -232,6 +230,25 @@
       "<input type=\"text\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"text\" value=\"" + escapeHtml(curVal) + "\" placeholder=\"" + escapeHtml(placeholder) + "\">" +
       (desc ? ("<div class=\"hint\">" + escapeHtml(desc) + "</div>") : "") +
     "</div>";
+  }
+
+  function renderFieldGroup(field, configValues, stateRef) {
+    const key = field.key;
+    const label = field.label || key;
+    const type = field.type || "text";
+    const desc = field.description || "";
+    const inputId = "field-" + key;
+
+    if (field.secret || type === "password") {
+      return renderSecretField(field, inputId, label, desc, configValues, stateRef);
+    }
+    if (type === "boolean") {
+      return renderBooleanField(field, inputId, label, desc, configValues);
+    }
+    if (type === "number") {
+      return renderNumberField(field, inputId, label, desc, configValues, stateRef);
+    }
+    return renderTextField(field, inputId, label, desc, configValues, stateRef);
   }
 
   function renderFields(fields, configValues) {

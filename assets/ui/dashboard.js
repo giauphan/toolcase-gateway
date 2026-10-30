@@ -726,7 +726,7 @@
   window.updateModulePosition = function(id, opts) {
     moduleRequestsInFlight.add(id);
     renderModules(renderedModules, true);
-    const payload = { id: id, ...(opts || {}) };
+    const payload = { id: id, ...opts };
 
     fetch("/api/v1/dashboard/modules/position", {
       method: "POST",
@@ -1053,6 +1053,66 @@
     setMessageVisible(modErrMsg, true);
   }
 
+  function submitCustomModuleInstall(payload) {
+    installBtn.disabled = true;
+    installBtn.textContent = "Installing...";
+
+    fetch("/api/v1/dashboard/modules/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    .then(function(res) {
+      return res.text().then(function(text) {
+        return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
+      });
+    })
+    .then(function(result) {
+      installBtn.disabled = false;
+      installBtn.textContent = "Install Module";
+      if (!result.ok) {
+        handleInstallModuleFailure(result);
+      } else {
+        handleInstallModuleSuccess(result.json?.module);
+      }
+    })
+    .catch(function(err) {
+      installBtn.disabled = false;
+      installBtn.textContent = "Install Module";
+      modErrMsg.textContent = "Network error: " + err.message;
+      setMessageVisible(modErrMsg, true);
+    });
+  }
+
+  function buildModuleInstallPayload(sourceVal, zipBase64) {
+    return {
+      source: sourceVal || undefined,
+      zip_base64: zipBase64 || undefined,
+      id: modId?.value.trim() || undefined,
+      name: modName?.value.trim() || undefined,
+      namespace: modNamespace?.value.trim() || undefined,
+      entrypoint: modEntrypoint?.value.trim() || undefined,
+      capabilities: modCaps?.value.trim()
+        ? modCaps.value.split(",").map(function(c) { return c.trim(); }).filter(Boolean)
+        : undefined
+    };
+  }
+
+  function handleZipFileAndInstall(zipFileInput, sourceVal) {
+    const reader = new FileReader();
+    reader.onload = function() {
+      const base64 = reader.result.split(",")[1];
+      submitCustomModuleInstall(buildModuleInstallPayload(sourceVal, base64));
+    };
+    reader.onerror = function() {
+      installBtn.disabled = false;
+      installBtn.textContent = "Install Module";
+      modErrMsg.textContent = "Error reading selected file.";
+      setMessageVisible(modErrMsg, true);
+    };
+    reader.readAsDataURL(zipFileInput);
+  }
+
   // Custom module install form
   function initCustomInstallForm() {
     if (!installForm) return;
@@ -1070,66 +1130,41 @@
         return;
       }
 
-      installBtn.disabled = true;
-      installBtn.textContent = "Installing...";
-
-      const proceedWithPayload = function(zipBase64) {
-        const payload = {
-          source: sourceVal || undefined,
-          zip_base64: zipBase64 || undefined,
-          id: modId?.value.trim() || undefined,
-          name: modName?.value.trim() || undefined,
-          namespace: modNamespace?.value.trim() || undefined,
-          entrypoint: modEntrypoint?.value.trim() || undefined,
-          capabilities: modCaps?.value.trim()
-            ? modCaps.value.split(",").map(function(c) { return c.trim(); }).filter(Boolean)
-            : undefined
-        };
-
-        fetch("/api/v1/dashboard/modules/install", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        })
-        .then(function(res) {
-          return res.text().then(function(text) {
-            return { ok: res.ok, status: res.status, json: parseJsonSafely(text) };
-          });
-        })
-        .then(function(result) {
-          installBtn.disabled = false;
-          installBtn.textContent = "Install Module";
-          if (!result.ok) {
-            handleInstallModuleFailure(result);
-          } else {
-            handleInstallModuleSuccess(result.json?.module);
-          }
-        })
-        .catch(function(err) {
-          installBtn.disabled = false;
-          installBtn.textContent = "Install Module";
-          modErrMsg.textContent = "Network error: " + err.message;
-          setMessageVisible(modErrMsg, true);
-        });
-      };
-
       if (zipFileInput) {
-        const reader = new FileReader();
-        reader.onload = function() {
-          const base64 = reader.result.split(",")[1];
-          proceedWithPayload(base64);
-        };
-        reader.onerror = function() {
-          installBtn.disabled = false;
-          installBtn.textContent = "Install Module";
-          modErrMsg.textContent = "Error reading selected file.";
-          setMessageVisible(modErrMsg, true);
-        };
-        reader.readAsDataURL(zipFileInput);
+        handleZipFileAndInstall(zipFileInput, sourceVal);
       } else {
-        proceedWithPayload(null);
+        submitCustomModuleInstall(buildModuleInstallPayload(sourceVal, null));
       }
     });
+  }
+
+  function updateOmniOverviewCard(config, omni) {
+    if (omniTarget) omniTarget.textContent = (omni.target_host || config.target_host || "127.0.0.1") + ":" + (omni.target_port || config.target_port || "20128");
+    if (omniDesc) omniDesc.textContent = "Model: " + (omni.default_model || config.default_model || "gpt-5.6-sol");
+  }
+
+  function updateJevOverviewCard(config, jev) {
+    const jevAccountsCount = (jev.accounts || []).length;
+    if (jevStatus) {
+      const suffix = jevAccountsCount === 1 ? "" : "s";
+      jevStatus.textContent = jevAccountsCount > 0 ? `${jevAccountsCount} account${suffix}` : "Configured";
+    }
+    if (jevDesc) jevDesc.textContent = "Base URL: " + (config.jev_base_url || "https://api.jev.ai");
+  }
+
+  function updateOpenRouterOverviewCard(config, orJev) {
+    const orAccountsCount = (orJev.accounts || []).length;
+    if (openrouterStatus) {
+      const suffix = orAccountsCount === 1 ? "" : "s";
+      const fallback = orJev.enabled ? "Enabled" : "Disabled";
+      openrouterStatus.textContent = orAccountsCount > 0 ? `${orAccountsCount} browser/key account${suffix}` : fallback;
+    }
+    if (openrouterDesc) openrouterDesc.textContent = "Model: " + (config.jev_openrouter_model || "anthropic/claude-3.5-sonnet");
+  }
+
+  function updateMuseOverviewCard(muse, approval) {
+    if (museStatus) museStatus.textContent = muse.configured ? "Configured" : "Default Config";
+    if (museDesc) museDesc.textContent = "Approval Mode: " + (approval.mode || "off");
   }
 
   function updateOverviewCards(config, providers) {
@@ -1139,42 +1174,21 @@
     const muse = providers.museai || {};
     const approval = muse.approval || {};
 
-    // Update Overview Cards
-    if (omniTarget) omniTarget.textContent = (omni.target_host || config.target_host || "127.0.0.1") + ":" + (omni.target_port || config.target_port || "20128");
-    if (omniDesc) omniDesc.textContent = "Model: " + (omni.default_model || config.default_model || "gpt-5.6-sol");
-
-    const jevAccountsCount = (jev.accounts || []).length;
-    if (jevStatus) {
-      const suffix = jevAccountsCount === 1 ? "" : "s";
-      jevStatus.textContent = jevAccountsCount > 0 ? `${jevAccountsCount} account${suffix}` : "Configured";
-    }
-    if (jevDesc) jevDesc.textContent = "Base URL: " + (config.jev_base_url || "https://api.jev.ai");
-
-    const orAccountsCount = (orJev.accounts || []).length;
-    if (openrouterStatus) {
-      const suffix = orAccountsCount === 1 ? "" : "s";
-      const fallback = orJev.enabled ? "Enabled" : "Disabled";
-      openrouterStatus.textContent = orAccountsCount > 0 ? `${orAccountsCount} browser/key account${suffix}` : fallback;
-    }
-    if (openrouterDesc) openrouterDesc.textContent = "Model: " + (config.jev_openrouter_model || "anthropic/claude-3.5-sonnet");
-
-    if (museStatus) museStatus.textContent = muse.configured ? "Configured" : "Default Config";
-    if (museDesc) museDesc.textContent = "Approval Mode: " + (approval.mode || "off");
+    updateOmniOverviewCard(config, omni);
+    updateJevOverviewCard(config, jev);
+    updateOpenRouterOverviewCard(config, orJev);
+    updateMuseOverviewCard(muse, approval);
   }
 
-  function populateProviderConfigForms(config, providers) {
-    const orJev = providers.openrouter_jev || {};
-    const muse = providers.museai || {};
-    const approval = muse.approval || {};
-
-    // OmniRoute Form
+  function populateOmniConfigForm(config) {
     if (cfgHost) cfgHost.value = config.target_host || "127.0.0.1";
     if (cfgPort) cfgPort.value = config.target_port || 20128;
     if (cfgDefaultModel) cfgDefaultModel.value = config.default_model || "gpt-5.6-sol";
     if (cfgTimeout) cfgTimeout.value = config.io_timeout_secs || 120;
     if (cfgFallbacks) cfgFallbacks.value = (config.fallbacks || []).join(", ");
+  }
 
-    // Jev Form
+  function populateJevConfigForm(config, orJev) {
     if (cfgJevBase) cfgJevBase.value = config.jev_base_url || "https://api.jev.ai";
     if (cfgJevOrBase) cfgJevOrBase.value = config.jev_openrouter_base_url || "https://openrouter.ai/api/v1";
     if (cfgJevOrModel) cfgJevOrModel.value = config.jev_openrouter_model || "anthropic/claude-3.5-sonnet";
@@ -1184,8 +1198,9 @@
       const cooldown = orJev.credit_cooldown_secs != null ? orJev.credit_cooldown_secs : config.jev_credit_cooldown_secs;
       cfgJevCooldown.value = cooldown != null ? cooldown : 300;
     }
+  }
 
-    // Muse Form
+  function populateMuseConfigForm(config, muse, approval) {
     if (cfgMuseBase) cfgMuseBase.value = config.museai_base_url || "https://muse.ai";
     if (cfgMuseWs) cfgMuseWs.value = config.museai_ws_url || "wss://vm-438.metaaivm.com/";
     if (cfgMuseVmid) cfgMuseVmid.value = config.museai_vm_id || "vm-438";
@@ -1197,6 +1212,16 @@
     if (cfgMuseApprovalTimeout) cfgMuseApprovalTimeout.value = approval.timeout_secs || 30;
     if (cfgMuseApprovalDestinations) cfgMuseApprovalDestinations.value = (approval.allowed_destinations || []).join(", ");
     if (cfgMuseApprovalTypes) cfgMuseApprovalTypes.value = (approval.allowed_types || []).join(", ");
+  }
+
+  function populateProviderConfigForms(config, providers) {
+    const orJev = providers.openrouter_jev || {};
+    const muse = providers.museai || {};
+    const approval = muse.approval || {};
+
+    populateOmniConfigForm(config);
+    populateJevConfigForm(config, orJev);
+    populateMuseConfigForm(config, muse, approval);
   }
 
   function renderOverviewAccountsTable(providers) {

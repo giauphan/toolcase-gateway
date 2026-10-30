@@ -166,7 +166,7 @@ async function dashboardOverviewAndNavigation(browser) {
   assert.match(await page.locator("#dashboard-breadcrumb").textContent(), /Catalog/);
 
   // 7. Test Navigation to Provider Settings
-  await page.locator('.side-nav [data-go="providers"]').click();
+  await page.locator('.side-nav [data-go="providers"]:not([data-tab])').click();
   assert.equal(await page.locator("#view-providers").isVisible(), true);
   assert.equal(await page.locator("#panel-omni").isVisible(), true);
 
