@@ -92,7 +92,7 @@ def benchmark_endpoint(name: str, base_url: str, tasks: List[Dict[str, Any]]) ->
 
 def main():
     parser = argparse.ArgumentParser(description="Toolcase Gateway Routing Benchmark")
-    parser.add_argument("--endpoint", default="http://127.0.0.1:20130", type=_validate_endpoint, help="Gateway URL")
+    parser.add_argument("--endpoint", default="http://127.0.0.1:28130", type=_validate_endpoint, help="Gateway URL")
     parser.add_argument("--mode", default="A", choices=["A", "B", "C"], help="Mode identifier")
     args = parser.parse_args()
 

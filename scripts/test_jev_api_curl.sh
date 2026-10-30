@@ -10,7 +10,7 @@ fi
 
 : "${GW_JEV_API_KEYS:?GW_JEV_API_KEYS must be set in environment or .env}"
 GW_LISTEN_HOST="${GW_LISTEN_HOST:-127.0.0.1}"
-GW_LISTEN_PORT="${GW_LISTEN_PORT:-20130}"
+GW_LISTEN_PORT="${GW_LISTEN_PORT:-28130}"
 GW_SCHEME="${GW_SCHEME:-http}"
 GATEWAY_URL="${GW_SCHEME}://${GW_LISTEN_HOST}:${GW_LISTEN_PORT}/jev/v1/systemone"
 IDEMPOTENCY_KEY="live-jev-gateway-curl-smoke-$(date +%s%N)"

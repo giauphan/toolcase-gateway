@@ -7,7 +7,7 @@
 
 **A high-performance, zero-async Rust AI and tool gateway running as a local sidecar between agent runners, developer IDEs, SDKs, and upstream AI engines.**
 
-Toolcase Gateway sits transparently on loopback (`127.0.0.1:20130`), unifying multi-provider AI routing, automatic tool normalization, model failover cascades, decision evaluation, and native Model Context Protocol (MCP) coordination into a single lightweight binary with no heavy async runtime.
+Toolcase Gateway sits transparently on loopback (`127.0.0.1:28130`), unifying multi-provider AI routing, automatic tool normalization, model failover cascades, decision evaluation, and native Model Context Protocol (MCP) coordination into a single lightweight binary with no heavy async runtime.
 
 ---
 
@@ -49,7 +49,7 @@ Built on standard-library blocking networking (`std::net`, `std::thread`) with n
 - **Muse AI Confidential VM Subsystem** (`/muse-ai/v1/*`): Encrypted Noise XX WebSocket sessions to confidential VMs, conversational multi-turn chat continuity, image synthesis, and text-to-video pipelines with Sentinel auto-approvals.
 
 ### 6. Interactive Web Dashboard & Hot Reconfiguration
-Embedded web control center at `http://127.0.0.1:20130/dashboard`:
+Embedded web control center at `http://127.0.0.1:28130/dashboard`:
 - Live routing inspector, fallback configuration, and latency/uptime metrics.
 - Hot credential and pool updates without restarting the gateway process.
 - Atomic POSIX `0600` standalone persistence to `gateway_config.json`, keeping repository `.env` untouched.
@@ -72,7 +72,7 @@ Modules are an optional extra, not required to use the gateway. If you need a cu
 
 ```mermaid
 flowchart TD
-    Client["Client / IDE / AI Agent"] --> Gateway["toolcase-gateway (127.0.0.1:20130)"]
+    Client["Client / IDE / AI Agent"] --> Gateway["toolcase-gateway (127.0.0.1:28130)"]
     Gateway --> Dispatcher{"Core Dispatcher (src/routes/)"}
 
     Dispatcher -->|"/omniroute, /v1/chat/completions"| OmniRoute["OmniRoute: Failover & Tool Casing Repair"]
@@ -112,7 +112,7 @@ The compiled binary will be placed at `target/release/toolcase-gateway` (~350 KB
 
 ### 1. Launch the Gateway
 ```bash
-# Run with default settings (listens on 127.0.0.1:20130, proxies to 127.0.0.1:20128)
+# Run with default settings (listens on 127.0.0.1:28130, proxies to 127.0.0.1:20128)
 ./target/release/toolcase-gateway
 ```
 
@@ -125,7 +125,7 @@ GW_FALLBACK_MODELS="gpt-4o-mini,claude-3-5-sonnet" \
 ```
 
 ### 3. Open the Web Dashboard
-Navigate to `http://127.0.0.1:20130/dashboard` in any browser to inspect active routes, manage credentials, or view live traffic metrics.
+Navigate to `http://127.0.0.1:28130/dashboard` in any browser to inspect active routes, manage credentials, or view live traffic metrics.
 
 ---
 
@@ -148,8 +148,8 @@ Add the following to your MCP client configuration file:
 
 ### SSE / Remote HTTP Mode
 Point your agent runner to:
-- SSE Endpoint: `http://127.0.0.1:20130/mcp/sse`
-- HTTP JSON-RPC Endpoint: `http://127.0.0.1:20130/mcp`
+- SSE Endpoint: `http://127.0.0.1:28130/mcp/sse`
+- HTTP JSON-RPC Endpoint: `http://127.0.0.1:28130/mcp`
 
 ---
 
@@ -160,7 +160,7 @@ The gateway supports dual-layer configuration: initial startup via environment v
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `GW_LISTEN_HOST` | `127.0.0.1` | Loopback bind address. Non-loopback IPs trigger security warnings. |
-| `GW_LISTEN_PORT` | `20130` | Gateway HTTP listen port. |
+| `GW_LISTEN_PORT` | `28130` | Gateway HTTP listen port. |
 | `GW_TARGET_HOST` | `127.0.0.1` | Default upstream LLM host. |
 | `GW_TARGET_PORT` | `20128` | Default upstream LLM port. |
 | `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated list of fallback models for automatic failover. |

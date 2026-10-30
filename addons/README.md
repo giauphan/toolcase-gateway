@@ -20,7 +20,7 @@ The gateway includes pre-configured, production-ready provider adapters in its S
 | `mistral-ai` | **Mistral AI Provider** | Catalog Template | `chat_completions`, `models` | `/custom/mistral` |
 | `local-echo` | **Local Echo Test Module** | In-Tree Reference | `chat_completions` | `/custom/echo` |
 
-To install any of these, use the web dashboard at `http://127.0.0.1:20130/dashboard` or submit a `POST /api/v1/dashboard/modules/install` request with the GitHub repository URL.
+To install any of these, use the web dashboard at `http://127.0.0.1:28130/dashboard` or submit a `POST /api/v1/dashboard/modules/install` request with the GitHub repository URL.
 
 ---
 

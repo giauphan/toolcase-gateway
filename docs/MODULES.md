@@ -155,7 +155,7 @@ Instead of authoring, installing, and maintaining dozens of distinct single-purp
 Provide the GitHub URL. The installer downloads the branch archive, verifies or generates the manifest, and extracts it:
 
 ```sh
-curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
+curl -X POST http://127.0.0.1:28130/api/v1/dashboard/modules/install \
   -H "Content-Type: application/json" \
   -d '{
     "source": "https://github.com/my-org/my-gateway-module",
@@ -167,7 +167,7 @@ curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
 
 1. **Via URL**:
    ```sh
-   curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
+   curl -X POST http://127.0.0.1:28130/api/v1/dashboard/modules/install \
      -H "Content-Type: application/json" \
      -d '{
        "source": "https://example.com/downloads/my-module.zip"
@@ -175,14 +175,14 @@ curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
    ```
 
 2. **Via Web Dashboard Upload**:
-   - Navigate to `http://127.0.0.1:20130/dashboard#module-catalog`.
+   - Navigate to `http://127.0.0.1:28130/dashboard#module-catalog`.
    - Open **Install Custom Module (GitHub Repo, ZIP Archive, or Upload)**.
    - Select your `.zip` archive or paste a GitHub link.
    - Click **Install Module**.
 
 3. **Via Base64 Payload**:
    ```sh
-   curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
+   curl -X POST http://127.0.0.1:28130/api/v1/dashboard/modules/install \
      -H "Content-Type: application/json" \
      -d '{
        "zip_base64": "<base64-encoded-zip-data>",

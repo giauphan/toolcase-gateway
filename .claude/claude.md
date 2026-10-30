@@ -20,7 +20,7 @@ This document defines the system design, core pipelines, and architecture standa
 The gateway routes inbound HTTP requests through distinct subsystem pipelines via fail-closed matching in `src/routes/`:
 
 ```
-                           Inbound TCP (Port 20130)
+                           Inbound TCP (Port 28130)
                                       │
                                       ▼
                        Request Framing & Parsing (src/http.rs)

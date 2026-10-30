@@ -37,7 +37,7 @@ Key capabilities:
 ### 3.1 Basic Chat Request (Dedicated Route)
 
 ```bash
-curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+curl -X POST http://127.0.0.1:28130/muse-ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "muse",
@@ -55,7 +55,7 @@ curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
 The Muse CVM can look up live web sources and technical indicators to answer real-time questions:
 
 ```bash
-curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+curl -X POST http://127.0.0.1:28130/muse-ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "muse",
@@ -73,7 +73,7 @@ curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
 When fetching updated data, checking current prices, or querying fresh macro developments for a previously analyzed asset, the request **MUST** follow the previous thread by passing `reply_thread_id`:
 
 ```bash
-curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+curl -X POST http://127.0.0.1:28130/muse-ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "muse",
@@ -91,10 +91,10 @@ Following the reply thread ensures the CVM performs an incremental update rather
 
 ### 3.3 Global OpenAI Proxy Route
 
-If your client or SDK points to a generic OpenAI base URL (e.g. `http://127.0.0.1:20130/v1`):
+If your client or SDK points to a generic OpenAI base URL (e.g. `http://127.0.0.1:28130/v1`):
 
 ```bash
-curl -X POST http://127.0.0.1:20130/v1/chat/completions \
+curl -X POST http://127.0.0.1:28130/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "muse",
@@ -113,7 +113,7 @@ When you receive a response from Muse AI, take the `reply_thread_id` (or `thread
 
 **Turn 1: Start Conversation**
 ```bash
-curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+curl -X POST http://127.0.0.1:28130/muse-ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "muse",
@@ -129,7 +129,7 @@ curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
 
 **Turn 2: Follow-Up in the Same Thread**
 ```bash
-curl -X POST http://127.0.0.1:20130/muse-ai/v1/chat/completions \
+curl -X POST http://127.0.0.1:28130/muse-ai/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "muse",

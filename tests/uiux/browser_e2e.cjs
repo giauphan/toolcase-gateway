@@ -4,7 +4,7 @@
  * Run against a local gateway:
  * NODE_PATH=/home/ubuntu/codeatlas-platform/node_modules \
  * PLAYWRIGHT_EXECUTABLE_PATH=/home/ubuntu/.cache/ms-playwright/chromium-1228/chrome-linux/chrome \
- * GATEWAY_BASE_URL=http://127.0.0.1:20130 \
+ * GATEWAY_BASE_URL=http://127.0.0.1:28130 \
  *   node tests/uiux/browser_e2e.cjs
  */
 "use strict";
@@ -13,7 +13,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
-const baseUrl = process.env.GATEWAY_BASE_URL || "http://127.0.0.1:20130";
+const baseUrl = process.env.GATEWAY_BASE_URL || "http://127.0.0.1:28130";
 const DEFAULT_VIEWPORT = Object.freeze({ width: 1440, height: 900 });
 const SCREENSHOT_DIR = path.resolve(__dirname, "../../target/screenshots");
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });

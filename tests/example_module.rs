@@ -267,8 +267,8 @@ fn test_crashing_module_captures_stderr_message() {
 #[test]
 fn test_default_listen_port_separation() {
     use toolcase_gateway::config::env_or;
-    let fallback = env_or("GW_LISTEN_PORT_UNSET_TEST_VAR", "20130");
-    assert_eq!(fallback, "20130");
+    let fallback = env_or("GW_LISTEN_PORT_UNSET_TEST_VAR", "28130");
+    assert_eq!(fallback, "28130");
 }
 
 #[test]

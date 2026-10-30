@@ -187,7 +187,7 @@ fn test_sync_video_creation_and_status_includes_full_video_url() {
     let (get_status, _, get_body) = request_route_raw(
         "GET",
         &format!("/muse-ai/v1/videos/{test_job_id}"),
-        &[("Host", "localhost:20130")],
+        &[("Host", "localhost:28130")],
         &[],
         test_config(),
     );

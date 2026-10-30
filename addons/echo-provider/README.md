@@ -108,7 +108,7 @@ zip -r echo-provider.zip module.json run.sh adapter.py
 
 ### Option A: Via Web Dashboard (1-Click or Upload)
 
-1. Open the dashboard at `http://localhost:20130/dashboard#modules-section`.
+1. Open the dashboard at `http://localhost:28130/dashboard#modules-section`.
 2. Scroll to the **Platform Gateway Modules** section.
 3. Choose one of the following:
    - **System Catalog**: Click **Install** on any catalog item.
@@ -121,7 +121,7 @@ zip -r echo-provider.zip module.json run.sh adapter.py
 ```sh
 ZIP_B64=$(base64 -w 0 echo-provider.zip)
 
-curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
+curl -X POST http://127.0.0.1:28130/api/v1/dashboard/modules/install \
   -H "Content-Type: application/json" \
   -d '{
     "id": "echo-provider",
@@ -131,7 +131,7 @@ curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
 
 #### From GitHub Repository:
 ```sh
-curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
+curl -X POST http://127.0.0.1:28130/api/v1/dashboard/modules/install \
   -H "Content-Type: application/json" \
   -d '{
     "source": "https://github.com/my-org/echo-provider",
@@ -170,7 +170,7 @@ AI coding agents can install the module using the `gateway_install_personal_modu
 Once installed and active, send OpenAI-compatible requests directly to the module's mounted namespace:
 
 ```sh
-curl -X POST http://127.0.0.1:20130/custom/echo/v1/chat/completions \
+curl -X POST http://127.0.0.1:28130/custom/echo/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "echo-model",

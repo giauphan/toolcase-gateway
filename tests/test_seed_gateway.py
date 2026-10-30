@@ -125,7 +125,7 @@ def test_show_current_settings_runs_without_error(tmp_path: Path, capsys):
     db_file = tmp_path / "test_show.db"
     conn = sqlite3.connect(str(db_file))
     init_schema(conn)
-    apply_settings(conn, {"target_port": 20130})
+    apply_settings(conn, {"target_port": 28130})
     show_current_settings(conn)
     captured = capsys.readouterr()
     assert "[ACTIVE DATABASE SETTINGS]" in captured.out

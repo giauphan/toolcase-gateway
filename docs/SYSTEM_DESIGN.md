@@ -13,7 +13,7 @@ It orchestrates six primary subsystems:
 
 ```mermaid
 flowchart TD
-    Client["Client (Agent / IDE / curl)"] --> Listener["Gateway Listener (127.0.0.1:20130)"]
+    Client["Client (Agent / IDE / curl)"] --> Listener["Gateway Listener (127.0.0.1:28130)"]
     Listener --> Dispatcher["Canonical Dispatcher (src/routes/)"]
 
     Dispatcher -->|"/dashboard, /api/v1/dashboard/*"| Dashboard["Dashboard Subsystem (src/features/dashboard)"]

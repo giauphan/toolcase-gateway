@@ -31,7 +31,7 @@ Submits a new text-to-video generation task. Supports both **synchronous** (bloc
 
 #### Synchronous Request Example
 ```bash
-curl -X POST "http://127.0.0.1:20130/muse-ai/v1/create-video?wait=true" \
+curl -X POST "http://127.0.0.1:28130/muse-ai/v1/create-video?wait=true" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "A small orange fox wearing a blue scarf rides a skateboard through a colorful city park, bouncy animation, bright morning light.",
@@ -60,7 +60,7 @@ curl -X POST "http://127.0.0.1:20130/muse-ai/v1/create-video?wait=true" \
   "output_verified": true,
   "media_validated": true,
   "video_url": "/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content",
-  "full_video_url": "http://127.0.0.1:20130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content"
+  "full_video_url": "http://127.0.0.1:28130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content"
 }
 ```
 
@@ -86,7 +86,7 @@ Retrieves status, artifacts, and approval details for a specific video job.
 #### Request
 ```http
 GET /muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000
-Host: 127.0.0.1:20130
+Host: 127.0.0.1:28130
 ```
 
 #### Response (`200 OK`)
@@ -102,7 +102,7 @@ Host: 127.0.0.1:20130
   "output_verified": true,
   "media_validated": true,
   "video_url": "/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content",
-  "full_video_url": "http://127.0.0.1:20130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content",
+  "full_video_url": "http://127.0.0.1:28130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content",
   "prompt": "A small orange fox wearing a blue scarf rides a skateboard...",
   "model": "muse-video",
   "requested_model": "muse-video",
@@ -128,7 +128,7 @@ Streams genuine ISO MP4 bytes for verified and downloaded video artifacts direct
 
 #### Request Example
 ```bash
-curl -I http://127.0.0.1:20130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content
+curl -I http://127.0.0.1:28130/muse-ai/v1/videos/video-123e4567-e89b-12d3-a456-426614174000/content
 ```
 
 #### Response (`200 OK`)

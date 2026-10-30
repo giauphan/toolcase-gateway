@@ -153,7 +153,7 @@ curl -X GET "http://127.0.0.1:20129/muse-ai/v1/images/image-c63c6257-5803-4452-8
 | `4:5` | `1024x1280` | Social portrait |
 
 ```bash
-curl -O -J "http://127.0.0.1:20130/muse-ai/v1/images/image-9457fc85-5b87-43cf-be64-fbbef273eefb/download"
+curl -O -J "http://127.0.0.1:28130/muse-ai/v1/images/image-9457fc85-5b87-43cf-be64-fbbef273eefb/download"
 ```
 
 ---
@@ -163,7 +163,7 @@ curl -O -J "http://127.0.0.1:20130/muse-ai/v1/images/image-9457fc85-5b87-43cf-be
 Query the status of an ongoing or completed image generation task:
 
 ```bash
-curl -X GET "http://127.0.0.1:20130/muse-ai/v1/images/image-9457fc85-5b87-43cf-be64-fbbef273eefb"
+curl -X GET "http://127.0.0.1:28130/muse-ai/v1/images/image-9457fc85-5b87-43cf-be64-fbbef273eefb"
 ```
 
 ---
