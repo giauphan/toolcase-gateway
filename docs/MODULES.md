@@ -348,11 +348,13 @@ The TikTok Creator Studio Adapter lives in its own dedicated repository (`https:
 
 - **1-Click Install**: Install from `/dashboard#module-catalog` or `POST /api/v1/dashboard/modules/install` with `{"id": "tiktok-studio"}` (or `"source": "https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git"`).
 - **Automatic UI Config**: Accessible at `GET /modules/tiktok-studio/config` (or `/dashboard#provider-settings` → **TikTok Creator Studio Adapter** tab) and the module's own self-contained UI at `GET /custom/tiktok/ui`.
-- **Module Endpoints** (mounted under `/custom/tiktok`):
-  - `GET /custom/tiktok/v1/status` & `GET/POST /custom/tiktok/v1/config` — Module status and credential persistence (`module_config.json`, `0600`).
-  - `POST /custom/tiktok/v1/config/har` — Ingests `download-tiktok.har` to extract `base_url`, `cookie`, and `tt-csrf-token`.
-  - `GET /custom/tiktok/v1/items` — Paginated creator video listings and engagement counters.
-  - `GET /custom/tiktok/v1/download?item_id=<id>` — Direct watermark-free CDN video download URL resolution.
+- **Module Endpoints** (mounted under `/tiktok` and `/custom/tiktok`):
+  - `GET /tiktok/v1/status` & `GET/POST /tiktok/v1/config` — Module status and credential persistence (`config.json`, `0600`).
+  - `GET /tiktok/v1/user` — Authenticated creator profile identity check.
+  - `POST /tiktok/v1/config/har` — Ingests `download-tiktok.har` to extract `base_url`, `cookie`, and `tt-csrf-token`.
+  - `GET /tiktok/v1/items?cursor=0&count=10` — Paginated creator video listings and engagement counters.
+  - `GET /tiktok/v1/download?item_id=<id>` — Direct watermark-free CDN video download URL resolution.
+  - `GET /tiktok/v1/upload/auth` & `POST /tiktok/v1/publish` — Video upload authorization and Creator Studio post publishing (see [Publishing Guide](https://github.com/giauphan/TikTok-Creator-Studio-Adapter/blob/main/docs/PUBLISHING.md)).
 
 ### 9.2 Automatic Module UI Configuration & Dynamic Dashboard Menu Positioning
 
