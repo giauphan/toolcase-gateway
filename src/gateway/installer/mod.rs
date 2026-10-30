@@ -46,7 +46,7 @@ pub fn get_state_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(".gw_state"))
 }
 
-/// Auto-discovers self-contained modules from directories (Odoo / WordPress paradigm).
+/// Auto-discovers self-contained modules from directories (modular plugin paradigm).
 pub fn scan_and_register_modules(
     registry: &mut crate::gateway::modules::ModuleRegistry,
     state_dir: &Path,

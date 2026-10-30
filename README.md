@@ -12,7 +12,7 @@
 6. **TikTok Creator Studio Module (External Catalog Plugin)** — Installable from [`giauphan/TikTok-Creator-Studio-Adapter`](https://github.com/giauphan/TikTok-Creator-Studio-Adapter) via the System Module Catalog (`/custom/tiktok`) with automatic UI configuration (`/modules/tiktok-studio/config`) and drag-and-drop HAR credential import.
 7. **Interactive Dashboard & Standalone Persistent Storage** — Embedded web management UI at `/dashboard` (plus `/muse-config` and automatic `/modules/<id>/config`) that saves settings, module UI menu positions, and provider keys to `gateway_config.json` via atomic POSIX `0600` file replacement, leaving `.env` untouched.
 8. **Model Context Protocol (MCP) Control Plane** — Full native MCP implementation supporting 3 transports (`stdio`, `SSE`, and `Streamable HTTP`) enabling agentic tools to inspect modules, manage lifecycle, and query system health.
-9. **Extensible Modular Architecture** — WordPress/Odoo-style dynamic module plugins (`.gw_state/modules/<id>/`), declarative manifests, GitHub/ZIP remote installation, and prefix routing isolation.
+9. **Extensible Modular Architecture** — Extensible dynamic module plugins (`.gw_state/modules/<id>/`), declarative manifests, GitHub/ZIP remote installation, and prefix routing isolation.
 10. **Hardware-Safe Encrypted Storage** — AES-256-GCM envelope encryption and blind indexing powered by embedded SQLite alongside atomic POSIX `0600` files.
 11. **Automated Dependency Security** — Continuous Dependabot monitoring for both Cargo crates and GitHub Actions workflows.
 
@@ -333,7 +333,7 @@ See [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) for full threat modeling.
 
 ## Documentation
 
-- [`docs/MODULES.md`](docs/MODULES.md) — Platform modules and plugins (WordPress/Odoo paradigm), manifest schema, dynamic installation (GitHub/ZIP), and auto-discovery
+- [`docs/MODULES.md`](docs/MODULES.md) — Platform modules and plugins (modular plugin paradigm), manifest schema, dynamic installation (GitHub/ZIP), and auto-discovery
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Architectural overview, canonical route inventory, and lifecycle
 - [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) — Subsystem components, code ownership, concurrency, and data flow
 - [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) — Live source code organization, file responsibilities, and DDD rules

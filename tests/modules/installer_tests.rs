@@ -70,16 +70,16 @@ fn build_stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
 }
 
 #[test]
-fn test_scan_and_auto_discover_odoo_style_module() {
+fn test_scan_and_auto_discover_standalone_manifest_module() {
     let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
-    let module_dir = temp_state.join("modules").join("custom-odoo-addon");
+    let module_dir = temp_state.join("modules").join("custom-standalone-addon");
     fs::create_dir_all(&module_dir).unwrap();
 
     let manifest_json = r#"{
-        "id": "custom-odoo-addon",
-        "name": "Custom Odoo Addon",
+        "id": "custom-standalone-addon",
+        "name": "Custom Standalone Addon",
         "version": "1.0.0",
-        "namespace": "/custom/odoo",
+        "namespace": "/custom/addon",
         "entrypoint": "run.sh",
         "protocol": "stdio-stream",
         "capabilities": ["chat_completions", "models"]
@@ -92,22 +92,24 @@ fn test_scan_and_auto_discover_odoo_style_module() {
     .unwrap();
 
     let mut reg = ModuleRegistry::new();
-    assert!(reg.get_module("custom-odoo-addon").is_none());
+    assert!(reg.get_module("custom-standalone-addon").is_none());
 
     scan_and_register_modules(&mut reg, &temp_state);
 
     let desc = reg
-        .get_module("custom-odoo-addon")
+        .get_module("custom-standalone-addon")
         .expect("module auto-discovered");
-    assert_eq!(desc.id, "custom-odoo-addon");
-    assert_eq!(desc.name, "Custom Odoo Addon");
-    assert_eq!(desc.namespace, "/custom/odoo");
+    assert_eq!(desc.id, "custom-standalone-addon");
+    assert_eq!(desc.name, "Custom Standalone Addon");
+    assert_eq!(desc.namespace, "/custom/addon");
 
-    let pers = reg.get_personal_manifest("custom-odoo-addon").unwrap();
+    let pers = reg
+        .get_personal_manifest("custom-standalone-addon")
+        .unwrap();
     assert!(Path::new(&pers.entrypoint).is_absolute());
     assert!(pers.entrypoint.ends_with("run.sh"));
 
-    cleanup_module_files("custom-odoo-addon", &temp_state);
+    cleanup_module_files("custom-standalone-addon", &temp_state);
     assert!(!module_dir.exists());
     let _ = fs::remove_dir_all(&temp_state);
 }

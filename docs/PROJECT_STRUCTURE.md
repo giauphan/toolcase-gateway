@@ -93,7 +93,7 @@ toolcase-gateway-rs/
 │   │   ├── crypto.rs             # AES-256-GCM envelope encryption and blind indexing
 │   │   └── sqlite.rs             # Embedded SQLite database (rusqlite) for account keys & modules
 │   │
-│   ├── modules/                  # Extensible platform module system (WordPress/Odoo style)
+│   ├── modules/                  # Extensible platform module system (modular plugin style)
 │   │   ├── mod.rs                # Modules facade
 │   │   ├── catalog.rs            # Public module catalog and installation sources
 │   │   ├── manifest.rs           # Manifest parser (module.json, manifest.json, __manifest__.json)

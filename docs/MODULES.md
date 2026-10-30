@@ -1,6 +1,6 @@
 # Platform Modules & Plugin Architecture
 
-Toolcase Gateway features an extensible, self-contained module and plugin architecture modeled after the **WordPress plugin** and **Odoo addon** paradigms.
+Toolcase Gateway features an extensible, self-contained module and plugin architecture modeled after modern modular plugin paradigms.
 
 External developers and operators can author, package, install, and run provider modules without needing the gateway source code or recompiling the binary.
 
@@ -8,7 +8,7 @@ External developers and operators can author, package, install, and run provider
 
 ## 1. Architectural Concept
 
-Just like WordPress plugins (`wp-content/plugins/<plugin-slug>/`) and Odoo modules (`addons/<module_name>/` with `__manifest__.py`):
+Following modular, self-contained plugin patterns:
 
 1. **Self-Contained Bundles**: Every module is an independent directory under `$GW_STATE_DIR/modules/<module-id>/` (or `./modules/<module-id>/`). It bundles its own manifest (`module.json`, `manifest.json`, or `__manifest__.json`), executables, scripts, configuration, and assets.
 2. **Auto-Discovery**: The gateway automatically scans the modules directory on boot. Any valid folder containing a manifest is discovered and registered.
@@ -27,7 +27,7 @@ toolcase-gateway/
         │   ├── run.sh                <-- Executable entrypoint
         │   └── adapter.py
         └── custom-anthropic/
-            ├── __manifest__.json     <-- Odoo-style manifest
+            ├── __manifest__.json     <-- Alternative manifest name
             └── index.js
 ```
 
@@ -190,7 +190,7 @@ curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
      }'
    ```
 
-### Option C: Direct Drop-in (Odoo / WordPress Style)
+### Option C: Direct Drop-in (Local Directory Style)
 
 Copy or extract the module folder directly into `$GW_STATE_DIR/modules/<id>/` (default `.gw_state/modules/<id>/`):
 

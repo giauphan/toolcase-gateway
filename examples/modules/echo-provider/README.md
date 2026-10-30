@@ -139,7 +139,7 @@ curl -X POST http://127.0.0.1:20130/api/v1/dashboard/modules/install \
   }'
 ```
 
-### Option C: Direct Drop-in (Odoo / WordPress Style)
+### Option C: Direct Drop-in (Local Directory Style)
 
 Copy the module folder directly into the gateway's state directory:
 

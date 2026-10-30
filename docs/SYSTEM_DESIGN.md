@@ -38,7 +38,7 @@ flowchart TD
 3. **Muse AI Subsystem**: End-to-end encrypted Noise XX WebSocket transport communicating directly with remote Confidential VMs (CVM), conversational chat continuity, video generation (`/muse-ai/v1/create-video`), image synthesis (`/muse-ai/v1/create-image`), and headless Sentinel auto-approval coordinator.
 4. **Interactive Dashboard & Standalone Persistent Storage**: Embedded web UI at `/dashboard` and REST endpoints at `/api/v1/dashboard/*` providing real-time overview, provider account ingestion, PWA support, and atomic POSIX `0600` persistence to `gateway_config.json`.
 5. **Model Context Protocol (MCP) Control Plane**: Native MCP server engine implementing stdio, SSE (`/mcp/sse`), and Streamable HTTP (`/mcp`) transports for autonomous AI engineering environments.
-6. **Dynamic Modules & Plugin Architecture**: WordPress/Odoo-style self-contained personal modules, declarative manifests, GitHub/ZIP remote installation, and prefix-isolated URL namespaces.
+6. **Dynamic Modules & Plugin Architecture**: Modular self-contained personal modules, declarative manifests, GitHub/ZIP remote installation, and prefix-isolated URL namespaces.
 7. **Encrypted Storage Subsystem**: Embedded SQLite engine (`rusqlite`) utilizing hardware-accelerated AES-256-GCM envelope encryption and blind indexing for credential and module state storage.
 
 ---

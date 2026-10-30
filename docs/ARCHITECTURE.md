@@ -117,7 +117,7 @@ Dispatch in `src/routes/` is **exclusive and fail-closed**: a request matching a
 - **Agent Interoperability**: Seamless integration with modern AI engineering environments (Claude Desktop, Cursor, Windsurf, Antigravity).
 
 ### F. Dynamic Personal Modules & Plugin Architecture (`src/modules/personal/`, `src/gateway/installer.rs`)
-- **WordPress/Odoo Paradigm**: Discovers self-contained modules located in `.gw_state/modules/<id>/`.
+- **Modular Plugin Paradigm**: Discovers self-contained modules located in `.gw_state/modules/<id>/`.
 - **Manifest Engine**: Supports declarative `module.json`, `manifest.json`, or `__manifest__.json` formats defining entrypoint scripts, protocols, and URL namespaces.
 - **Sub-Provider Groups**: Modules can declare multiple sub-providers mounted under subpaths, completely isolated from core system routes.
 

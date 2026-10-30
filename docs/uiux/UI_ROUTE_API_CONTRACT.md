@@ -1,6 +1,6 @@
 # UI Route and API Contract Baseline
 
-This document specifies the exact baseline route contracts, JSON request/response shapes, error scenarios, and transport constraints for the Toolcase Gateway Odoo-inspired management console.
+This document specifies the exact baseline route contracts, JSON request/response shapes, error scenarios, and transport constraints for the Toolcase Gateway management console.
 
 ## 1. System UI and Asset Routes
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Browser workflow checks for the embedded pages and Odoo-inspired UI shell.
+ * Browser workflow checks for the embedded pages and modern UI shell.
  * Run against a local gateway:
  * NODE_PATH=/home/ubuntu/codeatlas-platform/node_modules \
  * PLAYWRIGHT_EXECUTABLE_PATH=/home/ubuntu/.cache/ms-playwright/chromium-1228/chrome-linux/chrome \
@@ -195,7 +195,7 @@ async function dashboardOverviewAndNavigation(browser) {
 
   // Save screenshot of desktop overview
   await page.locator('.side-nav [data-go="overview"]').click();
-  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gateway_odoo_desktop_overview.png"), fullPage: true });
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gateway_desktop_overview.png"), fullPage: true });
 
   assert.deepEqual(pageErrors, []);
   await context.close();
@@ -217,7 +217,7 @@ async function dashboardResponsiveMobile(browser) {
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#sidebar").isVisible(), false);
 
-  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gateway_odoo_mobile_overview.png"), fullPage: true });
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gateway_mobile_overview.png"), fullPage: true });
 
   assert.deepEqual(pageErrors, []);
   await context.close();
@@ -238,7 +238,7 @@ async function dashboardResponsiveMobile(browser) {
     await videoNetworkFailure(browser);
     console.log("Running HAR workflow tests...");
     await harFailure(browser);
-    console.log("Running Odoo dashboard overview and navigation tests...");
+    console.log("Running dashboard overview and navigation tests...");
     await dashboardOverviewAndNavigation(browser);
     console.log("Running mobile responsive and drawer tests...");
     await dashboardResponsiveMobile(browser);

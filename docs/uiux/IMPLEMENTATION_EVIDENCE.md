@@ -1,9 +1,9 @@
-# Implementation Evidence — Toolcase Gateway Odoo-Inspired UI/UX Redesign
+# Implementation Evidence — Toolcase Gateway Modern UI/UX Redesign
 
 **Baseline Audit SHA:** `51dac26d09e213cd88164235a2c8789a8f9f14e5`  
 **Current HEAD SHA:** `ca10ba5`  
 **Date:** 2026-10-29  
-**Specification:** `plan/toolcase_gateway_odoo_uiux_plan/TOOLCASE_GATEWAY_ODOO_UIUX_REDESIGN_PLAN.md` & `AGENT_EXECUTION_PROMPT.md`  
+**Specification:** `plan/toolcase_gateway_uiux_plan/TOOLCASE_GATEWAY_UIUX_REDESIGN_PLAN.md` & `AGENT_EXECUTION_PROMPT.md`  
 
 ---
 
@@ -18,7 +18,7 @@ All 7 phases (P0–P6) have been executed with proof-based verification:
    - `cargo fmt --check`: Clean formatting across the repository.
    - `cargo clippy --all-targets -- -D warnings`: 0 warnings, clean compilation.
    - `cargo test --all-targets`: 100% tests passing across all test suites (46 unit tests, 28 dashboard tests, 140 gateway tests, 22 video template tests, 5 config tests, 2 routes contract tests, 1 muse cleanup test, 1 muse lifecycle test).
-   - Playwright Browser E2E: Image workflow, video workflow, HAR import, Odoo navigation, filtering, theme toggle, and 390px mobile drawer tests pass with 0 browser console errors.
+   - Playwright Browser E2E: Image workflow, video workflow, HAR import, dashboard navigation, filtering, theme toggle, and 390px mobile drawer tests pass with 0 browser console errors.
 
 ---
 
@@ -28,9 +28,9 @@ All 7 phases (P0–P6) have been executed with proof-based verification:
 - Audited baseline commit `51dac26d09e213cd88164235a2c8789a8f9f14e5` against live HEAD.
 - Built `docs/uiux/UI_ROUTE_API_CONTRACT.md` detailing all UI routes, static asset delivery endpoints, JSON shapes, and fail-closed security properties.
 
-### Phase P1 — Design System & Odoo Prototype Parity
-- Reconciled target design with `plan/toolcase_gateway_odoo_uiux_plan/gateway_odoo_ui_prototype.html`.
-- Implemented Odoo design tokens (`--ui-brand`, `--purple: #714b67`, `--mint: #017e84`, `--bg: #f6f7f9`, `--surface-1: #ffffff`, `--surface-2: #f9fafb`, `--edge: #e5e6eb`) and dark mode palette (`body.dark`).
+### Phase P1 — Design System & Prototype Parity
+- Reconciled target design with `plan/toolcase_gateway_uiux_plan/gateway_ui_prototype.html`.
+- Implemented gateway design tokens (`--ui-brand`, `--purple: #714b67`, `--mint: #017e84`, `--bg: #f6f7f9`, `--surface-1: #ffffff`, `--surface-2: #f9fafb`, `--edge: #e5e6eb`) and dark mode palette (`body.dark`).
 - Ensured WCAG 2.2 AA compliant contrast, 24px+ pointer targets, and visible focus rings (`outline: 3px solid var(--ui-accent)`).
 
 ### Phase P2 — App Shell & Navigation
@@ -114,7 +114,7 @@ GATEWAY_BASE_URL=http://127.0.0.1:20135 node tests/uiux/browser_e2e.cjs
 Running image workflow tests...
 Running video workflow tests...
 Running HAR workflow tests...
-Running Odoo dashboard overview and navigation tests...
+Running dashboard overview and navigation tests...
 Running mobile responsive and drawer tests...
 ALL browser workflow and UI/UX checks passed successfully!
 ```
