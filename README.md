@@ -7,11 +7,21 @@
 
 **A high-performance, zero-async Rust AI and tool gateway running as a local sidecar between agent runners, developer IDEs, SDKs, and upstream AI engines.**
 
-Toolcase Gateway sits transparently on loopback (`127.0.0.1:20130`), unifying multi-provider AI routing, automatic tool normalization, model failover cascades, decision evaluation, and native Model Context Protocol (MCP) coordination into a single lightweight binary (< 400 KB) with zero heavy runtime overhead.
+Toolcase Gateway sits transparently on loopback (`127.0.0.1:20130`), unifying multi-provider AI routing, automatic tool normalization, model failover cascades, decision evaluation, and native Model Context Protocol (MCP) coordination into a single lightweight binary with no heavy async runtime.
 
 ---
 
 ## Highlights of Toolcase Gateway
+
+| What you get | Why it matters |
+| :--- | :--- |
+| **Tool-name casing repair** | Strict tool-calling clients keep working when upstreams lowercase function names |
+| **Automatic model failover** | `429` / `503` / credit errors are retried on fallback models before the client sees them |
+| **Native MCP server** | `stdio`, SSE and Streamable HTTP for Claude Desktop, Cursor, Windsurf, Antigravity |
+| **Multi-provider routing** | OpenAI-compatible, Prism, Jev decisions and Muse AI behind one local endpoint |
+| **Web dashboard** | Change keys, targets and fallbacks live at `/dashboard`, no restart |
+| **Fail-closed security** | Loopback by default, masked secrets, encrypted local storage |
+| **Optional modules** | Add your own providers only if you need them |
 
 ### 1. Transparent Tool-Name Casing Drift Repair
 Upstream LLMs and proxies frequently alter function or tool names during completion generation (e.g., lowercasing `SearchCodebase` → `searchcodebase`), breaking strict tool-calling clients and IDE extensions. Toolcase Gateway inspects original client tool definitions and transparently restores original tool casings in streaming chunks on the fly.
@@ -28,10 +38,10 @@ First-class support for the Model Context Protocol across all three official tra
 Agents can query system metrics, inspect active routes, test connectivity, and orchestrate tools through standard MCP primitives.
 
 ### 4. Zero-Async Native Rust Architecture
-Engineered strictly with standard library blocking networking (`std::net`, `std::thread`, and crossbeam channels) without `tokio`, `async-std`, or complex futures runtimes:
-- Fast cold starts (< 5 ms).
-- Predictable deterministic latency and minimal memory footprint (< 15 MB RSS).
-- Compile-time guaranteed memory safety with `#![forbid(unsafe_code)]`.
+Built on standard-library blocking networking (`std::net`, `std::thread`) with no `tokio`, `async-std`, or futures runtime:
+- A single small, statically linked release binary with no runtime to install.
+- Simple, predictable threading model that is easy to audit.
+- Memory safety enforced at compile time with `#![forbid(unsafe_code)]`.
 
 ### 5. Multi-Provider AI Subsystems
 - **Prism & OpenAI-Compatible Gateways** (`/omniroute`, `/v1/chat/completions`): Transparent token handling, multi-account rotation, and reasoning effort parameter injection.
@@ -50,8 +60,8 @@ Embedded web control center at `http://127.0.0.1:20130/dashboard`:
 - Passwords, cookies, and bearer tokens masked across all logs, status responses, and UI endpoints.
 - Embedded SQLite with AES-256-GCM envelope encryption and blind indexing for local credential storage.
 
-### 8. Extensible Module & Addon Feature
-For users needing custom providers or specialized external workflows, the gateway provides an optional **modular plugin system**:
+### 8. Optional Modules (Only If You Need Them)
+Modules are an optional extra, not required to use the gateway. If you need a custom provider or workflow, the gateway provides an optional **modular plugin system**:
 - Author or drop custom adapters into `./addons/<id>/` or `$GW_STATE_DIR/modules/<id>/`.
 - Isolated out-of-process execution (`stdio-stream` child process or loopback HTTP) preventing module crashes from impacting the core gateway.
 - Dedicated URL prefix routing (e.g. `/custom/my-adapter/*`).
