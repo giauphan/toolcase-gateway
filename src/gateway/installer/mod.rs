@@ -51,7 +51,11 @@ pub fn scan_and_register_modules(
     registry: &mut crate::gateway::modules::ModuleRegistry,
     state_dir: &Path,
 ) {
-    let search_roots = [state_dir.join("modules"), PathBuf::from("modules")];
+    let search_roots = [
+        state_dir.join("modules"),
+        PathBuf::from("modules"),
+        PathBuf::from("addons"),
+    ];
     for root in &search_roots {
         scan_directory_for_modules(root, registry);
     }

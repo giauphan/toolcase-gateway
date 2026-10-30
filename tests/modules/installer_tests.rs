@@ -115,6 +115,43 @@ fn test_scan_and_auto_discover_standalone_manifest_module() {
 }
 
 #[test]
+fn test_scan_and_auto_discover_addons_directory_module() {
+    let addons_dir = Path::new("addons").join("test-dropin-addon");
+    fs::create_dir_all(&addons_dir).unwrap();
+
+    let manifest_json = r#"{
+        "id": "test-dropin-addon",
+        "name": "Test Dropin Addon",
+        "version": "1.0.0",
+        "namespace": "/custom/dropin-addon",
+        "entrypoint": "run.sh",
+        "protocol": "stdio-stream",
+        "capabilities": ["chat_completions"]
+    }"#;
+    fs::write(addons_dir.join("module.json"), manifest_json).unwrap();
+    fs::write(
+        addons_dir.join("run.sh"),
+        "#!/bin/sh\necho '{\"status\": 200}'\n",
+    )
+    .unwrap();
+
+    let mut reg = ModuleRegistry::new();
+    let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_state).unwrap();
+
+    scan_and_register_modules(&mut reg, &temp_state);
+
+    let desc = reg
+        .get_module("test-dropin-addon")
+        .expect("module auto-discovered from addons directory");
+    assert_eq!(desc.id, "test-dropin-addon");
+    assert_eq!(desc.namespace, "/custom/dropin-addon");
+
+    let _ = fs::remove_dir_all(&addons_dir);
+    let _ = fs::remove_dir_all(&temp_state);
+}
+
+#[test]
 fn test_install_and_convert_script_without_manifest() {
     let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
     let src_dir = std::env::temp_dir().join(format!("test_raw_repo_{}", uuid::Uuid::new_v4()));
