@@ -441,7 +441,7 @@
     }
 
     const harInput = e.target.closest(".dynamic-har-file");
-    if (harInput?.files?.[0] && harInput.dataset.harEndpoint) {
+    if (harInput?.files?.[0] && harInput?.dataset?.harEndpoint) {
       const file = harInput.files[0];
       const modId = harInput.dataset.moduleId || "module";
       file.text().then(function(rawText) {
@@ -689,8 +689,8 @@
     catalogGrid.innerHTML = catalog.map(function(item) {
       const isInstalled = allModules.some(function(m) {
         return m.id === item.id
-          || (m.namespace && item.namespace && m.namespace.toLowerCase() === item.namespace.toLowerCase())
-          || (item.id === "tiktok-studio" && (m.namespace === "/tiktok" || m.id.toLowerCase().includes("tiktok")));
+          || (m.namespace && m.namespace.toLowerCase() === item.namespace?.toLowerCase())
+          || (item.id === "tiktok-studio" && (m.namespace === "/tiktok" || m.id?.toLowerCase().includes("tiktok")));
       });
       const caps = (item.capabilities || []).map(function(c) {
         return "<span class=\"cap\">" + escapeHtml(c) + "</span>";

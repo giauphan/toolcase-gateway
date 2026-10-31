@@ -115,6 +115,17 @@ fn apply_muse_approval_settings(
     }
 }
 
+fn update_muse_vm_id(conf: &mut Config, vm_id: Option<String>) {
+    if let Some(vm) = vm_id {
+        let trimmed = vm.trim();
+        if trimmed.is_empty() || trimmed == "vm-438" {
+            conf.museai_vm_id.clear();
+        } else {
+            conf.museai_vm_id = trimmed.to_string();
+        }
+    }
+}
+
 fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
     let UpdateMuseConfigPayload {
         base_url,
@@ -136,41 +147,20 @@ fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
 
     update_non_empty_string(&mut conf.museai_base_url, base_url);
     update_non_empty_string(&mut conf.museai_ws_url, ws_url);
-    if let Some(vm) = vm_id {
-        let trimmed = vm.trim();
-        if trimmed.is_empty() || trimmed == "vm-438" {
-            conf.museai_vm_id.clear();
-        } else {
-            conf.museai_vm_id = trimmed.to_string();
-        }
-    }
+    update_muse_vm_id(conf, vm_id);
     update_non_empty_string(&mut conf.museai_access_token, access_token);
     update_non_empty_string(&mut conf.museai_notary_token, notary_token);
     update_non_empty_string(&mut conf.museai_cookie, cookie);
     update_non_empty_string(&mut conf.default_video_prompt, default_video_prompt);
 
     let mut app = approval.unwrap_or_default();
-    if app.mode.is_none() {
-        app.mode = approval_mode;
-    }
-    if app.allowed_destinations.is_none() {
-        app.allowed_destinations = allowed_destinations;
-    }
-    if app.allowed_types.is_none() {
-        app.allowed_types = allowed_types;
-    }
-    if app.prefer_allow_once.is_none() {
-        app.prefer_allow_once = prefer_allow_once;
-    }
-    if app.allow_always.is_none() {
-        app.allow_always = allow_always;
-    }
-    if app.max_decisions.is_none() {
-        app.max_decisions = max_decisions;
-    }
-    if app.timeout_secs.is_none() {
-        app.timeout_secs = timeout_secs;
-    }
+    app.mode = app.mode.or(approval_mode);
+    app.allowed_destinations = app.allowed_destinations.or(allowed_destinations);
+    app.allowed_types = app.allowed_types.or(allowed_types);
+    app.prefer_allow_once = app.prefer_allow_once.or(prefer_allow_once);
+    app.allow_always = app.allow_always.or(allow_always);
+    app.max_decisions = app.max_decisions.or(max_decisions);
+    app.timeout_secs = app.timeout_secs.or(timeout_secs);
 
     apply_muse_approval_settings(&mut conf.muse_approval, app);
 }
