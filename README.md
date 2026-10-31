@@ -52,7 +52,7 @@ Built on standard-library blocking networking (`std::net`, `std::thread`) with n
 Embedded web control center at `http://127.0.0.1:28130/dashboard`:
 - Live routing inspector, fallback configuration, and latency/uptime metrics.
 - Hot credential and pool updates without restarting the gateway process.
-- Atomic POSIX `0600` standalone persistence to `gateway_config.json`, keeping repository `.env` untouched.
+- Transactional persistence to the encrypted database repository (SQLite), keeping repository `.env` strictly reserved for server binding.
 
 ### 7. Fail-Closed Security & Encrypted Storage
 - Loopback-only binding (`127.0.0.1`) by default; flags unauthorized network exposure.
@@ -86,8 +86,7 @@ flowchart TD
     Jev --> UpstreamJev["Jev / OpenRouter Failover Pool"]
     Muse --> UpstreamMuse["Confidential VM (CVM)"]
     Modules --> Subprocesses["Local Provider Adapters / Scripts"]
-    Dashboard --> ConfigDisk[("gateway_config.json (0600)")]
-    Gateway --> EncryptedDB[("Encrypted SQLite (AES-256-GCM)")]
+    Dashboard & Gateway --> EncryptedDB[("Encrypted Database (SQLite / AES-256-GCM)")]
 ```
 
 ---
@@ -111,21 +110,29 @@ The compiled binary will be placed at `target/release/toolcase-gateway` (~350 KB
 ## Quick Start
 
 ### 1. Launch the Gateway
+Start the binary (binds to `127.0.0.1:28130` and initializes local database storage):
 ```bash
-# Run with default settings (listens on 127.0.0.1:28130, proxies to 127.0.0.1:20128)
 ./target/release/toolcase-gateway
 ```
+*(Optional: copy `.env.example` to `.env` if you wish to customize the database path or listen port).*
 
-### 2. Configure Custom Target & Fallbacks
+### 2. Configure via the Web Dashboard
+Open `http://127.0.0.1:28130/dashboard` in your browser. All operational proxy routing, targets, fallbacks, provider credentials, and modules are configured dynamically in the UI and persisted to the database repository:
+- **Upstream Target & Port**: Set your upstream LLM host and port (e.g. `127.0.0.1:8080`).
+- **Fallback Models**: Configure candidate fallback models (e.g. `gpt-4o-mini,claude-3-5-sonnet`) for automatic retry cascades on `429`/`503` errors.
+- **Provider Credentials**: Enter account keys and tokens for Jev AI, OpenRouter, and Muse AI with automatic masking.
+
+### 3. Route Client Traffic
+Point your IDE extensions, agent runner, or OpenAI-compatible client to Toolcase Gateway:
 ```bash
-GW_TARGET_HOST=127.0.0.1 \
-GW_TARGET_PORT=8080 \
-GW_FALLBACK_MODELS="gpt-4o-mini,claude-3-5-sonnet" \
-./target/release/toolcase-gateway
+curl http://127.0.0.1:28130/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test" \
+  -d '{
+    "model": "default",
+    "messages": [{"role": "user", "content": "Hello via Toolcase Gateway!"}]
+  }'
 ```
-
-### 3. Open the Web Dashboard
-Navigate to `http://127.0.0.1:28130/dashboard` in any browser to inspect active routes, manage credentials, or view live traffic metrics.
 
 ---
 
@@ -155,20 +162,32 @@ Point your agent runner to:
 
 ## Core Configuration Reference
 
-The gateway supports dual-layer configuration: initial startup via environment variables (or `.env`), and runtime persistence via `gateway_config.json` editable via the dashboard.
+Toolcase Gateway strictly enforces Clean Architecture separation: **`.env` is reserved for database connection and server listener binding**, while all operational proxy settings, upstream targets, fallback chains, provider accounts, and modules are configured via the **Web Dashboard** and persisted in the encrypted **database repository** (SQLite).
+
+### 1. Server Listener & Database Bootstrap (`.env`)
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
+| `DATABASE_URL` | `sqlite://.gw_state/gateway.db` | Database connection URL. Supports embedded SQLite, PostgreSQL, or MySQL. |
+| `GW_STATE_DIR` | `.gw_state` | Directory for runtime state, local SQLite database, and installed modules. |
 | `GW_LISTEN_HOST` | `127.0.0.1` | Loopback bind address. Non-loopback IPs trigger security warnings. |
 | `GW_LISTEN_PORT` | `28130` | Gateway HTTP listen port. |
-| `GW_TARGET_HOST` | `127.0.0.1` | Default upstream LLM host. |
-| `GW_TARGET_PORT` | `20128` | Default upstream LLM port. |
-| `GW_FALLBACK_MODELS` | `fail-try` | Comma-separated list of fallback models for automatic failover. |
 | `GW_MAX_CONNECTIONS` | `256` | Maximum concurrent connection limit; excess rejected with `503`. |
 | `GW_IO_TIMEOUT_SECS` | `120` | Read and write socket timeout in seconds (`0` disables). |
-| `GW_JEV_API_KEYS` | empty | Comma-separated Jev AI account keys for decision failover pool. |
-| `GW_JEV_OPENROUTER_API_KEY` | empty | OpenRouter API key for decision evaluations. |
-| `GW_MUSE_APPROVAL_MODE` | `off` | Sentinel auto-approval mode (`off`, `observe`, `on`). |
+
+### 2. Operational Settings (Configured at `/dashboard` & Persisted in Database)
+
+| Setting | Managed In | Description |
+| :--- | :--- | :--- |
+| **Upstream Target & Port** | Dashboard UI | Upstream OpenAI-compatible host and port (default: `127.0.0.1:20128`). |
+| **Fallback Models** | Dashboard UI | Comma-separated candidate models for automatic failover cascades. |
+| **Default Model** | Dashboard UI | Default model substituted when requests omit or specify an unknown model. |
+| **Jev AI Accounts** | Dashboard UI | Jev decision API keys with automatic round-robin rotation and cooldowns. |
+| **OpenRouter Credentials** | Dashboard UI | OpenRouter API keys and cookies for decision fallback cascades. |
+| **Muse AI Credentials** | Dashboard UI | Confidential VM credentials, WebSocket notary tokens, and auto-approval modes. |
+| **Addons & Modules** | Dashboard UI | Enable, order, and configure custom or external provider modules. |
+
+*(Note: Bootstrap environment variables such as `GW_TARGET_HOST` or `GW_FALLBACK_MODELS` may still be supplied as initial seed defaults, but active values configured in the Dashboard UI and saved to the database take precedence).*
 
 See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for full configuration details and advanced tuning options.
 
@@ -213,7 +232,7 @@ cargo build --release         # Build optimized production binary
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Architectural overview, canonical routes, and system lifecycle
 - [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) — Core subsystems, zero-async mechanics, and file size governance
 - [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) — Live source code directory tree and Clean Architecture layers
-- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — Dual-layer configuration reference and JSON schema
+- [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — Configuration reference, database storage, and dashboard usage
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — Threat modeling, credential masking, and POSIX permissions
 - [`docs/JEV_INTEGRATION.md`](docs/JEV_INTEGRATION.md) — Jev Decision API schemas and pool rotation mechanics
 - [`docs/MODULES.md`](docs/MODULES.md) — Modular addon plugin guide, manifest schema, and auto-discovery
