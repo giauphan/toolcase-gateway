@@ -253,3 +253,87 @@ fn dashboard_accounts_openrouter_explicit_key_and_cookie_ingest_and_persistence(
     let _ = fs::remove_file(tmp_env);
     let _ = fs::remove_file(store.config_file);
 }
+
+#[test]
+fn test_dashboard_update_muse_config_nested_approval_and_overview_sync() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    let tmp_json = std::env::temp_dir().join(format!("test_cfg_{}.json", uuid::Uuid::new_v4()));
+    fs::write(&tmp_env, "GW_LISTEN_PORT=20129\n").unwrap();
+
+    let store = ConfigStore::new_with_limits_and_config_file(
+        test_config(),
+        tmp_env.clone(),
+        tmp_json.clone(),
+        256,
+        1024 * 1024,
+    );
+
+    // Payload mimicking exact format sent by dashboard.js initMuseForm()
+    let payload = serde_json::json!({
+        "base_url": "https://muse.example.com",
+        "ws_url": "wss://vm-abc.metaaivm.com/",
+        "vm_id": "vm-abc",
+        "access_token": "sk-token-1234567890",
+        "cookie": "hatch_sess=val1234567890",
+        "default_video_prompt": "A soaring hawk",
+        "approval": {
+            "mode": "on",
+            "timeout_secs": 60,
+            "allowed_destinations": ["custom.muse.ai"],
+            "allowed_types": ["network", "filesystem"]
+        }
+    });
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/muse-config",
+        &serde_json::to_vec(&payload).unwrap(),
+        &store,
+    );
+    assert_eq!(head.status, 200);
+
+    let res: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(res["ok"], true);
+    assert_eq!(res["museai"]["approval"]["mode"], "on");
+    assert_eq!(res["museai"]["approval"]["timeout_secs"], 60);
+    assert_eq!(
+        res["museai"]["approval"]["allowed_destinations"],
+        serde_json::json!(["custom.muse.ai"])
+    );
+    assert_eq!(
+        res["museai"]["approval"]["allowed_types"],
+        serde_json::json!(["network", "filesystem"])
+    );
+
+    // Check overview returns updated muse config in both config and providers.museai
+    let (head_ov, body_ov) = request_gateway("GET", "/api/v1/dashboard/overview", b"", &store);
+    assert_eq!(head_ov.status, 200);
+    let overview: serde_json::Value = serde_json::from_slice(&body_ov).unwrap();
+    assert_eq!(
+        overview["config"]["museai_base_url"],
+        "https://muse.example.com"
+    );
+    assert_eq!(
+        overview["config"]["museai_ws_url"],
+        "wss://vm-abc.metaaivm.com/"
+    );
+    assert_eq!(overview["config"]["museai_vm_id"], "vm-abc");
+    assert_eq!(overview["config"]["default_video_prompt"], "A soaring hawk");
+
+    assert_eq!(
+        overview["providers"]["museai"]["base_url"],
+        "https://muse.example.com"
+    );
+    assert_eq!(
+        overview["providers"]["museai"]["ws_url"],
+        "wss://vm-abc.metaaivm.com/"
+    );
+    assert_eq!(overview["providers"]["museai"]["vm_id"], "vm-abc");
+    assert_eq!(overview["providers"]["museai"]["approval"]["mode"], "on");
+    assert_eq!(
+        overview["providers"]["museai"]["approval"]["timeout_secs"],
+        60
+    );
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(tmp_json);
+}

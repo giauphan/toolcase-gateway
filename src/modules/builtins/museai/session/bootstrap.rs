@@ -212,7 +212,10 @@ pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
         extract_subdomain_vm(&config.museai_ws_url)
     };
 
-    let active_vm_id = if !config.museai_vm_id.is_empty() && config.museai_vm_id != "." {
+    let active_vm_id = if !config.museai_vm_id.is_empty()
+        && config.museai_vm_id != "."
+        && config.museai_vm_id != "vm-438"
+    {
         config.museai_vm_id.clone()
     } else {
         shared_vm

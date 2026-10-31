@@ -98,6 +98,10 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
             "fallbacks": config.fallbacks,
             "default_model": config.default_model,
             "io_timeout_secs": config.io_timeout.map(|d| d.as_secs()).unwrap_or(0),
+            "museai_base_url": config.museai_base_url,
+            "museai_ws_url": config.museai_ws_url,
+            "museai_vm_id": config.museai_vm_id,
+            "default_video_prompt": config.default_video_prompt,
             "config_storage": store.config_file.file_name().unwrap_or_default().to_string_lossy(),
         },
         "providers": {

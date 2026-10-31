@@ -206,6 +206,8 @@ pub fn apply_har_config(
         }
     };
 
+    let _ = store.save_to_persistent_file();
+
     let report = ApplyReport {
         applied,
         config,

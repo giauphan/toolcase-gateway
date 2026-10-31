@@ -6,6 +6,17 @@ use crate::http::write_error;
 
 use super::service::mask_key;
 
+#[derive(serde::Deserialize, Default)]
+pub struct MuseApprovalPayload {
+    pub mode: Option<String>,
+    pub allowed_destinations: Option<Vec<String>>,
+    pub allowed_types: Option<Vec<String>>,
+    pub prefer_allow_once: Option<bool>,
+    pub allow_always: Option<bool>,
+    pub max_decisions: Option<usize>,
+    pub timeout_secs: Option<u64>,
+}
+
 #[derive(serde::Deserialize)]
 pub struct UpdateMuseConfigPayload {
     pub base_url: Option<String>,
@@ -15,6 +26,7 @@ pub struct UpdateMuseConfigPayload {
     pub notary_token: Option<String>,
     pub cookie: Option<String>,
     pub default_video_prompt: Option<String>,
+    pub approval: Option<MuseApprovalPayload>,
     pub approval_mode: Option<String>,
     pub allowed_destinations: Option<Vec<String>>,
     pub allowed_types: Option<Vec<String>>,
@@ -40,7 +52,12 @@ fn validate_muse_config_payload(payload: &UpdateMuseConfigPayload) -> Result<(),
             return Err("ws_url must start with ws:// or wss://");
         }
     }
-    if let Some(ref mode) = payload.approval_mode {
+    let mode_candidate = payload
+        .approval
+        .as_ref()
+        .and_then(|a| a.mode.as_ref())
+        .or(payload.approval_mode.as_ref());
+    if let Some(mode) = mode_candidate {
         let trimmed = mode.trim();
         if !trimmed.is_empty() && !is_valid_muse_approval_mode(trimmed) {
             return Err("approval_mode must be one of: 'off', 'observe', 'on'");
@@ -63,7 +80,12 @@ fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
         }
     }
     if let Some(vm) = payload.vm_id {
-        conf.museai_vm_id = vm.trim().to_string();
+        let trimmed = vm.trim();
+        if trimmed.is_empty() || trimmed == "vm-438" {
+            conf.museai_vm_id.clear();
+        } else {
+            conf.museai_vm_id = trimmed.to_string();
+        }
     }
     if let Some(token) = payload.access_token {
         let trimmed = token.trim();
@@ -89,36 +111,43 @@ fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
             conf.default_video_prompt = trimmed.to_string();
         }
     }
-    if let Some(mode) = payload.approval_mode {
-        let trimmed = mode.trim();
+
+    let approval = payload.approval.unwrap_or_default();
+    let mode = approval.mode.or(payload.approval_mode);
+    if let Some(m) = mode {
+        let trimmed = m.trim();
         if !trimmed.is_empty() {
             conf.muse_approval.mode = parse_muse_approval_mode(trimmed);
         }
     }
-    if let Some(dests) = payload.allowed_destinations {
+    let dests = approval
+        .allowed_destinations
+        .or(payload.allowed_destinations);
+    if let Some(dests) = dests {
         conf.muse_approval.allowed_destinations = dests
             .into_iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
     }
-    if let Some(types) = payload.allowed_types {
+    let types = approval.allowed_types.or(payload.allowed_types);
+    if let Some(types) = types {
         conf.muse_approval.allowed_types = types
             .into_iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
     }
-    if let Some(pref) = payload.prefer_allow_once {
+    if let Some(pref) = approval.prefer_allow_once.or(payload.prefer_allow_once) {
         conf.muse_approval.prefer_allow_once = pref;
     }
-    if let Some(always) = payload.allow_always {
+    if let Some(always) = approval.allow_always.or(payload.allow_always) {
         conf.muse_approval.allow_always = always;
     }
-    if let Some(max) = payload.max_decisions {
+    if let Some(max) = approval.max_decisions.or(payload.max_decisions) {
         conf.muse_approval.max_decisions_per_job = max;
     }
-    if let Some(timeout) = payload.timeout_secs {
+    if let Some(timeout) = approval.timeout_secs.or(payload.timeout_secs) {
         conf.muse_approval.approval_timeout_secs = timeout;
     }
 }

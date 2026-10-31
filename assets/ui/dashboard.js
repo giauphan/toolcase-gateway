@@ -1176,15 +1176,15 @@
   }
 
   function populateMuseConfigForm(config, muse, approval) {
-    setValue(cfgMuseBase, config.museai_base_url || "https://muse.ai");
-    setValue(cfgMuseWs, config.museai_ws_url || "wss://vm-438.metaaivm.com/");
-    setValue(cfgMuseVmid, config.museai_vm_id || "vm-438");
+    setValue(cfgMuseBase, muse.base_url || config.museai_base_url || "https://muse.ai");
+    setValue(cfgMuseWs, muse.ws_url || config.museai_ws_url || "");
+    setValue(cfgMuseVmid, muse.vm_id || config.museai_vm_id || "");
     setMaskedHint(hintToken, muse.masked_access_token);
     setMaskedHint(hintNotary, muse.masked_notary_token);
     setMaskedHint(hintCookie, muse.masked_cookie);
-    setValue(cfgMuseVideoPrompt, config.default_video_prompt || "");
+    setValue(cfgMuseVideoPrompt, muse.default_video_prompt || config.default_video_prompt || "");
     setValue(cfgMuseApprovalMode, approval.mode || "off");
-    setValue(cfgMuseApprovalTimeout, approval.timeout_secs || 30);
+    setValue(cfgMuseApprovalTimeout, approval.timeout_secs != null ? approval.timeout_secs : 30);
     setValue(cfgMuseApprovalDestinations, (approval.allowed_destinations || []).join(", "));
     setValue(cfgMuseApprovalTypes, (approval.allowed_types || []).join(", "));
   }

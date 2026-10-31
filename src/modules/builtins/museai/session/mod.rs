@@ -85,7 +85,10 @@ pub fn build_museai_ws_url(config: &Config, request_id: &str) -> io::Result<Stri
 
     let vm_id = if let Some(v) = parsed_query.get("vm_id") {
         v.to_string()
-    } else if !config.museai_vm_id.is_empty() && config.museai_vm_id != "." {
+    } else if !config.museai_vm_id.is_empty()
+        && config.museai_vm_id != "."
+        && config.museai_vm_id != "vm-438"
+    {
         config.museai_vm_id.as_str().to_string()
     } else if shared {
         base_url
@@ -165,7 +168,10 @@ pub fn apply_muse_session_metadata(config: &mut Config, session: &serde_json::Va
                 .or_else(|| vms.first())
         });
 
-    if config.museai_vm_id.is_empty() {
+    if config.museai_vm_id.is_empty()
+        || config.museai_vm_id == "."
+        || config.museai_vm_id == "vm-438"
+    {
         config.museai_vm_id = session
             .get("vm_id")
             .and_then(|value| value.as_str())

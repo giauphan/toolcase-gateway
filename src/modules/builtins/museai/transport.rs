@@ -86,6 +86,12 @@ impl MuseWebSocket {
                     ),
                 )
             }
+            tungstenite::Error::Http(ref resp) if resp.status().as_u16() == 502 => {
+                io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    "Muse WebSocket connection failed: HTTP error: 502 Bad Gateway (target VM endpoint offline or expired; please verify VM ID and session cookie in settings)",
+                )
+            }
             other => io::Error::other(format!("Muse WebSocket connection failed: {other}")),
         })?;
         match socket.get_mut() {
