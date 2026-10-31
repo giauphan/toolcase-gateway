@@ -298,3 +298,18 @@ body {
   border: 1px solid var(--edge);
   color: var(--text-muted);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn-primary:hover,
+  #go:hover:not(:disabled),
+  #btn-create:hover:not(:disabled),
+  .btn-action:hover:not(:disabled) {
+    transform: none !important;
+  }
+}

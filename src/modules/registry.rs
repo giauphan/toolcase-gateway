@@ -279,12 +279,15 @@ impl ModuleRegistry {
         validate_module_protocol(&manifest.protocol, &manifest.entrypoint)?;
 
         let mut sub_providers = build_sub_providers(manifest.group.as_ref(), existing_status)?;
-        if let (Some(ref mut new_list), Some(old_list)) =
-            (&mut sub_providers, existing.providers.as_ref())
-        {
-            for p in new_list.iter_mut() {
-                if let Some(prev) = old_list.iter().find(|o| o.id == p.id) {
-                    p.status = prev.status;
+        let group_enabled = manifest.group.as_ref().map(|g| g.enabled).unwrap_or(true);
+        if group_enabled {
+            if let (Some(ref mut new_list), Some(old_list)) =
+                (&mut sub_providers, existing.providers.as_ref())
+            {
+                for p in new_list.iter_mut() {
+                    if let Some(prev) = old_list.iter().find(|o| o.id == p.id) {
+                        p.status = prev.status;
+                    }
                 }
             }
         }
@@ -480,6 +483,11 @@ impl ModuleRegistry {
     /// Retrieves a module descriptor by id.
     pub fn get_module(&self, id: &str) -> Option<&ModuleDescriptor> {
         self.modules.get(id)
+    }
+
+    /// Returns a reference to all registered module descriptors.
+    pub fn modules(&self) -> &HashMap<String, ModuleDescriptor> {
+        &self.modules
     }
 
     /// Retrieves a personal module manifest by id.

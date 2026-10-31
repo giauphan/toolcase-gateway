@@ -3,12 +3,9 @@
 //! Upgrades an existing module in place, preserving existing configuration,
 //! secrets, and custom settings while safely rolling back on failure.
 
-use super::ingest::{
-    copy_dir_all, ingest_github, ingest_zip_file, ingest_zip_url, unwrap_single_top_level_directory,
-};
-use super::manifest::discover_or_synthesize_manifest;
+use super::ingest::{copy_dir_all, extract_source_url, ingest_source_into_staging};
+use super::manifest::{discover_or_synthesize_manifest, finalize_module_entrypoint};
 use super::{InstallOptions, InstallSource};
-use crate::gateway::archive::extract_zip;
 use crate::gateway::modules::{ModuleError, PersonalManifest};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,6 +19,9 @@ pub fn upgrade_module(
     source: InstallSource,
     mut options: InstallOptions,
     state_dir: &Path,
+    registered_modules: Option<
+        &std::collections::HashMap<String, crate::gateway::modules::ModuleDescriptor>,
+    >,
 ) -> Result<PersonalManifest, ModuleError> {
     let clean_id = module_id.trim();
     if clean_id.is_empty()
@@ -54,25 +54,7 @@ pub fn upgrade_module(
     let source_str = extract_source_url(&source);
 
     // Ingest source files into staging_dir
-    let ingest_result = match source {
-        InstallSource::GitHubUrl(ref url) => {
-            ingest_github(url, options.branch.as_deref(), &staging_dir)
-        }
-        InstallSource::ZipUrl(ref url) => ingest_zip_url(url, &staging_dir),
-        InstallSource::ZipFile(ref path) => ingest_zip_file(path, &staging_dir),
-        InstallSource::ZipBytes(ref bytes) => extract_zip(bytes, &staging_dir)
-            .map(|_| ())
-            .map_err(|e| ModuleError::InvalidManifest(e.to_string())),
-        InstallSource::LocalDir(ref dir) => copy_dir_all(dir, &staging_dir)
-            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to copy directory: {e}"))),
-    };
-
-    if let Err(e) = ingest_result {
-        let _ = fs::remove_dir_all(&staging_dir);
-        return Err(e);
-    }
-
-    unwrap_single_top_level_directory(&staging_dir);
+    ingest_source_into_staging(&source, options.branch.as_deref(), &staging_dir)?;
 
     // Discover or synthesize the updated manifest
     let mut manifest = match discover_or_synthesize_manifest(&staging_dir, &options) {
@@ -88,12 +70,14 @@ pub fn upgrade_module(
         manifest.source = Some(src);
     }
 
+    let empty_map = std::collections::HashMap::new();
+    let mod_map = registered_modules.unwrap_or(&empty_map);
     let ns_trimmed = manifest.namespace.trim().trim_end_matches('/');
     if let Err(e) = crate::modules::validation::validate_module_namespace(
         ns_trimmed,
         &manifest.namespace,
         &manifest.id,
-        &std::collections::HashMap::new(),
+        mod_map,
     ) {
         let _ = fs::remove_dir_all(&staging_dir);
         return Err(e);
@@ -107,15 +91,32 @@ pub fn upgrade_module(
         }
     }
 
+    // Validate entrypoint and protocol in staging prior to atomic swap without corrupting manifest entrypoint
+    let mut staged_manifest = manifest.clone();
+    if let Err(e) = finalize_module_entrypoint(&mut staged_manifest, &staging_dir) {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(e);
+    }
+    if let Err(e) = crate::modules::validation::validate_module_protocol(
+        &staged_manifest.protocol,
+        &staged_manifest.entrypoint,
+    ) {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(e);
+    }
+
     // Preserve existing config.json and custom configuration files
     if let Some(ref prev_dir) = existing_dir {
-        preserve_module_configuration(prev_dir, &staging_dir);
+        if let Err(e) = preserve_module_configuration(prev_dir, &staging_dir) {
+            let _ = fs::remove_dir_all(&staging_dir);
+            return Err(e);
+        }
     }
 
     // Atomic directory replacement with rollback
     perform_atomic_directory_swap(&staging_dir, &target_dir, &modules_root)?;
 
-    // Resolve entrypoint and set executable permissions
+    // Resolve finalized entrypoint path inside target_dir and set executable permissions
     finalize_module_entrypoint(&mut manifest, &target_dir)?;
 
     // Persist updated module.json into target directory
@@ -142,49 +143,56 @@ fn find_existing_module_dir(clean_id: &str, target_dir: &Path) -> Option<PathBuf
     None
 }
 
-fn extract_source_url(source: &InstallSource) -> Option<String> {
-    match source {
-        InstallSource::GitHubUrl(u) | InstallSource::ZipUrl(u) => Some(u.clone()),
-        InstallSource::LocalDir(p) | InstallSource::ZipFile(p) => {
-            Some(p.to_string_lossy().to_string())
-        }
-        InstallSource::ZipBytes(_) => None,
-    }
-}
-
 /// Preserves runtime `config.json` and persistent data files from the previous module directory.
-fn preserve_module_configuration(prev_dir: &Path, staging_dir: &Path) {
+fn preserve_module_configuration(prev_dir: &Path, staging_dir: &Path) -> Result<(), ModuleError> {
     let prev_config = prev_dir.join("config.json");
     if prev_config.is_file() {
-        let _ = fs::copy(&prev_config, staging_dir.join("config.json"));
+        fs::copy(&prev_config, staging_dir.join("config.json")).map_err(|e| {
+            ModuleError::InvalidManifest(format!("Failed to preserve config.json: {e}"))
+        })?;
     }
 
-    let Ok(entries) = fs::read_dir(prev_dir) else {
-        return;
-    };
+    let entries = fs::read_dir(prev_dir).map_err(|e| {
+        ModuleError::InvalidManifest(format!("Failed to read previous module directory: {e}"))
+    })?;
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        // Preserve secrets, environment files, and local sqlite databases
+        // Preserve secrets, environment files, and local sqlite databases (including WAL sidecars)
         let is_user_data = name_str == ".env"
             || name_str.ends_with(".db")
+            || name_str.ends_with(".db-wal")
+            || name_str.ends_with(".db-shm")
             || name_str.ends_with(".sqlite")
+            || name_str.ends_with(".sqlite-wal")
+            || name_str.ends_with(".sqlite-shm")
             || name_str.ends_with(".sqlite3")
+            || name_str.ends_with(".sqlite3-wal")
+            || name_str.ends_with(".sqlite3-shm")
             || name_str == "data";
 
         if is_user_data {
             let dest = staging_dir.join(&name);
-            if !dest.exists() {
-                if path.is_dir() {
-                    let _ = copy_dir_all(&path, &dest);
-                } else if path.is_file() {
-                    let _ = fs::copy(&path, &dest);
-                }
+            if path.is_dir() {
+                copy_dir_all(&path, &dest).map_err(|e| {
+                    ModuleError::InvalidManifest(format!(
+                        "Failed to preserve directory {}: {e}",
+                        name_str
+                    ))
+                })?;
+            } else if path.is_file() {
+                fs::copy(&path, &dest).map_err(|e| {
+                    ModuleError::InvalidManifest(format!(
+                        "Failed to preserve file {}: {e}",
+                        name_str
+                    ))
+                })?;
             }
         }
     }
+    Ok(())
 }
 
 /// Atomically replaces `target_dir` with `staging_dir`.
@@ -216,48 +224,6 @@ fn perform_atomic_directory_swap(
         return Err(ModuleError::InvalidManifest(format!(
             "Failed to finalize module directory: {e}"
         )));
-    }
-    Ok(())
-}
-
-fn finalize_module_entrypoint(
-    manifest: &mut PersonalManifest,
-    target_dir: &Path,
-) -> Result<(), ModuleError> {
-    let abs_target_dir = if target_dir.is_relative() {
-        std::env::current_dir()
-            .ok()
-            .map(|cwd| cwd.join(target_dir))
-            .unwrap_or_else(|| target_dir.to_path_buf())
-    } else {
-        target_dir.to_path_buf()
-    };
-
-    let is_url_entrypoint = manifest.protocol == "local-http"
-        || manifest.entrypoint.starts_with("http://")
-        || manifest.entrypoint.starts_with("https://");
-
-    if !is_url_entrypoint {
-        let ep_path = Path::new(&manifest.entrypoint);
-        let resolved_ep = if ep_path.is_relative() {
-            abs_target_dir.join(ep_path)
-        } else {
-            ep_path.to_path_buf()
-        };
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let (Ok(can_ep), Ok(can_target)) =
-                (resolved_ep.canonicalize(), abs_target_dir.canonicalize())
-            {
-                if can_ep.starts_with(&can_target) && can_ep.is_file() {
-                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
-                }
-            }
-        }
-
-        manifest.entrypoint = resolved_ep.to_string_lossy().to_string();
     }
     Ok(())
 }
@@ -336,12 +302,15 @@ mod tests {
             InstallSource::LocalDir(v2_dir.clone()),
             opts,
             &temp_state,
+            None,
         )
         .expect("upgrade succeeds");
 
         assert_eq!(upgraded.version, "2.1.0");
         assert_eq!(upgraded.name, "Upgrade Test Module v2");
         assert!(upgraded.capabilities.contains(&"video".to_string()));
+        assert!(upgraded.entrypoint.contains("test-upgrade-module"));
+        assert!(!upgraded.entrypoint.contains("stage_upg_"));
 
         // 4. Verify config.json and .env were strictly preserved
         let config_str = fs::read_to_string(target_dir.join("config.json")).unwrap();
@@ -424,6 +393,7 @@ mod tests {
             InstallSource::LocalDir(bad_v2_dir.clone()),
             opts,
             &temp_state,
+            None,
         );
         assert!(res.is_err());
 
@@ -450,6 +420,7 @@ mod tests {
             InstallSource::LocalDir(dummy_dir.clone()),
             opts,
             &temp_state,
+            None,
         );
         assert!(matches!(res, Err(ModuleError::NotFound(_))));
 

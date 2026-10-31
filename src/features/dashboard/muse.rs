@@ -66,20 +66,77 @@ fn validate_muse_config_payload(payload: &UpdateMuseConfigPayload) -> Result<(),
     Ok(())
 }
 
+fn update_non_empty_string(target: &mut String, val: Option<String>) {
+    if let Some(v) = val {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            *target = trimmed.to_string();
+        }
+    }
+}
+
+fn clean_string_list(list: Option<Vec<String>>) -> Option<Vec<String>> {
+    list.map(|items| {
+        items
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    })
+}
+
+fn apply_muse_approval_settings(
+    approval_conf: &mut crate::config::MuseApprovalConfig,
+    app: MuseApprovalPayload,
+) {
+    if let Some(m) = app.mode {
+        let trimmed = m.trim();
+        if !trimmed.is_empty() {
+            approval_conf.mode = parse_muse_approval_mode(trimmed);
+        }
+    }
+    if let Some(clean_dests) = clean_string_list(app.allowed_destinations) {
+        approval_conf.allowed_destinations = clean_dests;
+    }
+    if let Some(clean_types) = clean_string_list(app.allowed_types) {
+        approval_conf.allowed_types = clean_types;
+    }
+    if let Some(pref) = app.prefer_allow_once {
+        approval_conf.prefer_allow_once = pref;
+    }
+    if let Some(always) = app.allow_always {
+        approval_conf.allow_always = always;
+    }
+    if let Some(max) = app.max_decisions {
+        approval_conf.max_decisions_per_job = max;
+    }
+    if let Some(timeout) = app.timeout_secs {
+        approval_conf.approval_timeout_secs = timeout;
+    }
+}
+
 fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
-    if let Some(base) = payload.base_url {
-        let trimmed = base.trim();
-        if !trimmed.is_empty() {
-            conf.museai_base_url = trimmed.to_string();
-        }
-    }
-    if let Some(ws) = payload.ws_url {
-        let trimmed = ws.trim();
-        if !trimmed.is_empty() {
-            conf.museai_ws_url = trimmed.to_string();
-        }
-    }
-    if let Some(vm) = payload.vm_id {
+    let UpdateMuseConfigPayload {
+        base_url,
+        ws_url,
+        vm_id,
+        access_token,
+        notary_token,
+        cookie,
+        default_video_prompt,
+        approval,
+        approval_mode,
+        allowed_destinations,
+        allowed_types,
+        prefer_allow_once,
+        allow_always,
+        max_decisions,
+        timeout_secs,
+    } = payload;
+
+    update_non_empty_string(&mut conf.museai_base_url, base_url);
+    update_non_empty_string(&mut conf.museai_ws_url, ws_url);
+    if let Some(vm) = vm_id {
         let trimmed = vm.trim();
         if trimmed.is_empty() || trimmed == "vm-438" {
             conf.museai_vm_id.clear();
@@ -87,69 +144,35 @@ fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
             conf.museai_vm_id = trimmed.to_string();
         }
     }
-    if let Some(token) = payload.access_token {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            conf.museai_access_token = trimmed.to_string();
-        }
+    update_non_empty_string(&mut conf.museai_access_token, access_token);
+    update_non_empty_string(&mut conf.museai_notary_token, notary_token);
+    update_non_empty_string(&mut conf.museai_cookie, cookie);
+    update_non_empty_string(&mut conf.default_video_prompt, default_video_prompt);
+
+    let mut app = approval.unwrap_or_default();
+    if app.mode.is_none() {
+        app.mode = approval_mode;
     }
-    if let Some(token) = payload.notary_token {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            conf.museai_notary_token = trimmed.to_string();
-        }
+    if app.allowed_destinations.is_none() {
+        app.allowed_destinations = allowed_destinations;
     }
-    if let Some(cookie) = payload.cookie {
-        let trimmed = cookie.trim();
-        if !trimmed.is_empty() {
-            conf.museai_cookie = trimmed.to_string();
-        }
+    if app.allowed_types.is_none() {
+        app.allowed_types = allowed_types;
     }
-    if let Some(prompt) = payload.default_video_prompt {
-        let trimmed = prompt.trim();
-        if !trimmed.is_empty() {
-            conf.default_video_prompt = trimmed.to_string();
-        }
+    if app.prefer_allow_once.is_none() {
+        app.prefer_allow_once = prefer_allow_once;
+    }
+    if app.allow_always.is_none() {
+        app.allow_always = allow_always;
+    }
+    if app.max_decisions.is_none() {
+        app.max_decisions = max_decisions;
+    }
+    if app.timeout_secs.is_none() {
+        app.timeout_secs = timeout_secs;
     }
 
-    let approval = payload.approval.unwrap_or_default();
-    let mode = approval.mode.or(payload.approval_mode);
-    if let Some(m) = mode {
-        let trimmed = m.trim();
-        if !trimmed.is_empty() {
-            conf.muse_approval.mode = parse_muse_approval_mode(trimmed);
-        }
-    }
-    let dests = approval
-        .allowed_destinations
-        .or(payload.allowed_destinations);
-    if let Some(dests) = dests {
-        conf.muse_approval.allowed_destinations = dests
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-    }
-    let types = approval.allowed_types.or(payload.allowed_types);
-    if let Some(types) = types {
-        conf.muse_approval.allowed_types = types
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-    }
-    if let Some(pref) = approval.prefer_allow_once.or(payload.prefer_allow_once) {
-        conf.muse_approval.prefer_allow_once = pref;
-    }
-    if let Some(always) = approval.allow_always.or(payload.allow_always) {
-        conf.muse_approval.allow_always = always;
-    }
-    if let Some(max) = approval.max_decisions.or(payload.max_decisions) {
-        conf.muse_approval.max_decisions_per_job = max;
-    }
-    if let Some(timeout) = approval.timeout_secs.or(payload.timeout_secs) {
-        conf.muse_approval.approval_timeout_secs = timeout;
-    }
+    apply_muse_approval_settings(&mut conf.muse_approval, app);
 }
 
 pub fn handle_update_muse_config(

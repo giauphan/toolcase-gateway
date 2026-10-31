@@ -217,3 +217,40 @@ pub fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     }
     Ok(out)
 }
+
+/// Ingests source files from any supported source into a staging directory and unwraps top-level folders.
+pub(super) fn ingest_source_into_staging(
+    source: &InstallSource,
+    branch: Option<&str>,
+    staging_dir: &Path,
+) -> Result<(), ModuleError> {
+    let ingest_result = match source {
+        InstallSource::GitHubUrl(url) => ingest_github(url, branch, staging_dir),
+        InstallSource::ZipUrl(url) => ingest_zip_url(url, staging_dir),
+        InstallSource::ZipFile(path) => ingest_zip_file(path, staging_dir),
+        InstallSource::ZipBytes(bytes) => extract_zip(bytes, staging_dir)
+            .map(|_| ())
+            .map_err(|e| ModuleError::InvalidManifest(e.to_string())),
+        InstallSource::LocalDir(dir) => copy_dir_all(dir, staging_dir)
+            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to copy directory: {e}"))),
+    };
+
+    if let Err(e) = ingest_result {
+        let _ = fs::remove_dir_all(staging_dir);
+        return Err(e);
+    }
+
+    unwrap_single_top_level_directory(staging_dir);
+    Ok(())
+}
+
+/// Extracts a human-readable source URL or path from an InstallSource descriptor.
+pub(super) fn extract_source_url(source: &InstallSource) -> Option<String> {
+    match source {
+        InstallSource::GitHubUrl(u) | InstallSource::ZipUrl(u) => Some(u.clone()),
+        InstallSource::LocalDir(p) | InstallSource::ZipFile(p) => {
+            Some(p.to_string_lossy().to_string())
+        }
+        InstallSource::ZipBytes(_) => None,
+    }
+}

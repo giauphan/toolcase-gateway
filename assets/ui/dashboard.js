@@ -271,7 +271,7 @@
       panel.classList.toggle("is-hidden", !isCurrent);
     });
 
-    const currentViewIsProviders = views.providers && views.providers.classList.contains("visible");
+    const currentViewIsProviders = views.providers?.classList.contains("visible");
     if (currentViewIsProviders) {
       document.querySelectorAll("#sidebar-pinned-modules .navitem").forEach(function(item) {
         const active = item.dataset.tab === providerId;
@@ -920,7 +920,7 @@
       } else {
         const activeTabEl = document.querySelector("#provider-tabline .tab.active");
         const currentTab = activeTabEl ? activeTabEl.dataset.provider : "omni";
-        const isProvidersView = views.providers && views.providers.classList.contains("visible");
+        const isProvidersView = views.providers?.classList.contains("visible");
 
         sidebarPinned.innerHTML = "<div class=\"sidebar-label ui-sidebar-label\">PINNED PROVIDERS</div>" +
           pinned.map(function(m) {

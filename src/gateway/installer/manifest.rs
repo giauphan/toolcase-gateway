@@ -221,3 +221,45 @@ fn sanitize_id(raw: &str) -> String {
         clean
     }
 }
+
+/// Resolves the module entrypoint to an absolute path inside target_dir and sets executable permissions on Unix.
+pub(super) fn finalize_module_entrypoint(
+    manifest: &mut PersonalManifest,
+    target_dir: &Path,
+) -> Result<(), ModuleError> {
+    let abs_target_dir = if target_dir.is_relative() {
+        std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join(target_dir))
+            .unwrap_or_else(|| target_dir.to_path_buf())
+    } else {
+        target_dir.to_path_buf()
+    };
+
+    let is_url_entrypoint = manifest.protocol == "local-http"
+        || manifest.entrypoint.starts_with("http://")
+        || manifest.entrypoint.starts_with("https://");
+    if !is_url_entrypoint {
+        let ep_path = Path::new(&manifest.entrypoint);
+        let resolved_ep = if ep_path.is_relative() {
+            abs_target_dir.join(ep_path)
+        } else {
+            ep_path.to_path_buf()
+        };
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let (Ok(can_ep), Ok(can_target)) =
+                (resolved_ep.canonicalize(), abs_target_dir.canonicalize())
+            {
+                if can_ep.starts_with(&can_target) && can_ep.is_file() {
+                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
+                }
+            }
+        }
+
+        manifest.entrypoint = resolved_ep.to_string_lossy().to_string();
+    }
+    Ok(())
+}

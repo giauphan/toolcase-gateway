@@ -287,6 +287,7 @@ pub fn handle_upgrade_personal_module(
             );
         }
     };
+    let registered_mods = read_guard.modules().clone();
     drop(read_guard);
 
     let install_source = crate::gateway::installer::resolve_source(&raw_source);
@@ -305,6 +306,7 @@ pub fn handle_upgrade_personal_module(
         install_source,
         opts,
         &state_dir,
+        Some(&registered_mods),
     ) {
         Ok(m) => m,
         Err(e) => {
