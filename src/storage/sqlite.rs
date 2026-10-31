@@ -372,6 +372,7 @@ mod tests {
             config_schema: None,
             permissions: vec![],
             group: None,
+            source: None,
         };
         storage.save_module(&manifest).unwrap();
         let modules = storage.get_modules().unwrap();

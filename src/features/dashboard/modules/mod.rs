@@ -202,3 +202,160 @@ pub fn handle_remove_personal_module(
     client.write_all(&resp_bytes)?;
     client.flush()
 }
+
+pub fn handle_upgrade_personal_module(
+    client: &mut TcpStream,
+    body: &[u8],
+    store: &ConfigStore,
+) -> io::Result<()> {
+    #[derive(serde::Deserialize)]
+    struct UpgradePayload {
+        id: String,
+        #[serde(default)]
+        source: Option<String>,
+        #[serde(default)]
+        branch: Option<String>,
+    }
+
+    let payload: UpgradePayload = match serde_json::from_slice(body) {
+        Ok(p) => p,
+        Err(e) => return write_error(client, 400, "Bad Request", &format!("Invalid JSON: {e}")),
+    };
+
+    let id = payload.id.trim();
+    if id.is_empty() {
+        return write_error(client, 400, "Bad Request", "Module ID is required");
+    }
+
+    let reg = store.module_registry();
+    let read_guard = match reg.read() {
+        Ok(g) => g,
+        Err(e) => return write_error(client, 500, "Internal Error", &e.to_string()),
+    };
+
+    let resolved_id = read_guard
+        .resolve_module_id(id)
+        .unwrap_or_else(|| id.to_string());
+
+    let existing_desc = match read_guard.get_module(&resolved_id) {
+        Some(d) => d.clone(),
+        None => {
+            drop(read_guard);
+            return write_error(
+                client,
+                404,
+                "Not Found",
+                &format!("Module '{resolved_id}' is not installed"),
+            );
+        }
+    };
+
+    if existing_desc.kind == crate::gateway::modules::ModuleKind::BuiltIn {
+        drop(read_guard);
+        return write_error(
+            client,
+            400,
+            "Bad Request",
+            &format!("Built-in module '{resolved_id}' cannot be upgraded via this endpoint"),
+        );
+    }
+
+    let source_candidate = payload
+        .source
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| existing_desc.source.clone())
+        .or_else(|| {
+            crate::gateway::modules::get_system_module_catalog()
+                .into_iter()
+                .find(|c| c.id == resolved_id || c.namespace == existing_desc.namespace)
+                .and_then(|c| c.source)
+        });
+
+    let raw_source = match source_candidate {
+        Some(s) => s,
+        None => {
+            drop(read_guard);
+            return write_error(
+                client,
+                400,
+                "Bad Request",
+                &format!(
+                    "Module '{resolved_id}' has no configured source repository to upgrade from. Please provide a 'source' parameter."
+                ),
+            );
+        }
+    };
+    drop(read_guard);
+
+    let install_source = crate::gateway::installer::resolve_source(&raw_source);
+    let opts = InstallOptions {
+        id: Some(resolved_id.clone()),
+        name: None,
+        namespace: None,
+        entrypoint: None,
+        protocol: None,
+        branch: payload.branch,
+    };
+
+    let state_dir = get_state_dir();
+    let new_manifest = match crate::gateway::installer::upgrade_module(
+        &resolved_id,
+        install_source,
+        opts,
+        &state_dir,
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            return write_error(
+                client,
+                400,
+                "Bad Request",
+                &format!("Module upgrade failed: {e}"),
+            )
+        }
+    };
+
+    let mut write_guard = match reg.write() {
+        Ok(g) => g,
+        Err(e) => return write_error(client, 500, "Internal Error", &e.to_string()),
+    };
+    let updated_desc = match write_guard.upgrade_personal_module(new_manifest) {
+        Ok(d) => d,
+        Err(e) => {
+            drop(write_guard);
+            return write_error(client, 400, "Bad Request", &e.to_string());
+        }
+    };
+    drop(write_guard);
+
+    if let Err(e) = store.save_to_persistent_file() {
+        return write_error(
+            client,
+            500,
+            "Internal Error",
+            &format!("Module upgraded but persistence failed: {e}"),
+        );
+    }
+
+    let resp = serde_json::json!({
+        "ok": true,
+        "id": resolved_id,
+        "version": updated_desc.version,
+        "message": format!(
+            "Module '{}' upgraded successfully to version {}.",
+            resolved_id,
+            updated_desc.version.as_deref().unwrap_or("latest")
+        ),
+        "module": updated_desc
+    });
+    let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        resp_bytes.len()
+    )?;
+    client.write_all(&resp_bytes)?;
+    client.flush()
+}

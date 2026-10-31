@@ -208,6 +208,7 @@ pub fn parse_or_synthesize_manifest(
                     config_schema: cat.config_schema,
                     permissions: Vec::new(),
                     group,
+                    source: cat.source,
                 },
                 false,
             ));
@@ -253,6 +254,7 @@ pub fn parse_or_synthesize_manifest(
             config_schema: None,
             permissions: Vec::new(),
             group: None,
+            source: payload.source.clone(),
         },
         false,
     ))

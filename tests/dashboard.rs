@@ -12,3 +12,6 @@ mod config_persistence_tests;
 
 #[path = "dashboard/module_ui_position_tests.rs"]
 mod module_ui_position_tests;
+
+#[path = "dashboard/module_upgrade_tests.rs"]
+mod module_upgrade_tests;

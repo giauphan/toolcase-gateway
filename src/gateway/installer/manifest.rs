@@ -121,6 +121,7 @@ pub(super) fn discover_or_synthesize_manifest(
         config_schema: None,
         permissions: Vec::new(),
         group: None,
+        source: None,
     })
 }
 

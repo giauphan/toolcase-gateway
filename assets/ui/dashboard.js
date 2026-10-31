@@ -409,6 +409,12 @@
       return;
     }
 
+    const upgBtn = e.target.closest(".module-upgrade");
+    if (upgBtn) {
+      requestModuleUpgrade(upgBtn.dataset.moduleId);
+      return;
+    }
+
     const detailBtn = e.target.closest(".module-detail");
     if (detailBtn) {
       showModuleDetail(detailBtn.dataset.moduleId);
@@ -478,6 +484,7 @@
       pendingModuleAction = null;
       if (moduleActionDialog.returnValue !== "confirm" || !action) return;
       if (action.kind === "remove") window.removeModule(action.id);
+      else if (action.kind === "upgrade") window.upgradeModule(action.id);
       else window.toggleModule(action.id, action.enable);
     });
   }
@@ -525,6 +532,15 @@
     moduleActionDialog.showModal();
   }
 
+  function requestModuleUpgrade(id) {
+    if (!id || !moduleActionDialog) return;
+    pendingModuleAction = { id: id, kind: 'upgrade' };
+    moduleActionDescription.textContent = 'Upgrade this module to its latest version? Existing configuration and credentials will be preserved.';
+    moduleActionConfirm.textContent = 'Upgrade module';
+    moduleActionDialog.returnValue = '';
+    moduleActionDialog.showModal();
+  }
+
   function showModuleDetail(id) {
     const module = renderedModules.find(function(candidate) { return candidate.id === id; });
     if (!module || !moduleDetailDialog || !moduleDetailContent) return;
@@ -552,11 +568,14 @@
         "<div><strong>Module ID:</strong> " + escapeHtml(module.id) + "</div>" +
         "<div><strong>Display Name:</strong> " + escapeHtml(module.name) + "</div>" +
         "<div><strong>Kind:</strong> <span class=\"pill gray\">" + escapeHtml(module.kind) + "</span></div>" +
+        (module.version ? ("<div><strong>Version:</strong> <span class=\"pill gray\">" + escapeHtml(module.version) + "</span></div>") : "") +
+        (module.source ? ("<div><strong>Source:</strong> <code>" + escapeHtml(module.source) + "</code></div>") : "") +
         "<div><strong>Route Namespace:</strong> <code>" + escapeHtml(module.namespace) + "</code></div>" +
         "<div><strong>Status:</strong> <span class=\"pill " + (module.status === "enabled" ? "good" : "gray") + "\">" + escapeHtml(module.status) + "</span></div>" +
         "<div><strong>Capabilities:</strong><br>" + capabilities + "</div>" +
         "<div><strong>Nested Providers:</strong><ul>" + providers + "</ul></div>" +
         "<div class=\"btns\" style=\"margin-top:12px;\">" +
+          (module.kind !== "builtin" ? ("<button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(module.id) + "\">Upgrade Module</button> ") : "") +
           "<a class=\"btn primary btn-primary\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Configure in Provider Settings</a> " +
           "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config ↗</a>" +
         "</div>" +
@@ -583,11 +602,12 @@
       " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
     const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
       " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
-    let removeBtn = "";
+    let personalBtns = "";
     if (!isBuiltin) {
-      removeBtn = " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
+      personalBtns = " <button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Upgrade module to latest version\">Upgrade</button>" +
+        " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
     }
-    return toggleBtn + configBtns + posSelect + orderBtns + removeBtn;
+    return toggleBtn + configBtns + posSelect + orderBtns + personalBtns;
   }
 
   function renderModules(modules, isFiltered) {
@@ -686,7 +706,7 @@
         "<div class=\"catalogdesc\">" + escapeHtml(item.description) + "<br><code>" + escapeHtml(item.namespace) + "</code>" + sourceHtml + "<br>" + caps + "</div>" +
         "<div class=\"minirow\">" +
           (isInstalled
-            ? "<span class=\"pill good\">Installed</span>"
+            ? "<span class=\"pill good\">Installed</span> <button class=\"btn catalog-upgrade-btn\" data-catalog-id=\"" + escapeHtml(item.id) + "\" title=\"Upgrade to latest version\">Upgrade</button>"
             : "<button class=\"btn catalog-install-btn\" data-catalog-id=\"" + escapeHtml(item.id) + "\">Explore &amp; install</button>") +
         "</div>" +
       "</div>";
@@ -697,6 +717,15 @@
   function initCatalogGrid() {
     if (!catalogGrid) return;
     catalogGrid.addEventListener("click", function(ev) {
+      const upgBtn = ev.target.closest(".catalog-upgrade-btn");
+      if (upgBtn) {
+        const id = upgBtn.dataset.catalogId;
+        if (!id) return;
+        upgBtn.disabled = true;
+        upgBtn.textContent = "Upgrading...";
+        executeModuleUpgrade({ id: id }, upgBtn);
+        return;
+      }
       const btn = ev.target.closest(".catalog-install-btn");
       if (!btn) return;
       const id = btn.dataset.catalogId;
@@ -705,6 +734,30 @@
       btn.textContent = "Installing...";
       executeModuleInstall({ id: id }, btn);
     });
+  }
+
+  function executeModuleUpgrade(payload, catalogButton) {
+    postJson("/api/v1/dashboard/modules/upgrade", payload)
+      .then(function(result) {
+        if (catalogButton) {
+          catalogButton.disabled = false;
+          catalogButton.textContent = "Upgrade";
+        }
+        if (!result.ok) {
+          const errorDetail = result.json.message || ("HTTP " + result.status);
+          showModulesFeedback('Failed to upgrade module: ' + errorDetail, true);
+        } else {
+          showModulesFeedback("Module '" + (result.json.id || payload.id) + "' upgraded successfully to version " + (result.json.version || "latest") + ".", false);
+          loadOverview();
+        }
+      })
+      .catch(function(err) {
+        if (catalogButton) {
+          catalogButton.disabled = false;
+          catalogButton.textContent = "Upgrade";
+        }
+        showModulesFeedback('Network error: ' + err.message, true);
+      });
   }
 
   function executeModuleInstall(payload, catalogButton) {
@@ -1034,6 +1087,17 @@
       "Removing personal module '" + id + "'...",
       "Personal module '" + id + "' was successfully removed.",
       "Failed to remove module"
+    );
+  };
+
+  window.upgradeModule = function(id) {
+    sendModuleRequest(
+      id,
+      "/api/v1/dashboard/modules/upgrade",
+      { id: id },
+      "Upgrading personal module '" + id + "'...",
+      "Personal module '" + id + "' was successfully upgraded to the latest version.",
+      "Failed to upgrade module"
     );
   };
 

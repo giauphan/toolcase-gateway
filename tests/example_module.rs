@@ -59,6 +59,7 @@ fn test_example_echo_provider_dispatch_stdio_flow() {
         config_schema: None,
         permissions: vec![],
         group: None,
+        source: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -176,6 +177,7 @@ fn test_personal_module_accepts_structured_json_body() {
         config_schema: None,
         permissions: vec![],
         group: None,
+        source: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -237,6 +239,7 @@ fn test_crashing_module_captures_stderr_message() {
         config_schema: None,
         permissions: vec![],
         group: None,
+        source: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -315,6 +318,7 @@ EOF
         config_schema: None,
         permissions: vec![],
         group: None,
+        source: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -390,6 +394,7 @@ EOF
         config_schema: None,
         permissions: vec![],
         group: None,
+        source: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {

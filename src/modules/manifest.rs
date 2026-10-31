@@ -97,6 +97,8 @@ pub struct PersonalManifest {
     pub permissions: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<ModuleGroupManifest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 fn default_module_name() -> String {
@@ -231,6 +233,8 @@ pub struct ModuleDescriptor {
     pub settings_tab: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 pub fn builtin_ui_defaults(

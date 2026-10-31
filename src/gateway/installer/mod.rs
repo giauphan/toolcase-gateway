@@ -6,8 +6,10 @@
 
 mod ingest;
 mod manifest;
+mod upgrade;
 
 pub use ingest::{decode_base64, resolve_source};
+pub use upgrade::upgrade_module;
 
 use crate::gateway::archive::extract_zip;
 use crate::gateway::modules::{ModuleError, PersonalManifest};
@@ -113,16 +115,16 @@ pub fn install_module(
         .map_err(|e| ModuleError::InvalidManifest(format!("Failed to create staging dir: {e}")))?;
 
     // Ingest the source files into staging_dir
-    let ingest_result = match source {
+    let ingest_result = match &source {
         InstallSource::GitHubUrl(url) => {
-            ingest_github(&url, options.branch.as_deref(), &staging_dir)
+            ingest_github(url, options.branch.as_deref(), &staging_dir)
         }
-        InstallSource::ZipUrl(url) => ingest_zip_url(&url, &staging_dir),
-        InstallSource::ZipFile(path) => ingest_zip_file(&path, &staging_dir),
-        InstallSource::ZipBytes(bytes) => extract_zip(&bytes, &staging_dir)
+        InstallSource::ZipUrl(url) => ingest_zip_url(url, &staging_dir),
+        InstallSource::ZipFile(path) => ingest_zip_file(path, &staging_dir),
+        InstallSource::ZipBytes(bytes) => extract_zip(bytes, &staging_dir)
             .map(|_| ())
             .map_err(|e| ModuleError::InvalidManifest(e.to_string())),
-        InstallSource::LocalDir(dir) => copy_dir_all(&dir, &staging_dir)
+        InstallSource::LocalDir(dir) => copy_dir_all(dir, &staging_dir)
             .map_err(|e| ModuleError::InvalidManifest(format!("Failed to copy directory: {e}"))),
     };
 
@@ -133,6 +135,14 @@ pub fn install_module(
 
     unwrap_single_top_level_directory(&staging_dir);
 
+    let source_str = match &source {
+        InstallSource::GitHubUrl(u) | InstallSource::ZipUrl(u) => Some(u.clone()),
+        InstallSource::LocalDir(p) | InstallSource::ZipFile(p) => {
+            Some(p.to_string_lossy().to_string())
+        }
+        InstallSource::ZipBytes(_) => None,
+    };
+
     // Discover or synthesize the manifest
     let mut manifest = match discover_or_synthesize_manifest(&staging_dir, &options) {
         Ok(m) => m,
@@ -141,6 +151,12 @@ pub fn install_module(
             return Err(e);
         }
     };
+
+    if let Some(src) = source_str {
+        if manifest.source.is_none() {
+            manifest.source = Some(src);
+        }
+    }
 
     // Validate ID strictly to prevent path traversal or malformed paths
     let id_valid = !manifest.id.is_empty()
