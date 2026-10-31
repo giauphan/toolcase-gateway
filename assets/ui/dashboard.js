@@ -1167,18 +1167,26 @@
     }
   }
 
+  function setValue(el, value) {
+    if (el) el.value = value;
+  }
+
+  function setMaskedHint(el, masked) {
+    if (el) el.textContent = masked ? ("Current: " + masked) : "Current: not set";
+  }
+
   function populateMuseConfigForm(config, muse, approval) {
-    if (cfgMuseBase) cfgMuseBase.value = config.museai_base_url || "https://muse.ai";
-    if (cfgMuseWs) cfgMuseWs.value = config.museai_ws_url || "wss://vm-438.metaaivm.com/";
-    if (cfgMuseVmid) cfgMuseVmid.value = config.museai_vm_id || "vm-438";
-    if (hintToken) hintToken.textContent = muse.masked_access_token ? ("Current: " + muse.masked_access_token) : "Current: not set";
-    if (hintNotary) hintNotary.textContent = muse.masked_notary_token ? ("Current: " + muse.masked_notary_token) : "Current: not set";
-    if (hintCookie) hintCookie.textContent = muse.masked_cookie ? ("Current: " + muse.masked_cookie) : "Current: not set";
-    if (cfgMuseVideoPrompt) cfgMuseVideoPrompt.value = config.default_video_prompt || "";
-    if (cfgMuseApprovalMode) cfgMuseApprovalMode.value = approval.mode || "off";
-    if (cfgMuseApprovalTimeout) cfgMuseApprovalTimeout.value = approval.timeout_secs || 30;
-    if (cfgMuseApprovalDestinations) cfgMuseApprovalDestinations.value = (approval.allowed_destinations || []).join(", ");
-    if (cfgMuseApprovalTypes) cfgMuseApprovalTypes.value = (approval.allowed_types || []).join(", ");
+    setValue(cfgMuseBase, config.museai_base_url || "https://muse.ai");
+    setValue(cfgMuseWs, config.museai_ws_url || "wss://vm-438.metaaivm.com/");
+    setValue(cfgMuseVmid, config.museai_vm_id || "vm-438");
+    setMaskedHint(hintToken, muse.masked_access_token);
+    setMaskedHint(hintNotary, muse.masked_notary_token);
+    setMaskedHint(hintCookie, muse.masked_cookie);
+    setValue(cfgMuseVideoPrompt, config.default_video_prompt || "");
+    setValue(cfgMuseApprovalMode, approval.mode || "off");
+    setValue(cfgMuseApprovalTimeout, approval.timeout_secs || 30);
+    setValue(cfgMuseApprovalDestinations, (approval.allowed_destinations || []).join(", "));
+    setValue(cfgMuseApprovalTypes, (approval.allowed_types || []).join(", "));
   }
 
   function populateProviderConfigForms(config, providers) {

@@ -231,7 +231,7 @@ body {
   border-radius: var(--radius-md);
   padding: 12px 24px;
   font-size: 14px;
-  transition: all .15s ease;
+  transition: background-color .15s ease, box-shadow .15s ease, transform .15s ease;
   box-shadow: var(--shadow-sm);
 }
 .btn-primary:hover {
