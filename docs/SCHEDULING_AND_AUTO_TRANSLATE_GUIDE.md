@@ -96,12 +96,13 @@ Expected output:
 TikTok Creator Center supports scheduling posts for creator accounts with web scheduling capabilities enabled.
 
 ### 3.1 Scheduling Parameters
-- **Parameter Name**: `schedule_time`
+- **Parameter Name**: `schedule_time` (or `scheduled_publish_time`)
 - **Format**: Unix timestamp (seconds since epoch in integer format).
 - **Rules**:
-  - Must be between **15 minutes** and **10 days** from the current moment.
-  - Video visibility must typically be `"public"`.
-  - When provided, Toolcase Gateway automatically embeds `schedule_time` into `feature_common_info_list` and `post_common_info` within the TikTok Creator Studio post request.
+  - Must be between **15 minutes** and **30 days** from the current moment (some regional accounts have a 10-day ceiling).
+  - Video visibility is automatically set to `"public"` (`visibility_type: 0`) because TikTok does not permit private scheduled posts.
+  - Supports 1-step direct publishing by providing `video_path` (e.g., `"/path/to/video.mp4"`), eliminating manual TOS chunking.
+  - Toolcase Gateway automatically performs the upstream `/api/v1/post_schedule/ack/?ack_type=2` server storage acknowledgement, embedding `schedule_time` into `feature_common_info_list` alongside Creator Center parameters.
 
 ### 3.2 Schedule a TikTok Post (`curl`)
 
@@ -109,12 +110,12 @@ TikTok Creator Center supports scheduling posts for creator accounts with web sc
 # Calculate timestamp: e.g., 1 day from now
 TIKTOK_SCHEDULE=$(($(date +%s) + 86400))
 
+# 1-Step Schedule using local video file path
 curl -X POST http://127.0.0.1:28130/tiktok/v1/publish \
   -H "Content-Type: application/json" \
   -d "{
-    \"video_id\": \"v1c025g50000dbi47gfog65vcfe2cs80\",
+    \"video_path\": \"/path/to/video.mp4\",
     \"text\": \"Tomorrow morning routine highlights #daily #routine\",
-    \"visibility\": \"public\",
     \"schedule_time\": ${TIKTOK_SCHEDULE}
   }"
 ```
@@ -122,16 +123,20 @@ curl -X POST http://127.0.0.1:28130/tiktok/v1/publish \
 #### Response Example
 ```json
 {
-  "project_id": "7702471269211444231",
+  "project_id": "7702784686095111175",
+  "item_id": "7702784742617337095",
   "project_status": 1,
   "status": "scheduled",
-  "schedule_time": 1793430800,
-  "status_code": 0
+  "visibility_type": 0,
+  "visibility": "public",
+  "schedule_time": 1793613600,
+  "status_code": 0,
+  "status_msg": ""
 }
 ```
 
 > [!NOTE]
-> If your TikTok account has not activated desktop web scheduling in TikTok Creator Studio, upstream returns `status_code: 5`. Ensure the account has creator/business scheduling enabled in Creator Center settings.
+> Toolcase Gateway automatically authorizes server-side video staging via TikTok's schedule acknowledgment API (`/api/v1/post_schedule/ack/`). If your account is restricted by TikTok trust and safety from scheduling, verify in TikTok Creator Center settings that creator upload features are active.
 
 ---
 
@@ -279,13 +284,12 @@ fb_response = post_json(
 )
 print("Facebook Scheduled Result:", fb_response)
 
-# 2. Schedule on TikTok
+# 2. Schedule on TikTok (using local file path or video_id)
 tiktok_response = post_json(
     "/tiktok/v1/publish",
     {
-        "video_id": "v1c025g50000dbi47gfog65vcfe2cs80",
+        "video_path": "render.mp4",
         "text": "Scheduled premier for our global audience! #innovation #future",
-        "visibility": "public",
         "schedule_time": scheduled_time,
     },
 )

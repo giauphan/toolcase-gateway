@@ -51,21 +51,27 @@ fn test_match_path_builtins() {
     assert_eq!(jev_sub, "/v1/decisions");
 }
 
-#[test]
-fn test_personal_module_registration_and_isolation() {
-    let mut reg = ModuleRegistry::new();
-    let manifest = PersonalManifest {
-        id: "my-test-mod".to_string(),
-        name: "My Test Module".to_string(),
+fn sample_manifest(id: &str, name: &str, namespace: &str) -> PersonalManifest {
+    PersonalManifest {
+        id: id.to_string(),
+        name: name.to_string(),
+        short_name: None,
         version: "1.0.0".to_string(),
-        namespace: "/custom/test-mod".to_string(),
+        namespace: namespace.to_string(),
         entrypoint: "/bin/sh".to_string(),
         protocol: "stdio-stream".to_string(),
         capabilities: vec!["chat".to_string()],
+        icon: None,
         config_schema: None,
         permissions: Vec::new(),
         group: None,
-    };
+    }
+}
+
+#[test]
+fn test_personal_module_registration_and_isolation() {
+    let mut reg = ModuleRegistry::new();
+    let manifest = sample_manifest("my-test-mod", "My Test Module", "/custom/test-mod");
 
     reg.register_personal_module(manifest).unwrap();
     let desc = reg.get_module("my-test-mod").unwrap();
@@ -93,34 +99,29 @@ fn test_personal_module_registration_and_isolation() {
 #[test]
 fn test_personal_module_group_registration_and_sub_providers() {
     let mut reg = ModuleRegistry::new();
-    let manifest = PersonalManifest {
-        id: "my-group-mod".to_string(),
-        name: "My Multi-Provider Group".to_string(),
-        version: "1.0.0".to_string(),
-        namespace: "/custom/group-mod".to_string(),
-        entrypoint: "/bin/sh".to_string(),
-        protocol: "stdio-stream".to_string(),
-        capabilities: vec!["chat".to_string(), "vision".to_string()],
-        config_schema: None,
-        permissions: Vec::new(),
-        group: Some(ModuleGroupManifest {
-            enabled: true,
-            providers: vec![
-                SubProviderManifest {
-                    id: "chat-sub".to_string(),
-                    name: "Chat Sub Provider".to_string(),
-                    subpath: "/chat".to_string(),
-                    capabilities: vec!["chat".to_string()],
-                },
-                SubProviderManifest {
-                    id: "vision-sub".to_string(),
-                    name: "Vision Sub Provider".to_string(),
-                    subpath: "/vision".to_string(),
-                    capabilities: vec!["vision".to_string()],
-                },
-            ],
-        }),
-    };
+    let mut manifest = sample_manifest(
+        "my-group-mod",
+        "My Multi-Provider Group",
+        "/custom/group-mod",
+    );
+    manifest.capabilities = vec!["chat".to_string(), "vision".to_string()];
+    manifest.group = Some(ModuleGroupManifest {
+        enabled: true,
+        providers: vec![
+            SubProviderManifest {
+                id: "chat-sub".to_string(),
+                name: "Chat Sub Provider".to_string(),
+                subpath: "/chat".to_string(),
+                capabilities: vec!["chat".to_string()],
+            },
+            SubProviderManifest {
+                id: "vision-sub".to_string(),
+                name: "Vision Sub Provider".to_string(),
+                subpath: "/vision".to_string(),
+                capabilities: vec!["vision".to_string()],
+            },
+        ],
+    });
 
     reg.register_personal_module(manifest).unwrap();
     let desc = reg.get_module("my-group-mod").unwrap();
@@ -160,34 +161,25 @@ fn test_personal_module_group_registration_and_sub_providers() {
 #[test]
 fn test_module_group_validation_rejects_duplicates() {
     let mut reg = ModuleRegistry::new();
-    let manifest = PersonalManifest {
-        id: "duplicate-mod".to_string(),
-        name: "Duplicate Provider Mod".to_string(),
-        version: "1.0.0".to_string(),
-        namespace: "/custom/dup-mod".to_string(),
-        entrypoint: "/bin/sh".to_string(),
-        protocol: "stdio-stream".to_string(),
-        capabilities: vec!["chat".to_string()],
-        config_schema: None,
-        permissions: Vec::new(),
-        group: Some(ModuleGroupManifest {
-            enabled: true,
-            providers: vec![
-                SubProviderManifest {
-                    id: "p1".to_string(),
-                    name: "Provider 1".to_string(),
-                    subpath: "/chat".to_string(),
-                    capabilities: vec![],
-                },
-                SubProviderManifest {
-                    id: "p1".to_string(), // Duplicate ID!
-                    name: "Provider 1 dup".to_string(),
-                    subpath: "/chat2".to_string(),
-                    capabilities: vec![],
-                },
-            ],
-        }),
-    };
+    let mut manifest =
+        sample_manifest("duplicate-mod", "Duplicate Provider Mod", "/custom/dup-mod");
+    manifest.group = Some(ModuleGroupManifest {
+        enabled: true,
+        providers: vec![
+            SubProviderManifest {
+                id: "p1".to_string(),
+                name: "Provider 1".to_string(),
+                subpath: "/chat".to_string(),
+                capabilities: vec![],
+            },
+            SubProviderManifest {
+                id: "p1".to_string(), // Duplicate ID!
+                name: "Provider 1 dup".to_string(),
+                subpath: "/chat2".to_string(),
+                capabilities: vec![],
+            },
+        ],
+    });
 
     assert!(reg.register_personal_module(manifest).is_err());
 }
@@ -195,18 +187,7 @@ fn test_module_group_validation_rejects_duplicates() {
 #[test]
 fn test_provider_prefix_required_and_rejects_empty_or_root() {
     let mut reg = ModuleRegistry::new();
-    let mut manifest = PersonalManifest {
-        id: "no-prefix-mod".to_string(),
-        name: "No Prefix Mod".to_string(),
-        version: "1.0.0".to_string(),
-        namespace: "".to_string(),
-        entrypoint: "/bin/sh".to_string(),
-        protocol: "stdio-stream".to_string(),
-        capabilities: vec!["chat".to_string()],
-        config_schema: None,
-        permissions: Vec::new(),
-        group: None,
-    };
+    let mut manifest = sample_manifest("no-prefix-mod", "No Prefix Mod", "");
 
     // Empty namespace rejected
     assert!(reg.register_personal_module(manifest.clone()).is_err());
@@ -253,18 +234,11 @@ fn test_provider_prefix_rejects_reserved_gateway_urls() {
     ];
 
     for (i, prefix) in reserved_samples.iter().enumerate() {
-        let manifest = PersonalManifest {
-            id: format!("reserved-test-mod-{i}"),
-            name: "Reserved Test Mod".to_string(),
-            version: "1.0.0".to_string(),
-            namespace: prefix.to_string(),
-            entrypoint: "/bin/sh".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![],
-            config_schema: None,
-            permissions: Vec::new(),
-            group: None,
-        };
+        let manifest = sample_manifest(
+            &format!("reserved-test-mod-{i}"),
+            "Reserved Test Mod",
+            prefix,
+        );
         let res = reg.register_personal_module(manifest);
         assert!(
             res.is_err(),
@@ -289,18 +263,11 @@ fn test_provider_prefix_rejects_builtin_provider_collisions() {
     ];
 
     for (i, prefix) in builtin_samples.iter().enumerate() {
-        let manifest = PersonalManifest {
-            id: format!("builtin-collision-test-{i}"),
-            name: "Collision Test Mod".to_string(),
-            version: "1.0.0".to_string(),
-            namespace: prefix.to_string(),
-            entrypoint: "/bin/sh".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![],
-            config_schema: None,
-            permissions: Vec::new(),
-            group: None,
-        };
+        let manifest = sample_manifest(
+            &format!("builtin-collision-test-{i}"),
+            "Collision Test Mod",
+            prefix,
+        );
         let res = reg.register_personal_module(manifest);
         assert!(
             res.is_err(),
@@ -321,18 +288,8 @@ fn test_provider_prefix_rejects_malformed_syntax() {
     ];
 
     for (i, prefix) in malformed_samples.iter().enumerate() {
-        let manifest = PersonalManifest {
-            id: format!("malformed-test-{i}"),
-            name: "Malformed Test Mod".to_string(),
-            version: "1.0.0".to_string(),
-            namespace: prefix.to_string(),
-            entrypoint: "/bin/sh".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![],
-            config_schema: None,
-            permissions: Vec::new(),
-            group: None,
-        };
+        let manifest =
+            sample_manifest(&format!("malformed-test-{i}"), "Malformed Test Mod", prefix);
         assert!(
             reg.register_personal_module(manifest).is_err(),
             "Expected prefix '{prefix}' to be rejected as malformed"
@@ -346,26 +303,20 @@ fn test_sub_provider_requires_valid_non_root_subpath() {
     let invalid_subpaths = ["/", "//", "/sub with space", "/sub?query"];
 
     for (i, subpath) in invalid_subpaths.iter().enumerate() {
-        let manifest = PersonalManifest {
-            id: format!("sub-invalid-mod-{i}"),
-            name: "Invalid Subpath Mod".to_string(),
-            version: "1.0.0".to_string(),
-            namespace: format!("/custom/sub-invalid-{i}"),
-            entrypoint: "/bin/sh".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![],
-            config_schema: None,
-            permissions: Vec::new(),
-            group: Some(ModuleGroupManifest {
-                enabled: true,
-                providers: vec![SubProviderManifest {
-                    id: "sub-1".to_string(),
-                    name: "Sub 1".to_string(),
-                    subpath: subpath.to_string(),
-                    capabilities: vec![],
-                }],
-            }),
-        };
+        let mut manifest = sample_manifest(
+            &format!("sub-invalid-mod-{i}"),
+            "Invalid Subpath Mod",
+            &format!("/custom/sub-invalid-{i}"),
+        );
+        manifest.group = Some(ModuleGroupManifest {
+            enabled: true,
+            providers: vec![SubProviderManifest {
+                id: "sub-1".to_string(),
+                name: "Sub 1".to_string(),
+                subpath: subpath.to_string(),
+                capabilities: vec![],
+            }],
+        });
         assert!(
             reg.register_personal_module(manifest).is_err(),
             "Expected subpath '{subpath}' to be rejected as invalid"
@@ -420,4 +371,65 @@ fn test_module_ui_position_and_auto_config() {
         Some("sk-sec...3456")
     );
     assert!(masked.get("api_key").is_none());
+}
+
+#[test]
+fn test_module_short_name_and_icon_preservation_and_defaults() {
+    let mut reg = ModuleRegistry::new();
+
+    // 1. Built-in modules have short names and distinct icons
+    let omni = reg.get_module("omniroute").unwrap();
+    assert_eq!(omni.short_name.as_deref(), Some("OmniRoute"));
+    assert_eq!(omni.icon.as_deref(), Some("◎"));
+
+    let muse = reg.get_module("muse").unwrap();
+    assert_eq!(muse.short_name.as_deref(), Some("Muse AI"));
+    assert_eq!(muse.icon.as_deref(), Some("✦"));
+
+    // 2. Personal module with auto-detected known defaults (tiktok-studio, facebook-suite)
+    let tt_manifest = sample_manifest(
+        "tiktok-studio",
+        "TikTok Creator Studio Adapter",
+        "/custom/tiktok",
+    );
+    reg.register_personal_module(tt_manifest).unwrap();
+    let tt_desc = reg.get_module("tiktok-studio").unwrap();
+    assert_eq!(tt_desc.short_name.as_deref(), Some("TikTok Creator Studio"));
+    assert_eq!(tt_desc.icon.as_deref(), Some("♬"));
+
+    let tt_alias_manifest = sample_manifest(
+        "TikTok-Creator-Studio-Adapter",
+        "TikTok Creator Studio Adapter",
+        "/custom/tiktok-alias",
+    );
+    reg.register_personal_module(tt_alias_manifest).unwrap();
+    let tt_alias_desc = reg.get_module("TikTok-Creator-Studio-Adapter").unwrap();
+    assert_eq!(
+        tt_alias_desc.short_name.as_deref(),
+        Some("TikTok Creator Studio")
+    );
+    assert_eq!(tt_alias_desc.icon.as_deref(), Some("♬"));
+
+    let fb_manifest = sample_manifest(
+        "facebook-suite",
+        "Meta Business Suite / Facebook Creator Studio Adapter",
+        "/custom/facebook",
+    );
+    reg.register_personal_module(fb_manifest).unwrap();
+    let fb_desc = reg.get_module("facebook-suite").unwrap();
+    assert_eq!(fb_desc.short_name.as_deref(), Some("Meta Business Suite"));
+    assert_eq!(fb_desc.icon.as_deref(), Some("ⓕ"));
+
+    // 3. Custom personal module preserving explicit icon and short_name
+    let mut custom = sample_manifest(
+        "custom-mod",
+        "Custom Long Provider Module",
+        "/custom/my-tool",
+    );
+    custom.short_name = Some("Custom Tool".to_string());
+    custom.icon = Some("🛠".to_string());
+    reg.register_personal_module(custom).unwrap();
+    let custom_desc = reg.get_module("custom-mod").unwrap();
+    assert_eq!(custom_desc.short_name.as_deref(), Some("Custom Tool"));
+    assert_eq!(custom_desc.icon.as_deref(), Some("🛠"));
 }

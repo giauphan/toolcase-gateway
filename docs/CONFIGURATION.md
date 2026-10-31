@@ -33,7 +33,7 @@ When the gateway initializes and handles requests, configuration resolves in the
 | :--- | :--- | :--- | :--- | :--- |
 | `GW_STATE_DIR` | `.gw_state` | path | Core | Working state directory holding SQLite DB (`gateway.db`), job metadata, and dynamic personal modules. |
 | `GW_DATABASE_URL` | *(optional)* | string | Storage | SQLite database path override (defaults to `$GW_STATE_DIR/gateway.db`). |
-| `GW_MASTER_KEY` | *(optional)* | string | Storage | Hex or base64 key override for AES-256-GCM credential envelope encryption. |
+| `GW_ENCRYPTION_KEY` | *(optional)* | string | Storage | Master key for AES-256-GCM credential envelope encryption in SQLite (`openssl rand -hex 32`). |
 | `GW_CONFIG_FILE` | `gateway_config.json` | path | Core | Path to the dedicated persistent JSON configuration file. |
 | `GW_ENV_FILE` | `.env` | path | Core | Path to the environment bootstrap file. |
 | `GW_LISTEN_HOST` | `127.0.0.1` | host | Core | Bind IP address. Non-loopback addresses emit a security warning. |

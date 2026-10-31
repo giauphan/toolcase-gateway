@@ -7,11 +7,15 @@ use serde::{Deserialize, Serialize};
 pub struct SystemCatalogModule {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
     pub description: String,
     pub namespace: String,
     pub version: String,
     pub protocol: String,
     pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -28,11 +32,13 @@ fn catalog_item(
     SystemCatalogModule {
         id: id.to_string(),
         name: name.to_string(),
+        short_name: None,
         description: description.to_string(),
         namespace: namespace.to_string(),
         version: "1.0.0".to_string(),
         protocol: "stdio-stream".to_string(),
         capabilities: capabilities.iter().map(ToString::to_string).collect(),
+        icon: None,
         source: None,
         config_schema: None,
     }
@@ -121,11 +127,13 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
         SystemCatalogModule {
             id: "local-echo".to_string(),
             name: "Local Echo Test Module".to_string(),
+            short_name: None,
             description: "Diagnostic echo adapter for local routing testing".to_string(),
             namespace: "/custom/echo".to_string(),
             version: "1.0.0".to_string(),
             protocol: "stdio-stream".to_string(),
             capabilities: vec!["chat_completions".to_string(), "models".to_string()],
+            icon: None,
             source: Some("examples/modules/echo-provider".to_string()),
             config_schema: None,
         },
@@ -139,6 +147,7 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
         SystemCatalogModule {
             id: "tiktok-studio".to_string(),
             name: "TikTok Creator Studio Adapter".to_string(),
+            short_name: Some("TikTok Creator Studio".to_string()),
             description: "TikTok Creator Studio video management, download extraction, and publishing adapter".to_string(),
             namespace: "/custom/tiktok".to_string(),
             version: "1.0.0".to_string(),
@@ -149,6 +158,7 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "publish".to_string(),
                 "studio".to_string(),
             ],
+            icon: Some("♬".to_string()),
             source: Some("https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git".to_string()),
             config_schema: Some(config_schema(
                 "TikTok Creator Studio Config & HAR Import",
@@ -167,6 +177,7 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
         SystemCatalogModule {
             id: "facebook-suite".to_string(),
             name: "Meta Business Suite / Facebook Creator Studio Adapter".to_string(),
+            short_name: Some("Meta Business Suite".to_string()),
             description: "Meta Business Suite / Facebook Creator Studio video management, rupload resumable upload, and Reel/Story publishing adapter".to_string(),
             namespace: "/custom/facebook".to_string(),
             version: "1.0.0".to_string(),
@@ -179,6 +190,7 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "publish".to_string(),
                 "studio".to_string(),
             ],
+            icon: Some("ⓕ".to_string()),
             source: None,
             config_schema: Some(config_schema(
                 "Meta Business Suite Config & HAR Import",

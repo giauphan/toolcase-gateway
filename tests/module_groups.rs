@@ -51,6 +51,8 @@ for line in sys.stdin:
         entrypoint: script_path.to_string_lossy().to_string(),
         protocol: "stdio-stream".to_string(),
         capabilities: vec!["chat".to_string(), "vision".to_string()],
+        icon: None,
+        short_name: None,
         config_schema: None,
         permissions: Vec::new(),
         group: Some(ModuleGroupManifest {

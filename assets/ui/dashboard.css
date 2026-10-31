@@ -279,10 +279,26 @@ button:disabled {
   font-weight: 500;
   gap: 12px;
   min-height: 40px;
+  min-width: 0;
   padding: 10px 13px;
   text-align: left;
   text-decoration: none;
   width: 100%;
+}
+
+.navitem > span:not(.navicon):not(.navcount),
+.ui-nav-link > span:not(.navicon):not(.navcount) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navitem:focus-visible,
+.ui-nav-link:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: -2px;
 }
 
 .navitem.active, .ui-nav-link.active, .ui-nav-link[aria-current="page"] {

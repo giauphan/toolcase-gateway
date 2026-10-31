@@ -79,6 +79,8 @@ pub struct PersonalManifest {
     pub id: String,
     #[serde(default = "default_module_name")]
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
     #[serde(default = "default_module_version")]
     pub version: String,
     pub namespace: String,
@@ -87,6 +89,8 @@ pub struct PersonalManifest {
     pub protocol: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(default)]
     pub config_schema: Option<serde_json::Value>,
     #[serde(default)]
@@ -203,6 +207,8 @@ pub fn default_module_config_schema(id: &str, name: &str, namespace: &str) -> se
 pub struct ModuleDescriptor {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
     pub namespace: String,
     pub kind: ModuleKind,
     pub status: ModuleStatus,

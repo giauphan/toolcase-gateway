@@ -166,6 +166,8 @@ fn test_tiktok_creator_studio_adapter_alias_and_config_sync() {
             "chat_completions".to_string(),
             "models".to_string(),
         ],
+        icon: None,
+        short_name: None,
         config_schema: Some(serde_json::json!({
             "module_id": "tiktok-studio",
             "namespace": "/custom/tiktok",

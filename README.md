@@ -114,7 +114,18 @@ Start the binary (binds to `127.0.0.1:28130` and initializes local database stor
 ```bash
 ./target/release/toolcase-gateway
 ```
-*(Optional: copy `.env.example` to `.env` if you wish to customize the database path or listen port).*
+*(Optional: copy `.env.example` to `.env` to customize the database path, listen port, or encryption key).*
+
+To enable AES-256-GCM credential envelope encryption at rest in SQLite, generate a master encryption key:
+```bash
+# Generate a secure 256-bit encryption key
+openssl rand -hex 32
+# Alternative: python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+Add it to your `.env` file before launching:
+```bash
+GW_ENCRYPTION_KEY=<generated_hex_key>
+```
 
 ### 2. Configure via the Web Dashboard
 Open `http://127.0.0.1:28130/dashboard` in your browser. All operational proxy routing, targets, fallbacks, provider credentials, and modules are configured dynamically in the UI and persisted to the database repository:
@@ -170,6 +181,7 @@ Toolcase Gateway strictly enforces Clean Architecture separation: **`.env` is re
 | :--- | :--- | :--- |
 | `DATABASE_URL` | `sqlite://.gw_state/gateway.db` | Database connection URL. Supports embedded SQLite, PostgreSQL, or MySQL. |
 | `GW_STATE_DIR` | `.gw_state` | Directory for runtime state, local SQLite database, and installed modules. |
+| `GW_ENCRYPTION_KEY` | *(empty)* | Master key for AES-256-GCM credential envelope encryption at rest (`openssl rand -hex 32`). |
 | `GW_LISTEN_HOST` | `127.0.0.1` | Loopback bind address. Non-loopback IPs trigger security warnings. |
 | `GW_LISTEN_PORT` | `28130` | Gateway HTTP listen port. |
 | `GW_MAX_CONNECTIONS` | `256` | Maximum concurrent connection limit; excess rejected with `503`. |

@@ -105,11 +105,18 @@ impl ModuleRegistry {
     ) {
         let clean_ns = namespace.trim_end_matches('/').to_string();
         let (order, icon, desc, config_url, tab, schema) = builtin_ui_defaults(id, name, &clean_ns);
+        let short_name = match id {
+            "omniroute" => Some("OmniRoute".to_string()),
+            "muse" => Some("Muse AI".to_string()),
+            "jev" => Some("Jev Decision".to_string()),
+            _ => None,
+        };
         self.modules.insert(
             id.to_string(),
             ModuleDescriptor {
                 id: id.to_string(),
                 name: name.to_string(),
+                short_name,
                 namespace: clean_ns,
                 kind: ModuleKind::BuiltIn,
                 status: ModuleStatus::Enabled,
@@ -178,9 +185,22 @@ impl ModuleRegistry {
             .map(|s| normalize_module_config_schema(s, &id, &ns))
             .unwrap_or_else(|| default_module_config_schema(&id, &manifest.name, &ns));
         manifest.config_schema = Some(schema.clone());
+        let icon = manifest.icon.clone().unwrap_or_else(|| match id.as_str() {
+            "tiktok-studio" | "TikTok-Creator-Studio-Adapter" => "♬".to_string(),
+            "facebook-suite" => "ⓕ".to_string(),
+            _ => "◫".to_string(),
+        });
+        let short_name = manifest.short_name.clone().or_else(|| match id.as_str() {
+            "tiktok-studio" | "TikTok-Creator-Studio-Adapter" => {
+                Some("TikTok Creator Studio".to_string())
+            }
+            "facebook-suite" => Some("Meta Business Suite".to_string()),
+            _ => None,
+        });
         let desc = ModuleDescriptor {
             id: id.clone(),
             name: manifest.name.clone(),
+            short_name,
             namespace: ns.clone(),
             kind: ModuleKind::Personal,
             status: ModuleStatus::Enabled,
@@ -189,7 +209,7 @@ impl ModuleRegistry {
             providers: sub_providers,
             menu_position: default_menu_position(),
             menu_order: next_order,
-            icon: Some("◫".to_string()),
+            icon: Some(icon),
             description: Some(format!(
                 "Personal module '{}' routed at {}",
                 manifest.name, ns

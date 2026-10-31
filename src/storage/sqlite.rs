@@ -362,11 +362,13 @@ mod tests {
         let manifest = PersonalManifest {
             id: "my-tool".into(),
             name: "My Tool".into(),
+            short_name: None,
             version: "1.0.0".into(),
             namespace: "/custom/tool".into(),
             entrypoint: "/bin/echo".into(),
             protocol: "stdio-stream".into(),
             capabilities: vec!["chat".into()],
+            icon: None,
             config_schema: None,
             permissions: vec![],
             group: None,

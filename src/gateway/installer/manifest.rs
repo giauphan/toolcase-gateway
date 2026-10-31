@@ -111,11 +111,13 @@ pub(super) fn discover_or_synthesize_manifest(
     Ok(PersonalManifest {
         id,
         name,
+        short_name: None,
         version: "0.1.0".to_string(),
         namespace,
         entrypoint,
         protocol,
         capabilities: vec!["chat_completions".to_string(), "models".to_string()],
+        icon: None,
         config_schema: None,
         permissions: Vec::new(),
         group: None,

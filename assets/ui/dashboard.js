@@ -214,9 +214,29 @@
       }
     });
 
+    if (key === "providers" && tabKey) {
+      switchProviderTab(tabKey);
+    }
+
+    const currentTab = (key === "providers")
+      ? (tabKey || (function() {
+          const activeTabEl = document.querySelector("#provider-tabline .tab.active");
+          return activeTabEl ? activeTabEl.dataset.provider : "omni";
+        })())
+      : null;
+
     const navItems = document.querySelectorAll(".navitem, .ui-nav-link");
     navItems.forEach(function(item) {
-      const active = item.dataset.go === key;
+      let active = false;
+      if (item.dataset.go === key) {
+        if (key === "providers" && item.dataset.tab) {
+          active = item.dataset.tab === currentTab;
+        } else if (key === "providers" && !item.dataset.tab) {
+          active = true;
+        } else {
+          active = true;
+        }
+      }
       item.classList.toggle("active", active);
       if (active) item.setAttribute("aria-current", "page");
       else item.removeAttribute("aria-current");
@@ -235,10 +255,6 @@
     if (sidebar) sidebar.classList.remove("open");
     if (menubtn) menubtn.setAttribute("aria-expanded", "false");
 
-    if (key === "providers" && tabKey) {
-      switchProviderTab(tabKey);
-    }
-
     window.scrollTo(0, 0);
   }
 
@@ -254,6 +270,16 @@
       const isCurrent = panel.id === ("panel-" + providerId);
       panel.classList.toggle("is-hidden", !isCurrent);
     });
+
+    const currentViewIsProviders = views.providers && views.providers.classList.contains("visible");
+    if (currentViewIsProviders) {
+      document.querySelectorAll("#sidebar-pinned-modules .navitem").forEach(function(item) {
+        const active = item.dataset.tab === providerId;
+        item.classList.toggle("active", active);
+        if (active) item.setAttribute("aria-current", "page");
+        else item.removeAttribute("aria-current");
+      });
+    }
   }
 
   // Module view mode toggling (List vs Cards)
@@ -839,13 +865,19 @@
       if (!pinned.length) {
         sidebarPinned.innerHTML = "";
       } else {
+        const activeTabEl = document.querySelector("#provider-tabline .tab.active");
+        const currentTab = activeTabEl ? activeTabEl.dataset.provider : "omni";
+        const isProvidersView = views.providers && views.providers.classList.contains("visible");
+
         sidebarPinned.innerHTML = "<div class=\"sidebar-label ui-sidebar-label\">PINNED PROVIDERS</div>" +
           pinned.map(function(m) {
             const tabKey = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
             const icon = m.icon || "◫";
-            return "<a class=\"navitem ui-nav-link\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabKey) + "\" href=\"#provider-settings\">" +
+            const displayName = m.short_name || m.name;
+            const isActive = isProvidersView && currentTab === tabKey;
+            return "<a class=\"navitem ui-nav-link" + (isActive ? " active" : "") + "\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabKey) + "\" href=\"#provider-settings\" title=\"" + escapeHtml(m.name) + "\"" + (isActive ? " aria-current=\"page\"" : "") + ">" +
               "<span class=\"navicon\" aria-hidden=\"true\">" + escapeHtml(icon) + "</span>" +
-              "<span>" + escapeHtml(m.name) + "</span>" +
+              "<span>" + escapeHtml(displayName) + "</span>" +
             "</a>";
           }).join("");
       }
