@@ -13,6 +13,7 @@ pub use module_ui::{
 };
 pub use modules::{
     handle_install_personal_module, handle_remove_personal_module, handle_set_module_state,
+    handle_upgrade_personal_module,
 };
 pub use muse::handle_update_muse_config;
 pub use service::{

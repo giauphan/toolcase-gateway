@@ -117,6 +117,11 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_install_personal_module(c, b, store)
             })
         }
+        "/api/v1/dashboard/modules/upgrade" | "/api/v1/dashboard/modules/update" => {
+            handle_post(client, request, "dashboard modules/upgrade", |c, b| {
+                crate::features::dashboard::handle_upgrade_personal_module(c, b, store)
+            })
+        }
         "/api/v1/dashboard/modules/remove" | "/api/v1/dashboard/modules/uninstall" => {
             handle_post(client, request, "dashboard modules/remove", |c, b| {
                 crate::features::dashboard::handle_remove_personal_module(c, b, store)

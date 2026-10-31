@@ -65,6 +65,7 @@ fn sample_manifest(id: &str, name: &str, namespace: &str) -> PersonalManifest {
         config_schema: None,
         permissions: Vec::new(),
         group: None,
+        source: None,
     }
 }
 
@@ -432,4 +433,49 @@ fn test_module_short_name_and_icon_preservation_and_defaults() {
     let custom_desc = reg.get_module("custom-mod").unwrap();
     assert_eq!(custom_desc.short_name.as_deref(), Some("Custom Tool"));
     assert_eq!(custom_desc.icon.as_deref(), Some("🛠"));
+}
+
+#[test]
+fn test_upgrade_personal_module_in_registry() {
+    let mut reg = ModuleRegistry::new();
+
+    let mut m1 = sample_manifest("my-upg-mod", "My Upgrade Mod", "/custom/my-upg");
+    m1.version = "1.0.0".to_string();
+    m1.capabilities = vec!["chat".to_string()];
+    m1.source = Some("https://github.com/my-org/my-upg".to_string());
+    reg.register_personal_module(m1).unwrap();
+
+    // Set custom position, order, and disabled status
+    reg.set_module_position("my-upg-mod", Some("sidebar".to_string()), Some(42))
+        .unwrap();
+    reg.set_module_status("my-upg-mod", ModuleStatus::Disabled)
+        .unwrap();
+
+    let before = reg.get_module("my-upg-mod").unwrap();
+    assert_eq!(before.status, ModuleStatus::Disabled);
+    assert_eq!(before.menu_position, "sidebar");
+    assert_eq!(before.menu_order, 42);
+    assert_eq!(before.version.as_deref(), Some("1.0.0"));
+
+    // Upgrade with v2 manifest
+    let mut m2 = sample_manifest("my-upg-mod", "My Upgrade Mod v2", "/custom/my-upg");
+    m2.version = "2.0.0".to_string();
+    m2.capabilities = vec!["chat".to_string(), "embeddings".to_string()];
+
+    let upgraded = reg.upgrade_personal_module(m2).unwrap();
+    assert_eq!(upgraded.version.as_deref(), Some("2.0.0"));
+    assert_eq!(upgraded.name, "My Upgrade Mod v2");
+    assert_eq!(upgraded.status, ModuleStatus::Disabled); // Preserved!
+    assert_eq!(upgraded.menu_position, "sidebar"); // Preserved!
+    assert_eq!(upgraded.menu_order, 42); // Preserved!
+    assert_eq!(
+        upgraded.source.as_deref(),
+        Some("https://github.com/my-org/my-upg")
+    ); // Preserved from existing!
+    assert!(upgraded.capabilities.contains(&"embeddings".to_string()));
+
+    // Cannot upgrade built-in module
+    let mut fake_builtin = sample_manifest("omniroute", "Fake Omni", "/ominroute");
+    fake_builtin.version = "9.9.9".to_string();
+    assert!(reg.upgrade_personal_module(fake_builtin).is_err());
 }

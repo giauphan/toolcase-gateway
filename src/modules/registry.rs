@@ -28,6 +28,68 @@ fn sub_provider(id: &str, name: &str, subpath: &str, caps: &[&str]) -> SubProvid
     }
 }
 
+fn build_sub_providers(
+    grp: Option<&super::manifest::ModuleGroupManifest>,
+    status: ModuleStatus,
+) -> Result<Option<Vec<SubProviderDescriptor>>, ModuleError> {
+    let Some(grp) = grp else {
+        return Ok(None);
+    };
+    validate_sub_providers(&grp.providers)?;
+    let desc_list: Vec<SubProviderDescriptor> = grp
+        .providers
+        .iter()
+        .map(|p| {
+            let clean_subpath = if p.subpath.is_empty() {
+                format!("/{}", p.id.trim())
+            } else if !p.subpath.starts_with('/') {
+                format!("/{}", p.subpath.trim_end_matches('/'))
+            } else {
+                p.subpath.trim_end_matches('/').to_string()
+            };
+            SubProviderDescriptor {
+                id: p.id.trim().to_string(),
+                name: p.name.clone(),
+                subpath: clean_subpath,
+                capabilities: p.capabilities.clone(),
+                status: if grp.enabled {
+                    status
+                } else {
+                    ModuleStatus::Disabled
+                },
+            }
+        })
+        .collect();
+    Ok(Some(desc_list))
+}
+
+fn resolve_personal_icon_and_short_name(
+    id: &str,
+    icon: Option<String>,
+    short_name: Option<String>,
+    existing: Option<&ModuleDescriptor>,
+) -> (String, Option<String>) {
+    let resolved_icon = icon
+        .or_else(|| existing.and_then(|e| e.icon.clone()))
+        .unwrap_or_else(|| match id {
+            "tiktok-studio" | "TikTok-Creator-Studio-Adapter" => "♬".to_string(),
+            "facebook-suite" => "ⓕ".to_string(),
+            _ => "◫".to_string(),
+        });
+
+    let resolved_short_name = short_name
+        .or_else(|| existing.and_then(|e| e.short_name.clone()))
+        .or_else(|| match id {
+            "tiktok-studio" | "TikTok-Creator-Studio-Adapter" => {
+                Some("TikTok Creator Studio".to_string())
+            }
+            "facebook-suite" => Some("Meta Business Suite".to_string()),
+            _ => None,
+        });
+
+    (resolved_icon, resolved_short_name)
+}
+
 impl ModuleRegistry {
     /// Creates a registry initialized with default built-in platform modules.
     pub fn new() -> Self {
@@ -130,6 +192,7 @@ impl ModuleRegistry {
                 config_url: Some(config_url),
                 settings_tab: Some(tab),
                 config_schema: schema,
+                source: None,
             },
         );
     }
@@ -147,37 +210,7 @@ impl ModuleRegistry {
 
         validate_module_protocol(&manifest.protocol, &manifest.entrypoint)?;
 
-        let sub_providers = if let Some(ref grp) = manifest.group {
-            validate_sub_providers(&grp.providers)?;
-            let desc_list: Vec<SubProviderDescriptor> = grp
-                .providers
-                .iter()
-                .map(|p| {
-                    let clean_subpath = if p.subpath.is_empty() {
-                        format!("/{}", p.id.trim())
-                    } else if !p.subpath.starts_with('/') {
-                        format!("/{}", p.subpath.trim_end_matches('/'))
-                    } else {
-                        p.subpath.trim_end_matches('/').to_string()
-                    };
-                    SubProviderDescriptor {
-                        id: p.id.trim().to_string(),
-                        name: p.name.clone(),
-                        subpath: clean_subpath,
-                        capabilities: p.capabilities.clone(),
-                        status: if grp.enabled {
-                            ModuleStatus::Enabled
-                        } else {
-                            ModuleStatus::Disabled
-                        },
-                    }
-                })
-                .collect();
-            Some(desc_list)
-        } else {
-            None
-        };
-
+        let sub_providers = build_sub_providers(manifest.group.as_ref(), ModuleStatus::Enabled)?;
         let next_order = 100 + (self.personal_manifests.len() as i32) * 10;
         let schema = manifest
             .config_schema
@@ -185,18 +218,12 @@ impl ModuleRegistry {
             .map(|s| normalize_module_config_schema(s, &id, &ns))
             .unwrap_or_else(|| default_module_config_schema(&id, &manifest.name, &ns));
         manifest.config_schema = Some(schema.clone());
-        let icon = manifest.icon.clone().unwrap_or_else(|| match id.as_str() {
-            "tiktok-studio" | "TikTok-Creator-Studio-Adapter" => "♬".to_string(),
-            "facebook-suite" => "ⓕ".to_string(),
-            _ => "◫".to_string(),
-        });
-        let short_name = manifest.short_name.clone().or_else(|| match id.as_str() {
-            "tiktok-studio" | "TikTok-Creator-Studio-Adapter" => {
-                Some("TikTok Creator Studio".to_string())
-            }
-            "facebook-suite" => Some("Meta Business Suite".to_string()),
-            _ => None,
-        });
+        let (icon, short_name) = resolve_personal_icon_and_short_name(
+            &id,
+            manifest.icon.clone(),
+            manifest.short_name.clone(),
+            None,
+        );
         let desc = ModuleDescriptor {
             id: id.clone(),
             name: manifest.name.clone(),
@@ -217,12 +244,97 @@ impl ModuleRegistry {
             config_url: Some(format!("/modules/{id}/config")),
             settings_tab: Some(id.clone()),
             config_schema: Some(schema),
+            source: manifest.source.clone(),
         };
 
         self.modules.insert(id.clone(), desc);
         self.personal_manifests.insert(id.clone(), manifest);
         self.sync_module_config_from_disk(&id);
         Ok(())
+    }
+
+    /// Upgrades an existing installed personal module with a new manifest.
+    /// Preserves existing menu position, menu order, and status (enabled/disabled).
+    pub fn upgrade_personal_module(
+        &mut self,
+        mut manifest: PersonalManifest,
+    ) -> Result<ModuleDescriptor, ModuleError> {
+        let id = manifest.id.trim().to_string();
+        let existing = self
+            .modules
+            .get(&id)
+            .ok_or_else(|| ModuleError::NotFound(id.clone()))?;
+        if existing.kind == ModuleKind::BuiltIn {
+            return Err(ModuleError::InvalidManifest(format!(
+                "Cannot upgrade built-in module '{id}'"
+            )));
+        }
+
+        let existing_status = existing.status;
+        let existing_position = existing.menu_position.clone();
+        let existing_order = existing.menu_order;
+
+        let ns = manifest.namespace.trim().trim_end_matches('/').to_string();
+        validate_module_namespace(&ns, &manifest.namespace, &id, &self.modules)?;
+        validate_module_protocol(&manifest.protocol, &manifest.entrypoint)?;
+
+        let mut sub_providers = build_sub_providers(manifest.group.as_ref(), existing_status)?;
+        let group_enabled = manifest.group.as_ref().map(|g| g.enabled).unwrap_or(true);
+        if group_enabled {
+            if let (Some(ref mut new_list), Some(old_list)) =
+                (&mut sub_providers, existing.providers.as_ref())
+            {
+                for p in new_list.iter_mut() {
+                    if let Some(prev) = old_list.iter().find(|o| o.id == p.id) {
+                        p.status = prev.status;
+                    }
+                }
+            }
+        }
+        let schema = manifest
+            .config_schema
+            .take()
+            .map(|s| normalize_module_config_schema(s, &id, &ns))
+            .unwrap_or_else(|| default_module_config_schema(&id, &manifest.name, &ns));
+        manifest.config_schema = Some(schema.clone());
+
+        let (icon, short_name) = resolve_personal_icon_and_short_name(
+            &id,
+            manifest.icon.clone(),
+            manifest.short_name.clone(),
+            Some(existing),
+        );
+
+        let source = manifest.source.clone().or_else(|| existing.source.clone());
+        manifest.source = source.clone();
+
+        let desc = ModuleDescriptor {
+            id: id.clone(),
+            name: manifest.name.clone(),
+            short_name,
+            namespace: ns.clone(),
+            kind: ModuleKind::Personal,
+            status: existing_status,
+            capabilities: manifest.capabilities.clone(),
+            version: Some(manifest.version.clone()),
+            providers: sub_providers,
+            menu_position: existing_position,
+            menu_order: existing_order,
+            icon: Some(icon),
+            description: Some(format!(
+                "Personal module '{}' routed at {}",
+                manifest.name, ns
+            )),
+            config_url: Some(format!("/modules/{id}/config")),
+            settings_tab: Some(id.clone()),
+            config_schema: Some(schema),
+            source,
+        };
+
+        self.modules.insert(id.clone(), desc.clone());
+        self.personal_manifests.insert(id.clone(), manifest);
+        self.sync_module_config_from_disk(&id);
+        Ok(desc)
     }
 
     /// Unregisters an installed personal module by id.
@@ -371,6 +483,11 @@ impl ModuleRegistry {
     /// Retrieves a module descriptor by id.
     pub fn get_module(&self, id: &str) -> Option<&ModuleDescriptor> {
         self.modules.get(id)
+    }
+
+    /// Returns a reference to all registered module descriptors.
+    pub fn modules(&self) -> &HashMap<String, ModuleDescriptor> {
+        &self.modules
     }
 
     /// Retrieves a personal module manifest by id.

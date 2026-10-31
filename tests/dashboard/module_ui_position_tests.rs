@@ -190,6 +190,7 @@ fn test_tiktok_creator_studio_adapter_alias_and_config_sync() {
         })),
         permissions: vec![],
         group: None,
+        source: None,
     };
 
     store

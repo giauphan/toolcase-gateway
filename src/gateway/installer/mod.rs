@@ -6,15 +6,14 @@
 
 mod ingest;
 mod manifest;
+mod upgrade;
 
 pub use ingest::{decode_base64, resolve_source};
+pub use upgrade::upgrade_module;
 
-use crate::gateway::archive::extract_zip;
 use crate::gateway::modules::{ModuleError, PersonalManifest};
-use ingest::{
-    copy_dir_all, ingest_github, ingest_zip_file, ingest_zip_url, unwrap_single_top_level_directory,
-};
-use manifest::{discover_or_synthesize_manifest, read_module_manifest};
+use ingest::{extract_source_url, ingest_source_into_staging};
+use manifest::{discover_or_synthesize_manifest, finalize_module_entrypoint, read_module_manifest};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -113,25 +112,8 @@ pub fn install_module(
         .map_err(|e| ModuleError::InvalidManifest(format!("Failed to create staging dir: {e}")))?;
 
     // Ingest the source files into staging_dir
-    let ingest_result = match source {
-        InstallSource::GitHubUrl(url) => {
-            ingest_github(&url, options.branch.as_deref(), &staging_dir)
-        }
-        InstallSource::ZipUrl(url) => ingest_zip_url(&url, &staging_dir),
-        InstallSource::ZipFile(path) => ingest_zip_file(&path, &staging_dir),
-        InstallSource::ZipBytes(bytes) => extract_zip(&bytes, &staging_dir)
-            .map(|_| ())
-            .map_err(|e| ModuleError::InvalidManifest(e.to_string())),
-        InstallSource::LocalDir(dir) => copy_dir_all(&dir, &staging_dir)
-            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to copy directory: {e}"))),
-    };
-
-    if let Err(e) = ingest_result {
-        let _ = fs::remove_dir_all(&staging_dir);
-        return Err(e);
-    }
-
-    unwrap_single_top_level_directory(&staging_dir);
+    ingest_source_into_staging(&source, options.branch.as_deref(), &staging_dir)?;
+    let source_str = extract_source_url(&source);
 
     // Discover or synthesize the manifest
     let mut manifest = match discover_or_synthesize_manifest(&staging_dir, &options) {
@@ -141,6 +123,12 @@ pub fn install_module(
             return Err(e);
         }
     };
+
+    if let Some(src) = source_str {
+        if manifest.source.is_none() {
+            manifest.source = Some(src);
+        }
+    }
 
     // Validate ID strictly to prevent path traversal or malformed paths
     let id_valid = !manifest.id.is_empty()
@@ -190,41 +178,8 @@ pub fn install_module(
         )));
     }
 
-    let abs_target_dir = if target_dir.is_relative() {
-        std::env::current_dir()
-            .ok()
-            .map(|cwd| cwd.join(&target_dir))
-            .unwrap_or_else(|| target_dir.clone())
-    } else {
-        target_dir.clone()
-    };
-
-    // Resolve entrypoint to absolute path inside target_dir for local executables
-    let is_url_entrypoint = manifest.protocol == "local-http"
-        || manifest.entrypoint.starts_with("http://")
-        || manifest.entrypoint.starts_with("https://");
-    if !is_url_entrypoint {
-        let ep_path = Path::new(&manifest.entrypoint);
-        let resolved_ep = if ep_path.is_relative() {
-            abs_target_dir.join(ep_path)
-        } else {
-            ep_path.to_path_buf()
-        };
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let (Ok(can_ep), Ok(can_target)) =
-                (resolved_ep.canonicalize(), abs_target_dir.canonicalize())
-            {
-                if can_ep.starts_with(&can_target) && can_ep.is_file() {
-                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
-                }
-            }
-        }
-
-        manifest.entrypoint = resolved_ep.to_string_lossy().to_string();
-    }
+    // Resolve entrypoint to absolute path inside target_dir and set executable permissions
+    finalize_module_entrypoint(&mut manifest, &target_dir)?;
 
     // Persist finalized manifest.json into the module directory
     let manifest_path = target_dir.join("module.json");
