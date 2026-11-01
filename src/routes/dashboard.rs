@@ -127,6 +127,11 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_remove_personal_module(c, b, store)
             })
         }
+        "/api/v1/dashboard/modules/test" | "/api/v1/dashboard/modules/check" => {
+            handle_post(client, request, "dashboard modules/test", |c, b| {
+                crate::features::dashboard::handle_test_personal_module(c, b, store)
+            })
+        }
         "/api/v1/dashboard/modules/position" => {
             handle_post(client, request, "dashboard modules/position", |c, b| {
                 crate::features::dashboard::handle_set_module_position(c, b, store)

@@ -1,8 +1,10 @@
 //! Dashboard personal module management handlers and route dispatchers.
 
 mod synthesis;
+mod testing;
 
 pub use synthesis::{generate_module_adapter_script, parse_or_synthesize_manifest, InstallPayload};
+pub use testing::handle_test_personal_module;
 
 use crate::config::ConfigStore;
 use crate::gateway::installer::{

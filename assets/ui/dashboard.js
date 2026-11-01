@@ -415,6 +415,12 @@
       return;
     }
 
+    const testBtn = e.target.closest(".module-test");
+    if (testBtn) {
+      testModule(testBtn.dataset.moduleId, testBtn);
+      return;
+    }
+
     const detailBtn = e.target.closest(".module-detail");
     if (detailBtn) {
       showModuleDetail(detailBtn.dataset.moduleId);
@@ -575,6 +581,7 @@
         "<div><strong>Capabilities:</strong><br>" + capabilities + "</div>" +
         "<div><strong>Nested Providers:</strong><ul>" + providers + "</ul></div>" +
         "<div class=\"btns\" style=\"margin-top:12px;\">" +
+          "<button class=\"btn module-test\" data-module-id=\"" + escapeHtml(module.id) + "\">Test Module</button> " +
           (module.kind !== "builtin" ? ("<button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(module.id) + "\">Upgrade Module</button> ") : "") +
           "<a class=\"btn primary btn-primary\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Configure in Provider Settings</a> " +
           "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config ↗</a>" +
@@ -602,12 +609,13 @@
       " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
     const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
       " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
+    const testBtn = " <button class=\"btn module-test\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Test module execution and health\">Test</button>";
     let personalBtns = "";
     if (!isBuiltin) {
       personalBtns = " <button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Upgrade module to latest version\">Upgrade</button>" +
         " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
     }
-    return toggleBtn + configBtns + posSelect + orderBtns + personalBtns;
+    return toggleBtn + testBtn + configBtns + posSelect + orderBtns + personalBtns;
   }
 
   function renderModules(modules, isFiltered) {
@@ -734,6 +742,39 @@
       btn.textContent = "Installing...";
       executeModuleInstall({ id: id }, btn);
     });
+  }
+
+  function testModule(id, btn) {
+    if (!id) return;
+    const origText = btn ? btn.textContent : "Test";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Testing...";
+    }
+    showModulesFeedback("Testing module '" + id + "'...", false);
+    postJson("/api/v1/dashboard/modules/test", { id: id })
+      .then(function(result) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+        if (!result.ok) {
+          const errMsg = result.json?.message || ("HTTP " + result.status);
+          showModulesFeedback("Module test failed: " + errMsg, true);
+        } else {
+          const data = result.json;
+          const latency = data.latency_ms != null ? (" (" + data.latency_ms + "ms)") : "";
+          const msg = data.message || "Module is healthy";
+          showModulesFeedback("Module '" + id + "' test " + (data.ok ? "passed" : "failed") + latency + ": " + msg, !data.ok);
+        }
+      })
+      .catch(function(err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+        showModulesFeedback("Network error testing module: " + err.message, true);
+      });
   }
 
   function executeModuleUpgrade(payload, catalogButton) {
@@ -1099,6 +1140,10 @@
       "Personal module '" + id + "' was successfully upgraded to the latest version.",
       "Failed to upgrade module"
     );
+  };
+
+  window.testModule = function(id) {
+    testModule(id);
   };
 
   function clearInstallModuleInputs() {
