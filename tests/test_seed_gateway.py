@@ -16,10 +16,12 @@ from scripts.seed_gateway import (
     init_schema,
     load_env_vars,
     parse_cli_args,
+    protect_credential,
     resolve_database_path,
     safe_resolve_sqlite_path,
     seed_from_gateway_config,
     show_current_settings,
+    unprotect_credential,
 )
 
 
@@ -130,4 +132,91 @@ def test_show_current_settings_runs_without_error(tmp_path: Path, capsys):
     captured = capsys.readouterr()
     assert "[ACTIVE DATABASE SETTINGS]" in captured.out
     assert "target_port" in captured.out
+    conn.close()
+
+
+def test_apply_accounts_idempotency_and_uuid_generation(tmp_path: Path):
+    db_file = tmp_path / "test_accounts.db"
+    conn = sqlite3.connect(str(db_file))
+    init_schema(conn)
+
+    # 1. Accounts without explicit ID should receive generated provider prefix IDs
+    accounts = [
+        {"key": "sk-jev-sample-key", "label": "Initial Label"},
+        {"id": "explicit-id-123", "key": "sk-jev-explicit-key", "label": "Explicit Label"},
+    ]
+    apply_accounts(conn, "jev", accounts, enc_key="")
+
+    cur = conn.cursor()
+    cur.execute("SELECT id, key, label FROM accounts ORDER BY label ASC")
+    rows = cur.fetchall()
+    assert len(rows) == 2
+    explicit_row = next(r for r in rows if r[0] == "explicit-id-123")
+    assert explicit_row[2] == "Explicit Label"
+
+    auto_row = next(r for r in rows if r[0] != "explicit-id-123")
+    assert auto_row[0].startswith("jev_")
+    generated_id = auto_row[0]
+
+    # 2. Re-applying the same accounts with an updated label should update existing row without duplicates
+    updated_accounts = [
+        {"key": "sk-jev-sample-key", "label": "Updated Auto Label"},
+        {"id": "explicit-id-123", "key": "sk-jev-explicit-key", "label": "Updated Explicit Label"},
+    ]
+    apply_accounts(conn, "jev", updated_accounts, enc_key="")
+
+    cur.execute("SELECT id, key, label FROM accounts ORDER BY label ASC")
+    updated_rows = cur.fetchall()
+    assert len(updated_rows) == 2
+    reused_auto_row = next(r for r in updated_rows if r[1] == "sk-jev-sample-key")
+    assert reused_auto_row[0] == generated_id
+    assert reused_auto_row[2] == "Updated Auto Label"
+
+    conn.close()
+
+
+def test_apply_accounts_idempotency_with_encryption_key(tmp_path: Path):
+    db_file = tmp_path / "test_enc_accounts.db"
+    conn = sqlite3.connect(str(db_file))
+    init_schema(conn)
+
+    enc_key = "test_super_secret_master_key_12345"
+    accounts = [
+        {"key": "sk-jev-confidential-key", "label": "Encrypted Auto Account"},
+        {"id": "enc-explicit-1", "key": "sk-jev-second-key", "label": "Encrypted Explicit Account"},
+    ]
+
+    # First seeding with non-empty encryption key
+    apply_accounts(conn, "jev", accounts, enc_key=enc_key)
+
+    cur = conn.cursor()
+    cur.execute("SELECT id, key, label FROM accounts ORDER BY label ASC")
+    rows = cur.fetchall()
+    assert len(rows) == 2
+    auto_id = None
+    for acc_id, enc_value, label in rows:
+        assert enc_value.startswith("enc:v1:")
+        decrypted = unprotect_credential(enc_value, enc_key)
+        if acc_id == "enc-explicit-1":
+            assert decrypted == "sk-jev-second-key"
+        else:
+            assert decrypted == "sk-jev-confidential-key"
+            auto_id = acc_id
+
+    assert auto_id is not None
+
+    # Second seeding with the same encryption key - must not insert duplicate rows
+    updated_accounts = [
+        {"key": "sk-jev-confidential-key", "label": "Updated Encrypted Auto Account"},
+        {"id": "enc-explicit-1", "key": "sk-jev-second-key", "label": "Updated Encrypted Explicit Account"},
+    ]
+    apply_accounts(conn, "jev", updated_accounts, enc_key=enc_key)
+
+    cur.execute("SELECT id, key, label FROM accounts ORDER BY label ASC")
+    updated_rows = cur.fetchall()
+    assert len(updated_rows) == 2
+    reused_auto = next(r for r in updated_rows if r[0] == auto_id)
+    assert reused_auto[2] == "Updated Encrypted Auto Account"
+    assert unprotect_credential(reused_auto[1], enc_key) == "sk-jev-confidential-key"
+
     conn.close()
