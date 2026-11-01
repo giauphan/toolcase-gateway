@@ -87,7 +87,7 @@ fn test_personal_module_registration_and_isolation() {
     assert_eq!(matched_desc.id, "my-test-mod");
     assert_eq!(subpath, "/sub/route");
 
-    // Test Facebook-Suite alias prefix /facebook alongside /custom/facebook
+    // Test Facebook-Suite alias prefix /facebook alongside /custom/facebook and custom registered namespace
     let fb_manifest = sample_manifest("facebook-suite", "Meta Business Suite", "/custom/facebook");
     reg.register_personal_module(fb_manifest).unwrap();
     let (fb1, sub1) = reg.match_path("/custom/facebook/v1/publish").unwrap();
@@ -96,6 +96,18 @@ fn test_personal_module_registration_and_isolation() {
     let (fb2, sub2) = reg.match_path("/facebook/v1/publish").unwrap();
     assert_eq!(fb2.id, "facebook-suite");
     assert_eq!(sub2, "/v1/publish");
+
+    let mut custom_fb_reg = ModuleRegistry::new();
+    let fb_custom_ns = sample_manifest("facebook-suite", "Meta Business Suite", "/my-meta");
+    custom_fb_reg
+        .register_personal_module(fb_custom_ns)
+        .unwrap();
+    let (fb3, sub3) = custom_fb_reg.match_path("/my-meta/v1/publish").unwrap();
+    assert_eq!(fb3.id, "facebook-suite");
+    assert_eq!(sub3, "/v1/publish");
+    let (fb4, sub4) = custom_fb_reg.match_path("/facebook/v1/publish").unwrap();
+    assert_eq!(fb4.id, "facebook-suite");
+    assert_eq!(sub4, "/v1/publish");
 
     reg.set_module_status("my-test-mod", ModuleStatus::Disabled)
         .unwrap();

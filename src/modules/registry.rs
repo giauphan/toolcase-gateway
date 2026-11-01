@@ -435,6 +435,8 @@ impl ModuleRegistry {
 
         for desc in self.modules.values() {
             let ns_str = desc.namespace.as_str();
+            let tt_prefixes = ["/custom/tiktok", "/tiktok", ns_str];
+            let fb_prefixes = ["/custom/facebook", "/facebook", ns_str];
             let prefixes: &[&str] = if desc.id == "omniroute" {
                 &["/ominroute", "/omniroute"]
             } else if desc.id == "jev" {
@@ -442,9 +444,9 @@ impl ModuleRegistry {
             } else if desc.id == "muse" {
                 &["/muse-ai", "/v1/images/generations", "/video/v1/providers"]
             } else if desc.id == "tiktok-studio" || desc.id == "TikTok-Creator-Studio-Adapter" {
-                &["/custom/tiktok", "/tiktok"]
+                &tt_prefixes
             } else if desc.id == "facebook-suite" || desc.id == "Facebook-Suite" {
-                &["/custom/facebook", "/facebook"]
+                &fb_prefixes
             } else {
                 std::slice::from_ref(&ns_str)
             };

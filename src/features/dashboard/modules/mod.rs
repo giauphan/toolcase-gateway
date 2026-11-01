@@ -202,7 +202,15 @@ pub fn handle_remove_personal_module(
     drop(guard);
     let state_dir = get_state_dir();
     cleanup_module_files(&payload.id, &state_dir);
-    let _ = store.storage.remove_module(&payload.id);
+    match store.storage.remove_module(&payload.id) {
+        Ok(()) | Err(crate::storage::StorageError::NotFound(_)) => {}
+        Err(e) => {
+            eprintln!(
+                "warning: failed to remove module '{}' from storage: {e:?}",
+                payload.id
+            );
+        }
+    }
     if let Err(e) = store.save_to_persistent_file() {
         return write_error(
             client,

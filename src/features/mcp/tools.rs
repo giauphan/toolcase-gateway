@@ -243,7 +243,12 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
             }
             let state_dir = crate::gateway::installer::get_state_dir();
             crate::gateway::installer::cleanup_module_files(id, &state_dir);
-            let _ = store.storage.remove_module(id);
+            match store.storage.remove_module(id) {
+                Ok(()) | Err(crate::storage::StorageError::NotFound(_)) => {}
+                Err(e) => {
+                    eprintln!("warning: failed to remove module '{id}' from storage: {e:?}");
+                }
+            }
             store
                 .save_to_persistent_file()
                 .map_err(|e| format!("Module state updated but persistence failed: {e}"))?;
