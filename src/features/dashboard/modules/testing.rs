@@ -84,19 +84,31 @@ fn probe_local_http(manifest: &PersonalManifest) -> (bool, u64, String, serde_js
                 .unwrap_or("")
                 .trim()
                 .to_string();
+            let status_code = first_line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|code| code.parse::<u16>().ok());
+            let ok = status_code
+                .map(|code| (200..400).contains(&code))
+                .unwrap_or(false);
             let msg = if !first_line.is_empty() {
-                format!("Local HTTP server reachable ({first_line})")
+                if ok {
+                    format!("Local HTTP server reachable ({first_line})")
+                } else {
+                    format!("Local HTTP server returned error status ({first_line})")
+                }
             } else {
-                "Local HTTP server reachable (connection accepted)".to_string()
+                "Local HTTP server closed connection without HTTP response".to_string()
             };
             (
-                true,
+                ok,
                 latency_ms,
                 msg,
                 serde_json::json!({
                     "endpoint": raw_ep,
                     "socket_addr": parsed.to_string(),
                     "response_preview": first_line,
+                    "status_code": status_code,
                 }),
             )
         }
@@ -244,7 +256,8 @@ fn probe_stdio_module(manifest: &PersonalManifest) -> (bool, u64, String, serde_
             )
         }
     };
-    let _ = err_handle.join();
+    // Do not join: a grandchild process can keep the stderr pipe open after `kill()`.
+    drop(err_handle);
     result
 }
 

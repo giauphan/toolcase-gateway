@@ -201,28 +201,40 @@ fn test_dashboard_upgrade_module_resolves_catalog_and_addon_source() {
     assert_eq!(fb_cat.source.as_deref(), Some("addons/facebook-suite"));
 
     // 2. Register facebook-suite if not yet in registry
+    let tmp_bin = std::env::temp_dir().join(format!("test_fb_ep_{}.sh", uuid::Uuid::new_v4()));
+    let _ = fs::write(&tmp_bin, "#!/bin/sh\necho ok");
+    #[cfg(unix)]
     {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&tmp_bin, fs::Permissions::from_mode(0o755));
+    }
+
+    let (prev_manifest, had_installed_fb) = {
         let reg = store.module_registry();
         let mut guard = reg.write().unwrap();
-        if guard.get_module("facebook-suite").is_none() {
-            let manifest = toolcase_gateway::gateway::modules::PersonalManifest {
-                id: "facebook-suite".to_string(),
-                name: "Meta Business Suite".to_string(),
-                short_name: Some("Meta Business Suite".to_string()),
-                version: "1.0.0".to_string(),
-                namespace: "/custom/facebook".to_string(),
-                entrypoint: "run.sh".to_string(),
-                protocol: "stdio-stream".to_string(),
-                capabilities: vec!["studio".to_string()],
-                icon: Some("ⓕ".to_string()),
-                config_schema: None,
-                permissions: Vec::new(),
-                group: None,
-                source: None, // Simulating previously installed without explicit source
-            };
-            guard.register_personal_module(manifest).unwrap();
-        }
-    }
+        let prev = guard.get_personal_manifest("facebook-suite").cloned();
+        let _ = guard.unregister_personal_module("facebook-suite");
+        let manifest = toolcase_gateway::gateway::modules::PersonalManifest {
+            id: "facebook-suite".to_string(),
+            name: "Meta Business Suite".to_string(),
+            short_name: Some("Meta Business Suite".to_string()),
+            version: "1.0.0".to_string(),
+            namespace: "/custom/facebook".to_string(),
+            entrypoint: tmp_bin.to_string_lossy().to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec!["studio".to_string()],
+            icon: Some("ⓕ".to_string()),
+            config_schema: None,
+            permissions: Vec::new(),
+            group: None,
+            source: None, // Explicitly source-less to exercise catalog source fallback
+        };
+        guard.register_personal_module(manifest).unwrap();
+        let installed_dir = toolcase_gateway::gateway::installer::get_state_dir()
+            .join("modules")
+            .join("facebook-suite");
+        (prev, installed_dir.exists())
+    };
 
     // 3. Upgrade facebook-suite with payload without explicit source
     // It should locate source via catalog / addons and not fail with missing source
@@ -242,8 +254,42 @@ fn test_dashboard_upgrade_module_resolves_catalog_and_addon_source() {
         assert_eq!(head.status, 200, "Upgrade response: {}", resp_str);
         let upg_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(upg_json["ok"], true);
+    } else {
+        let (head, body) = request_gateway(
+            "POST",
+            "/api/v1/dashboard/modules/upgrade",
+            br#"{"id": "facebook-suite"}"#,
+            &store,
+        );
+        let resp_str = String::from_utf8_lossy(&body);
+        assert_eq!(head.status, 400, "Expected 400 bad request: {}", resp_str);
+        assert!(
+            resp_str.contains("Module upgrade failed")
+                && (resp_str.contains("Failed to copy directory")
+                    || resp_str.contains("is not currently installed")),
+            "Expected failure due to missing source directory or installation in CI, got: {}",
+            resp_str
+        );
     }
 
+    // 4. Teardown: restore previous registry state and remove test artifacts
+    {
+        let reg = store.module_registry();
+        let mut guard = reg.write().unwrap();
+        let _ = guard.unregister_personal_module("facebook-suite");
+        if let Some(prev) = prev_manifest {
+            let _ = guard.register_personal_module(prev);
+        }
+    }
+
+    let installed_dir = toolcase_gateway::gateway::installer::get_state_dir()
+        .join("modules")
+        .join("facebook-suite");
+    if !had_installed_fb && installed_dir.exists() {
+        let _ = fs::remove_dir_all(&installed_dir);
+    }
+
+    let _ = fs::remove_file(&tmp_bin);
     let _ = fs::remove_file(&tmp_env);
     let _ = fs::remove_file(&store.config_file);
 }

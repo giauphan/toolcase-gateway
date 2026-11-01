@@ -198,3 +198,61 @@ fn test_dashboard_test_module_rejects_get() {
 
     let _ = fs::remove_file(&tmp_env);
 }
+
+#[test]
+fn test_dashboard_test_module_local_http() {
+    let tmp_env = std::env::temp_dir().join(format!("test_mod_test_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let server_handle = std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 512];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let _ = std::io::Write::write_all(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+            );
+        }
+    });
+
+    let manifest = toolcase_gateway::gateway::modules::PersonalManifest {
+        id: "local-http-mod".to_string(),
+        name: "Local HTTP Mod".to_string(),
+        short_name: None,
+        version: "1.0.0".to_string(),
+        namespace: "/custom/http".to_string(),
+        entrypoint: format!("http://127.0.0.1:{port}"),
+        protocol: "local-http".to_string(),
+        capabilities: vec![],
+        icon: None,
+        config_schema: None,
+        permissions: vec![],
+        group: None,
+        source: None,
+    };
+    {
+        let reg = store.module_registry();
+        let mut guard = reg.write().unwrap();
+        guard.register_personal_module(manifest).unwrap();
+    }
+
+    let test_payload = serde_json::json!({ "id": "local-http-mod" });
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/test",
+        &serde_json::to_vec(&test_payload).unwrap(),
+        &store,
+    );
+    assert_eq!(head.status, 200);
+    let res: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(res["ok"], true);
+    assert_eq!(res["status"], "healthy");
+    assert_eq!(res["protocol"], "local-http");
+    assert_eq!(res["details"]["status_code"], 200);
+
+    let _ = server_handle.join();
+    let _ = fs::remove_file(&tmp_env);
+}
