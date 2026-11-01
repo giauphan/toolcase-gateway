@@ -443,6 +443,8 @@ impl ModuleRegistry {
                 &["/muse-ai", "/v1/images/generations", "/video/v1/providers"]
             } else if desc.id == "tiktok-studio" || desc.id == "TikTok-Creator-Studio-Adapter" {
                 &["/custom/tiktok", "/tiktok"]
+            } else if desc.id == "facebook-suite" || desc.id == "Facebook-Suite" {
+                &["/custom/facebook", "/facebook"]
             } else {
                 std::slice::from_ref(&ns_str)
             };

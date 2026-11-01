@@ -87,6 +87,16 @@ fn test_personal_module_registration_and_isolation() {
     assert_eq!(matched_desc.id, "my-test-mod");
     assert_eq!(subpath, "/sub/route");
 
+    // Test Facebook-Suite alias prefix /facebook alongside /custom/facebook
+    let fb_manifest = sample_manifest("facebook-suite", "Meta Business Suite", "/custom/facebook");
+    reg.register_personal_module(fb_manifest).unwrap();
+    let (fb1, sub1) = reg.match_path("/custom/facebook/v1/publish").unwrap();
+    assert_eq!(fb1.id, "facebook-suite");
+    assert_eq!(sub1, "/v1/publish");
+    let (fb2, sub2) = reg.match_path("/facebook/v1/publish").unwrap();
+    assert_eq!(fb2.id, "facebook-suite");
+    assert_eq!(sub2, "/v1/publish");
+
     reg.set_module_status("my-test-mod", ModuleStatus::Disabled)
         .unwrap();
     let desc = reg.get_module("my-test-mod").unwrap();
