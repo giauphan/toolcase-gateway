@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.seed_gateway import (
+    ENCRYPTED_PREFIX,
     apply_accounts,
     apply_settings,
     init_schema,
@@ -195,7 +196,7 @@ def test_apply_accounts_idempotency_with_encryption_key(tmp_path: Path):
     assert len(rows) == 2
     auto_id = None
     for acc_id, enc_value, label in rows:
-        assert enc_value.startswith("enc:v1:")
+        assert enc_value.startswith(ENCRYPTED_PREFIX)
         decrypted = unprotect_credential(enc_value, enc_key)
         if acc_id == "enc-explicit-1":
             assert decrypted == "sk-jev-second-key"
@@ -218,5 +219,17 @@ def test_apply_accounts_idempotency_with_encryption_key(tmp_path: Path):
     reused_auto = next(r for r in updated_rows if r[0] == auto_id)
     assert reused_auto[2] == "Updated Encrypted Auto Account"
     assert unprotect_credential(reused_auto[1], enc_key) == "sk-jev-confidential-key"
+
+    # Third seeding supplying the already-encrypted string without explicit ID
+    stored_enc_key = reused_auto[1]
+    enc_input_accounts = [
+        {"key": stored_enc_key, "label": "Preserved Encrypted Input Account"},
+    ]
+    apply_accounts(conn, "jev", enc_input_accounts, enc_key=enc_key)
+    cur.execute("SELECT id, key, label FROM accounts WHERE provider = 'jev'")
+    final_rows = cur.fetchall()
+    assert len(final_rows) == 2
+    matched_by_enc_input = next(r for r in final_rows if r[0] == auto_id)
+    assert matched_by_enc_input[2] == "Preserved Encrypted Input Account"
 
     conn.close()

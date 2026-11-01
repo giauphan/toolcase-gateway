@@ -240,14 +240,14 @@ fn probe_stdio_module(manifest: &PersonalManifest) -> (bool, u64, String, serde_
             let has_error = parsed_json.as_ref().map_or(true, |val| {
                 let status_err = val
                     .get("status")
-                    .and_then(|s| s.as_u64())
-                    .is_some_and(|s| !(200..400).contains(&s));
+                    .and_then(|s| s.as_f64())
+                    .is_some_and(|code| code < 200.0 || code >= 400.0);
                 let ok_err = val.get("ok").and_then(|o| o.as_bool()).is_some_and(|o| !o);
                 let healthy_err = val
                     .get("healthy")
                     .and_then(|h| h.as_bool())
                     .is_some_and(|h| !h);
-                let explicit_err = val.get("error").is_some();
+                let explicit_err = val.get("error").is_some_and(|e| !e.is_null());
                 status_err || ok_err || healthy_err || explicit_err
             });
             let ok = !has_error;
