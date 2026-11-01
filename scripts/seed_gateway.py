@@ -16,17 +16,18 @@ Features:
 
 import base64
 import hashlib
-import hmac
 import json
 import os
 import sqlite3
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_STATE_DIR = ".gw_state"
 DEFAULT_DB_PATH = f"{DEFAULT_STATE_DIR}/gateway.db"
 DEFAULT_CONFIG_PATH = "gateway_config.json"
+ENCRYPTED_PREFIX = "enc:v1:"
 
 
 def load_env_vars(env_path: Optional[Path] = None) -> Dict[str, str]:
@@ -69,17 +70,9 @@ def safe_resolve_sqlite_path(raw_path: str) -> Path:
     return resolved
 
 
-def derive_blind_index(secret: str, salt: str = "toolcase_blind_idx") -> str:
-    """Computes a deterministic blind index / fingerprint for secret lookup."""
-    if not secret:
-        return ""
-    h = hmac.new(salt.encode("utf-8"), secret.encode("utf-8"), hashlib.sha256)
-    return "fp_" + h.hexdigest()[:16]
-
-
 def protect_credential(secret: str, encryption_key: str) -> str:
     """Protects a credential at rest with AES-GCM envelope if key is provided."""
-    if not secret or secret.startswith("enc:v1:") or not encryption_key:
+    if not secret or secret.startswith(ENCRYPTED_PREFIX) or not encryption_key:
         return secret
 
     try:
@@ -90,9 +83,32 @@ def protect_credential(secret: str, encryption_key: str) -> str:
         ciphertext = aesgcm.encrypt(nonce, secret.encode("utf-8"), None)
         nonce_b64 = base64.b64encode(nonce).decode("ascii")
         payload_b64 = base64.b64encode(ciphertext).decode("ascii")
-        return f"enc:v1:{nonce_b64}:{payload_b64}"
+        return f"{ENCRYPTED_PREFIX}{nonce_b64}:{payload_b64}"
     except ImportError:
         raise RuntimeError("The 'cryptography' library is required to encrypt secrets compatible with toolcase-gateway.")
+
+
+def unprotect_credential(stored: str, encryption_key: str) -> str:
+    """Decrypts a credential protected with AES-GCM envelope if key is provided."""
+    if not stored or not stored.startswith(ENCRYPTED_PREFIX) or not encryption_key:
+        return stored
+
+    parts = stored.split(":")
+    if len(parts) != 4 or parts[0] != "enc" or parts[1] != "v1":
+        return stored
+
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        nonce_bytes = base64.b64decode(parts[2])
+        payload_bytes = base64.b64decode(parts[3])
+        if len(nonce_bytes) != 12:
+            return stored
+        key_bytes = hashlib.sha256(encryption_key.encode("utf-8")).digest()
+        aesgcm = AESGCM(key_bytes)
+        decrypted = aesgcm.decrypt(nonce_bytes, payload_bytes, None)
+        return decrypted.decode("utf-8")
+    except Exception:
+        return stored
 
 
 def init_schema(conn: sqlite3.Connection):
@@ -255,16 +271,64 @@ def apply_settings(
     print(f"[SEEDER] -> Updated 'gateway_config' ({len(gw_payload)} keys) and 'muse_config' ({len(muse_payload)} keys).")
 
 
+def _extract_account_key(acc: dict) -> str:
+    """Extracts raw secret from account dictionary."""
+    for key_name in ("api_key", "cookie", "key"):
+        val = (acc.get(key_name) or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _find_matching_account_id(
+    conn: sqlite3.Connection, provider: str, raw_key: str, enc_key: str
+) -> Tuple[Optional[str], int]:
+    """Finds existing account ID matching raw_key, and counts undecryptable accounts."""
+    cur = conn.cursor()
+    cur.execute("SELECT id, key FROM accounts WHERE provider = ?", (provider,))
+    undecryptable = 0
+    target_plain = unprotect_credential(raw_key, enc_key) if raw_key.startswith(ENCRYPTED_PREFIX) else raw_key
+    for existing_id, existing_key in cur.fetchall():
+        if existing_key == raw_key:
+            return existing_id, undecryptable
+        plain = unprotect_credential(existing_key, enc_key)
+        if plain == target_plain:
+            return existing_id, undecryptable
+        if plain == existing_key and existing_key.startswith(ENCRYPTED_PREFIX):
+            undecryptable += 1
+    return None, undecryptable
+
+
+def _resolve_account_id(
+    conn: sqlite3.Connection, provider: str, acc: dict, raw_key: str, enc_key: str
+) -> str:
+    """Resolves existing account ID or generates a new unique ID."""
+    explicit_id = acc.get("id")
+    if explicit_id:
+        return explicit_id
+
+    existing_id, undecryptable = _find_matching_account_id(conn, provider, raw_key, enc_key)
+    if existing_id:
+        return existing_id
+
+    generated_id = f"{provider}_{uuid.uuid4().hex[:12]}"
+    if undecryptable > 0:
+        print(
+            f"[SEEDER] WARNING: {undecryptable} {provider} account(s) could not be decrypted with current key; generated new ID '{generated_id}'."
+        )
+    return generated_id
+
+
 def apply_accounts(conn: sqlite3.Connection, provider: str, accounts: list, enc_key: str):
     """Extracts and persists provider accounts."""
     count = 0
     with conn:
         for acc in accounts:
-            raw_key = (acc.get("api_key") or acc.get("cookie") or acc.get("key") or "").strip()
+            raw_key = _extract_account_key(acc)
             if not raw_key:
                 continue
+            acc_id = _resolve_account_id(conn, provider, acc, raw_key, enc_key)
             prot_key = protect_credential(raw_key, enc_key)
-            acc_id = acc.get("id") or f"{provider}_{derive_blind_index(raw_key)[:16]}"
             label = acc.get("label", f"{provider}-account")
             conn.execute("""
                 INSERT INTO accounts (id, provider, key, label, is_active, updated_at)

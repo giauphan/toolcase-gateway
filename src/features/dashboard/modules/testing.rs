@@ -26,11 +26,12 @@ pub struct TestModuleResult {
     pub details: serde_json::Value,
 }
 
-fn parse_http_addr(raw: &str) -> Result<std::net::SocketAddr, String> {
-    let without_proto = raw
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
-    let host_port = without_proto.split('/').next().unwrap_or(without_proto);
+fn resolve_http_target(raw: &str) -> Result<(Vec<std::net::SocketAddr>, String, String), String> {
+    let without_proto = raw.trim_start_matches("http://");
+    let (host_port, path) = match without_proto.split_once('/') {
+        Some((hp, p)) => (hp, format!("/{p}")),
+        None => (without_proto, "/".to_string()),
+    };
     let resolved = if !host_port.contains(':') {
         format!("{host_port}:80")
     } else {
@@ -40,24 +41,32 @@ fn parse_http_addr(raw: &str) -> Result<std::net::SocketAddr, String> {
         .to_socket_addrs()
         .map_err(|e| format!("Failed to resolve '{resolved}': {e}"))?
         .collect();
-    addrs
-        .into_iter()
-        .next()
-        .ok_or_else(|| format!("Could not resolve socket address for '{resolved}'"))
+    if addrs.is_empty() {
+        return Err(format!("Could not resolve socket address for '{resolved}'"));
+    }
+    Ok((addrs, host_port.to_string(), path))
 }
 
 fn probe_local_http(manifest: &PersonalManifest) -> (bool, u64, String, serde_json::Value) {
     let start = Instant::now();
     let raw_ep = &manifest.entrypoint;
     let trimmed = raw_ep.trim();
-    let url_str = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+    if trimmed.starts_with("https://") {
+        return (
+            false,
+            0,
+            "HTTPS probing is not supported for local-http protocol; use http://".to_string(),
+            serde_json::json!({ "endpoint": raw_ep }),
+        );
+    }
+    let url_str = if trimmed.starts_with("http://") {
         trimmed.to_string()
     } else {
         format!("http://{trimmed}")
     };
 
-    let parsed = match parse_http_addr(&url_str) {
-        Ok(addr) => addr,
+    let (addrs, host_header, path) = match resolve_http_target(&url_str) {
+        Ok(t) => t,
         Err(e) => {
             return (
                 false,
@@ -68,12 +77,24 @@ fn probe_local_http(manifest: &PersonalManifest) -> (bool, u64, String, serde_js
         }
     };
 
-    match TcpStream::connect_timeout(&parsed, Duration::from_secs(5)) {
-        Ok(mut stream) => {
+    let mut connected = None;
+    let mut last_err = String::new();
+    for addr in &addrs {
+        match TcpStream::connect_timeout(addr, Duration::from_secs(2)) {
+            Ok(s) => {
+                connected = Some((*addr, s));
+                break;
+            }
+            Err(e) => last_err = e.to_string(),
+        }
+    }
+
+    match connected {
+        Some((connected_addr, mut stream)) => {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
             let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
             let probe_req =
-                format!("HEAD / HTTP/1.1\r\nHost: {parsed}\r\nConnection: close\r\n\r\n");
+                format!("GET {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n");
             let _ = stream.write_all(probe_req.as_bytes());
             let mut resp_buf = [0u8; 128];
             let n = stream.read(&mut resp_buf).unwrap_or(0);
@@ -88,9 +109,7 @@ fn probe_local_http(manifest: &PersonalManifest) -> (bool, u64, String, serde_js
                 .split_whitespace()
                 .nth(1)
                 .and_then(|code| code.parse::<u16>().ok());
-            let ok = status_code
-                .map(|code| (200..400).contains(&code))
-                .unwrap_or(false);
+            let ok = status_code.is_some_and(|code| (200..400).contains(&code));
             let msg = if !first_line.is_empty() {
                 if ok {
                     format!("Local HTTP server reachable ({first_line})")
@@ -106,22 +125,22 @@ fn probe_local_http(manifest: &PersonalManifest) -> (bool, u64, String, serde_js
                 msg,
                 serde_json::json!({
                     "endpoint": raw_ep,
-                    "socket_addr": parsed.to_string(),
+                    "socket_addr": connected_addr.to_string(),
                     "response_preview": first_line,
                     "status_code": status_code,
                 }),
             )
         }
-        Err(e) => {
+        None => {
             let latency_ms = start.elapsed().as_millis() as u64;
             (
                 false,
                 latency_ms,
-                format!("Failed to connect to local HTTP endpoint: {e}"),
+                format!("Failed to connect to local HTTP endpoint: {last_err}"),
                 serde_json::json!({
                     "endpoint": raw_ep,
-                    "socket_addr": parsed.to_string(),
-                    "error": e.to_string(),
+                    "attempted_addrs": addrs.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                    "error": last_err,
                 }),
             )
         }
@@ -217,10 +236,30 @@ fn probe_stdio_module(manifest: &PersonalManifest) -> (bool, u64, String, serde_
             let _ = child.wait();
             let latency_ms = start.elapsed().as_millis() as u64;
             let trimmed = line.trim();
+            let parsed_json: Option<serde_json::Value> = serde_json::from_str(trimmed).ok();
+            let has_error = parsed_json.as_ref().map_or(true, |val| {
+                let status_err = val
+                    .get("status")
+                    .and_then(|s| s.as_f64())
+                    .is_some_and(|code| code < 200.0 || code >= 400.0);
+                let ok_err = val.get("ok").and_then(|o| o.as_bool()).is_some_and(|o| !o);
+                let healthy_err = val
+                    .get("healthy")
+                    .and_then(|h| h.as_bool())
+                    .is_some_and(|h| !h);
+                let explicit_err = val.get("error").is_some_and(|e| !e.is_null());
+                status_err || ok_err || healthy_err || explicit_err
+            });
+            let ok = !has_error;
+            let msg = if ok {
+                format!("Module responded successfully in {latency_ms}ms")
+            } else {
+                format!("Module returned unhealthy status: {trimmed}")
+            };
             (
-                true,
+                ok,
                 latency_ms,
-                format!("Module responded successfully in {latency_ms}ms"),
+                msg,
                 serde_json::json!({
                     "entrypoint": manifest.entrypoint,
                     "response_preview": trimmed.chars().take(80).collect::<String>(),
@@ -265,40 +304,28 @@ fn probe_builtin_module(
     desc: &ModuleDescriptor,
     store: &ConfigStore,
 ) -> (bool, u64, String, serde_json::Value) {
-    match desc.id.as_str() {
+    let (msg, extra) = match desc.id.as_str() {
         "omniroute" => (
-            true,
-            0,
             "Built-in Omniroute gateway router is active and healthy".to_string(),
-            serde_json::json!({
-                "kind": "builtin",
-                "namespace": desc.namespace,
-            }),
+            serde_json::json!({}),
         ),
         "museai" => {
             let conf = store.snapshot();
             let has_token = !conf.museai_access_token.is_empty() || !conf.museai_cookie.is_empty();
-            let msg = if has_token {
-                "Built-in MuseAI provider module is configured and ready".to_string()
+            let text = if has_token {
+                "Built-in MuseAI provider module is configured and ready"
             } else {
                 "Built-in MuseAI provider module is enabled (credentials not yet configured)"
-                    .to_string()
             };
             (
-                true,
-                0,
-                msg,
-                serde_json::json!({
-                    "kind": "builtin",
-                    "namespace": desc.namespace,
-                    "configured": has_token,
-                }),
+                text.to_string(),
+                serde_json::json!({ "configured": has_token }),
             )
         }
         "jev" => {
             let conf = store.snapshot();
             let has_keys = !conf.jev_api_keys.is_empty();
-            let msg = if has_keys {
+            let text = if has_keys {
                 format!(
                     "Built-in Jev gateway module is configured with {} API key(s)",
                     conf.jev_api_keys.len()
@@ -306,27 +333,18 @@ fn probe_builtin_module(
             } else {
                 "Built-in Jev gateway module is enabled (no API keys configured)".to_string()
             };
-            (
-                true,
-                0,
-                msg,
-                serde_json::json!({
-                    "kind": "builtin",
-                    "namespace": desc.namespace,
-                    "configured": has_keys,
-                }),
-            )
+            (text, serde_json::json!({ "configured": has_keys }))
         }
         _ => (
-            true,
-            0,
             format!("Built-in module '{}' is registered and healthy", desc.id),
-            serde_json::json!({
-                "kind": "builtin",
-                "namespace": desc.namespace,
-            }),
+            serde_json::json!({}),
         ),
+    };
+    let mut details = serde_json::json!({ "kind": "builtin", "namespace": desc.namespace });
+    if let (Some(m), Some(e)) = (details.as_object_mut(), extra.as_object()) {
+        m.extend(e.clone());
     }
+    (true, 0, msg, details)
 }
 
 pub fn handle_test_personal_module(
