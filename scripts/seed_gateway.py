@@ -470,6 +470,43 @@ def resolve_database_path(cli_db: Optional[str] = None, env_vars: Optional[Dict[
     return f"{state_dir}/gateway.db"
 
 
+def _parse_key_value(raw: str) -> Tuple[str, str]:
+    """Splits a key-value assignment string, defaulting value to 'true'."""
+    if "=" in raw:
+        k, v = raw.split("=", 1)
+        return k.strip(), v.strip()
+    return raw.strip(), "true"
+
+
+def _extract_overrides_and_positionals(args: List[str]) -> Tuple[Dict[str, Any], List[str]]:
+    """Separates --set overrides from positional arguments."""
+    overrides: Dict[str, Any] = {}
+    pos_args: List[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--set" and i + 1 < len(args):
+            k, v = _parse_key_value(args[i + 1])
+            overrides[k] = v
+            i += 2
+            continue
+        if arg.startswith("--set="):
+            k, v = _parse_key_value(arg[6:])
+            overrides[k] = v
+            i += 1
+            continue
+        pos_args.append(arg)
+        i += 1
+    return overrides, pos_args
+
+
+def _resolve_cli_config_path(cli_cfg: Optional[str], env_vars: Dict[str, str]) -> str:
+    """Resolves config path prioritizing CLI argument, environment, and defaults."""
+    if cli_cfg:
+        return cli_cfg
+    return os.environ.get("GW_CONFIG_FILE") or env_vars.get("GW_CONFIG_FILE") or DEFAULT_CONFIG_PATH
+
+
 def parse_cli_args() -> Tuple[str, str, bool, bool, Dict[str, Any]]:
     """Parses CLI arguments safely and merges with .env configuration."""
     args = sys.argv[1:]
@@ -477,29 +514,14 @@ def parse_cli_args() -> Tuple[str, str, bool, bool, Dict[str, Any]]:
     show_only = "--show" in args
     filtered = [a for a in args if a not in ("--generate-key", "--show")]
 
-    overrides: Dict[str, Any] = {}
-    pos_args: List[str] = []
-    i = 0
-    while i < len(filtered):
-        arg = filtered[i]
-        if arg == "--set" and i + 1 < len(filtered):
-            k, v = filtered[i + 1].split("=", 1) if "=" in filtered[i + 1] else (filtered[i + 1], "true")
-            overrides[k.strip()] = v.strip()
-            i += 2
-        elif arg.startswith("--set="):
-            k, v = arg[6:].split("=", 1) if "=" in arg[6:] else (arg[6:], "true")
-            overrides[k.strip()] = v.strip()
-            i += 1
-        else:
-            pos_args.append(arg)
-            i += 1
+    overrides, pos_args = _extract_overrides_and_positionals(filtered)
 
     env_vars = load_env_vars()
-    cli_db = pos_args[0] if len(pos_args) > 0 else None
+    cli_db = pos_args[0] if pos_args else None
     cli_cfg = pos_args[1] if len(pos_args) > 1 else None
 
     db_arg = resolve_database_path(cli_db, env_vars)
-    cfg_arg = cli_cfg or os.environ.get("GW_CONFIG_FILE") or env_vars.get("GW_CONFIG_FILE") or DEFAULT_CONFIG_PATH
+    cfg_arg = _resolve_cli_config_path(cli_cfg, env_vars)
 
     return db_arg, cfg_arg, auto_gen, show_only, overrides
 
