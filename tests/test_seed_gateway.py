@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.seed_gateway import (
+    ENCRYPTED_PREFIX,
     apply_accounts,
     apply_settings,
     init_schema,
@@ -195,7 +196,7 @@ def test_apply_accounts_idempotency_with_encryption_key(tmp_path: Path):
     assert len(rows) == 2
     auto_id = None
     for acc_id, enc_value, label in rows:
-        assert enc_value.startswith("enc:v1:")
+        assert enc_value.startswith(ENCRYPTED_PREFIX)
         decrypted = unprotect_credential(enc_value, enc_key)
         if acc_id == "enc-explicit-1":
             assert decrypted == "sk-jev-second-key"
