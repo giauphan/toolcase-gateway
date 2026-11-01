@@ -143,7 +143,12 @@ impl SqliteStorage {
                     let already_in_db = existing.iter().any(|m| m.manifest.id == manifest.id);
                     if !already_in_db {
                         let is_enabled = enabled_map.get(&manifest.id).copied().unwrap_or(true);
-                        let _ = self.save_module_with_status(&manifest, is_enabled);
+                        if let Err(e) = self.save_module_with_status(&manifest, is_enabled) {
+                            eprintln!(
+                                "warning: failed to save module '{}' during legacy migration: {e}",
+                                manifest.id
+                            );
+                        }
                     }
                 }
             }
