@@ -16,11 +16,11 @@ Features:
 
 import base64
 import hashlib
-import hmac
 import json
 import os
 import sqlite3
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -69,14 +69,6 @@ def safe_resolve_sqlite_path(raw_path: str) -> Path:
     return resolved
 
 
-def derive_blind_index(secret: str, salt: str = "toolcase_blind_idx") -> str:
-    """Computes a deterministic blind index / fingerprint for secret lookup."""
-    if not secret:
-        return ""
-    h = hmac.new(salt.encode("utf-8"), secret.encode("utf-8"), hashlib.sha256)
-    return "fp_" + h.hexdigest()[:16]
-
-
 def protect_credential(secret: str, encryption_key: str) -> str:
     """Protects a credential at rest with AES-GCM envelope if key is provided."""
     if not secret or secret.startswith("enc:v1:") or not encryption_key:
@@ -93,6 +85,29 @@ def protect_credential(secret: str, encryption_key: str) -> str:
         return f"enc:v1:{nonce_b64}:{payload_b64}"
     except ImportError:
         raise RuntimeError("The 'cryptography' library is required to encrypt secrets compatible with toolcase-gateway.")
+
+
+def unprotect_credential(stored: str, encryption_key: str) -> str:
+    """Decrypts a credential protected with AES-GCM envelope if key is provided."""
+    if not stored or not stored.startswith("enc:v1:") or not encryption_key:
+        return stored
+
+    parts = stored.split(":")
+    if len(parts) != 4 or parts[0] != "enc" or parts[1] != "v1":
+        return stored
+
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        nonce_bytes = base64.b64decode(parts[2])
+        payload_bytes = base64.b64decode(parts[3])
+        if len(nonce_bytes) != 12:
+            return stored
+        key_bytes = hashlib.sha256(encryption_key.encode("utf-8")).digest()
+        aesgcm = AESGCM(key_bytes)
+        decrypted = aesgcm.decrypt(nonce_bytes, payload_bytes, None)
+        return decrypted.decode("utf-8")
+    except Exception:
+        return stored
 
 
 def init_schema(conn: sqlite3.Connection):
@@ -264,8 +279,25 @@ def apply_accounts(conn: sqlite3.Connection, provider: str, accounts: list, enc_
             if not raw_key:
                 continue
             prot_key = protect_credential(raw_key, enc_key)
-            acc_id = acc.get("id") or f"{provider}_{derive_blind_index(raw_key)[:16]}"
             label = acc.get("label", f"{provider}-account")
+            acc_id = acc.get("id")
+            if not acc_id:
+                cur = conn.cursor()
+                cur.execute("SELECT id, key FROM accounts WHERE provider = ?", (provider,))
+                undecryptable = 0
+                for existing_id, existing_key in cur.fetchall():
+                    plain = unprotect_credential(existing_key, enc_key)
+                    if plain == raw_key:
+                        acc_id = existing_id
+                        break
+                    if plain == existing_key and existing_key.startswith("enc:v1:"):
+                        undecryptable += 1
+                if not acc_id:
+                    acc_id = f"{provider}_{uuid.uuid4().hex[:12]}"
+                    if undecryptable > 0:
+                        print(
+                            f"[SEEDER] WARNING: {undecryptable} {provider} account(s) could not be decrypted with current key; generated new ID '{acc_id}'."
+                        )
             conn.execute("""
                 INSERT INTO accounts (id, provider, key, label, is_active, updated_at)
                 VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
