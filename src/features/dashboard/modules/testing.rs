@@ -247,7 +247,7 @@ fn probe_stdio_module(manifest: &PersonalManifest) -> (bool, u64, String, serde_
                     .get("healthy")
                     .and_then(|h| h.as_bool())
                     .is_some_and(|h| !h);
-                let explicit_err = val.get("error").is_some();
+                let explicit_err = val.get("error").is_some_and(|e| !e.is_null());
                 status_err || ok_err || healthy_err || explicit_err
             });
             let ok = !has_error;
