@@ -200,37 +200,37 @@ fn probe_stdio_module(manifest: &PersonalManifest) -> (bool, u64, String, serde_
 
     let probe_timeout = Duration::from_secs(5);
     let result = match rx.recv_timeout(probe_timeout) {
-        Ok(line) => {
+        Ok(line) if !line.trim().is_empty() => {
             let _ = child.kill();
             let _ = child.wait();
             let latency_ms = start.elapsed().as_millis() as u64;
             let trimmed = line.trim();
-            let msg = if !trimmed.is_empty() {
-                format!("Module responded successfully in {latency_ms}ms")
-            } else {
-                format!("Module spawned and exited cleanly in {latency_ms}ms")
-            };
             (
                 true,
                 latency_ms,
-                msg,
+                format!("Module responded successfully in {latency_ms}ms"),
                 serde_json::json!({
                     "entrypoint": manifest.entrypoint,
                     "response_preview": trimmed.chars().take(80).collect::<String>(),
                 }),
             )
         }
-        Err(_) => {
+        probe_res => {
             let _ = child.kill();
-            let _ = child.wait();
+            let exit_status = child.wait().ok();
             let latency_ms = start.elapsed().as_millis() as u64;
             let err_msg = rx_err
                 .recv_timeout(Duration::from_millis(150))
                 .unwrap_or_default();
+            let is_timeout = matches!(probe_res, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
             let msg = if !err_msg.trim().is_empty() {
-                format!("Module probe failed or crashed: {}", err_msg.trim())
-            } else {
+                format!("Module probe failed: {}", err_msg.trim())
+            } else if is_timeout {
                 format!("Module execution timed out ({probe_timeout:?})")
+            } else if let Some(code) = exit_status.and_then(|s| s.code()) {
+                format!("Module process exited prematurely with status code {code}")
+            } else {
+                "Module process closed stdout without responding".to_string()
             };
             (
                 false,
@@ -238,7 +238,7 @@ fn probe_stdio_module(manifest: &PersonalManifest) -> (bool, u64, String, serde_
                 msg,
                 serde_json::json!({
                     "entrypoint": manifest.entrypoint,
-                    "timeout": true,
+                    "timeout": is_timeout,
                     "stderr": err_msg.trim(),
                 }),
             )

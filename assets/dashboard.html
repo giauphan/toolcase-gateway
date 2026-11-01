@@ -260,6 +260,17 @@
         <form method="dialog">
           <h2 id="module-action-title">Confirm module action</h2>
           <p id="module-action-description"></p>
+          <div id="module-action-upgrade-inputs" style="display:none; margin:12px 0;">
+            <div class="field-group formgroup">
+              <label for="module-action-source">Source Repository / Directory (optional if configured)</label>
+              <input type="text" id="module-action-source" placeholder="e.g. https://github.com/org/repo.git or addons/my-addon">
+              <div class="hint">Leave unchanged to use the configured repository, or enter a new URL / directory path.</div>
+            </div>
+            <div class="field-group formgroup" style="margin-top:8px;">
+              <label for="module-action-branch">Branch (optional)</label>
+              <input type="text" id="module-action-branch" placeholder="main">
+            </div>
+          </div>
           <div class="ui-dialog-actions">
             <button type="submit" value="cancel" class="btn btn-secondary">Cancel</button>
             <button type="submit" id="module-action-confirm" value="confirm" class="btn primary btn-primary">Continue</button>

@@ -485,13 +485,29 @@
 
   function initModuleActionDialog() {
     if (!moduleActionDialog) return;
+    ["module-action-source", "module-action-branch"].forEach(function(fieldId) {
+      byId(fieldId)?.addEventListener("keydown", function(ev) {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          moduleActionConfirm?.click();
+        }
+      });
+    });
     moduleActionDialog.addEventListener("close", function() {
       const action = pendingModuleAction;
       pendingModuleAction = null;
+      const upgradeInputs = byId("module-action-upgrade-inputs");
+      if (upgradeInputs) upgradeInputs.style.display = "none";
       if (moduleActionDialog.returnValue !== "confirm" || !action) return;
-      if (action.kind === "remove") window.removeModule(action.id);
-      else if (action.kind === "upgrade") window.upgradeModule(action.id);
-      else window.toggleModule(action.id, action.enable);
+      if (action.kind === "remove") {
+        window.removeModule(action.id);
+      } else if (action.kind === "upgrade") {
+        const sourceVal = byId("module-action-source")?.value;
+        const branchVal = byId("module-action-branch")?.value;
+        window.upgradeModule(action.id, sourceVal, branchVal);
+      } else {
+        window.toggleModule(action.id, action.enable);
+      }
     });
   }
 
@@ -521,6 +537,8 @@
   function requestModuleStateChange(id, enable) {
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, enable: enable, kind: 'state' };
+    const upgradeInputs = byId("module-action-upgrade-inputs");
+    if (upgradeInputs) upgradeInputs.style.display = "none";
     moduleActionDescription.textContent = enable
       ? 'Enable this module? Its registered routes will accept requests again.'
       : 'Disable this module? Its registered routes will fail closed with HTTP 503 until it is re-enabled.';
@@ -532,6 +550,8 @@
   function requestModuleRemoval(id) {
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, kind: 'remove' };
+    const upgradeInputs = byId("module-action-upgrade-inputs");
+    if (upgradeInputs) upgradeInputs.style.display = "none";
     moduleActionDescription.textContent = 'Remove this personal module? This removes its installed files and cannot be undone.';
     moduleActionConfirm.textContent = 'Remove module';
     moduleActionDialog.returnValue = '';
@@ -541,8 +561,22 @@
   function requestModuleUpgrade(id) {
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, kind: 'upgrade' };
-    moduleActionDescription.textContent = 'Upgrade this module to its latest version? Existing configuration and credentials will be preserved.';
+    const module = renderedModules.find(function(candidate) { return candidate.id === id; });
+    const knownSource = module?.source || "";
+    moduleActionDescription.textContent = knownSource
+      ? "Upgrade module '" + id + "' to its latest version from source '" + knownSource + "'? Existing configuration and credentials will be preserved."
+      : "Upgrade module '" + id + "' to its latest version? Existing configuration and credentials will be preserved.";
     moduleActionConfirm.textContent = 'Upgrade module';
+
+    const upgradeInputs = byId("module-action-upgrade-inputs");
+    const sourceField = byId("module-action-source");
+    const branchField = byId("module-action-branch");
+    if (upgradeInputs) {
+      upgradeInputs.style.display = "block";
+      if (sourceField) sourceField.value = knownSource;
+      if (branchField) branchField.value = "";
+    }
+
     moduleActionDialog.returnValue = '';
     moduleActionDialog.showModal();
   }
@@ -1131,11 +1165,14 @@
     );
   };
 
-  window.upgradeModule = function(id) {
+  window.upgradeModule = function(id, source, branch) {
+    const payload = { id: id };
+    if (source?.trim()) payload.source = source.trim();
+    if (branch?.trim()) payload.branch = branch.trim();
     sendModuleRequest(
       id,
       "/api/v1/dashboard/modules/upgrade",
-      { id: id },
+      payload,
       "Upgrading personal module '" + id + "'...",
       "Personal module '" + id + "' was successfully upgraded to the latest version.",
       "Failed to upgrade module"

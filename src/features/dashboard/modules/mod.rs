@@ -262,18 +262,8 @@ pub fn handle_upgrade_personal_module(
         );
     }
 
-    let source_candidate = payload
-        .source
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| existing_desc.source.clone())
-        .or_else(|| {
-            crate::gateway::modules::get_system_module_catalog()
-                .into_iter()
-                .find(|c| c.id == resolved_id || c.namespace == existing_desc.namespace)
-                .and_then(|c| c.source)
-        });
+    let source_candidate =
+        resolve_upgrade_source_candidate(payload.source.as_deref(), &existing_desc, &resolved_id);
 
     let raw_source = match source_candidate {
         Some(s) => s,
@@ -362,4 +352,34 @@ pub fn handle_upgrade_personal_module(
     )?;
     client.write_all(&resp_bytes)?;
     client.flush()
+}
+
+fn resolve_upgrade_source_candidate(
+    payload_source: Option<&str>,
+    existing_desc: &crate::gateway::modules::ModuleDescriptor,
+    resolved_id: &str,
+) -> Option<String> {
+    payload_source
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| existing_desc.source.clone())
+        .or_else(|| {
+            crate::gateway::modules::get_system_module_catalog()
+                .into_iter()
+                .find(|c| c.id == resolved_id || c.namespace == existing_desc.namespace)
+                .and_then(|c| c.source)
+        })
+        .or_else(|| {
+            let addons = std::path::Path::new("addons").join(resolved_id);
+            if addons.is_dir() {
+                Some(addons.to_string_lossy().to_string())
+            } else {
+                let modules = std::path::Path::new("modules").join(resolved_id);
+                if modules.is_dir() {
+                    Some(modules.to_string_lossy().to_string())
+                } else {
+                    None
+                }
+            }
+        })
 }
