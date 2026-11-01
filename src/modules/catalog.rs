@@ -191,7 +191,7 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "studio".to_string(),
             ],
             icon: Some("ⓕ".to_string()),
-            source: None,
+            source: Some("addons/facebook-suite".to_string()),
             config_schema: Some(config_schema(
                 "Meta Business Suite Config & HAR Import",
                 "facebook-suite",

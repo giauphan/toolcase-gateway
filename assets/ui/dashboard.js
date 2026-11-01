@@ -415,6 +415,12 @@
       return;
     }
 
+    const testBtn = e.target.closest(".module-test");
+    if (testBtn) {
+      testModule(testBtn.dataset.moduleId, testBtn);
+      return;
+    }
+
     const detailBtn = e.target.closest(".module-detail");
     if (detailBtn) {
       showModuleDetail(detailBtn.dataset.moduleId);
@@ -479,13 +485,29 @@
 
   function initModuleActionDialog() {
     if (!moduleActionDialog) return;
+    ["module-action-source", "module-action-branch"].forEach(function(fieldId) {
+      byId(fieldId)?.addEventListener("keydown", function(ev) {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          moduleActionConfirm?.click();
+        }
+      });
+    });
     moduleActionDialog.addEventListener("close", function() {
       const action = pendingModuleAction;
       pendingModuleAction = null;
+      const upgradeInputs = byId("module-action-upgrade-inputs");
+      if (upgradeInputs) upgradeInputs.style.display = "none";
       if (moduleActionDialog.returnValue !== "confirm" || !action) return;
-      if (action.kind === "remove") window.removeModule(action.id);
-      else if (action.kind === "upgrade") window.upgradeModule(action.id);
-      else window.toggleModule(action.id, action.enable);
+      if (action.kind === "remove") {
+        window.removeModule(action.id);
+      } else if (action.kind === "upgrade") {
+        const sourceVal = byId("module-action-source")?.value;
+        const branchVal = byId("module-action-branch")?.value;
+        window.upgradeModule(action.id, sourceVal, branchVal);
+      } else {
+        window.toggleModule(action.id, action.enable);
+      }
     });
   }
 
@@ -515,6 +537,8 @@
   function requestModuleStateChange(id, enable) {
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, enable: enable, kind: 'state' };
+    const upgradeInputs = byId("module-action-upgrade-inputs");
+    if (upgradeInputs) upgradeInputs.style.display = "none";
     moduleActionDescription.textContent = enable
       ? 'Enable this module? Its registered routes will accept requests again.'
       : 'Disable this module? Its registered routes will fail closed with HTTP 503 until it is re-enabled.';
@@ -526,6 +550,8 @@
   function requestModuleRemoval(id) {
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, kind: 'remove' };
+    const upgradeInputs = byId("module-action-upgrade-inputs");
+    if (upgradeInputs) upgradeInputs.style.display = "none";
     moduleActionDescription.textContent = 'Remove this personal module? This removes its installed files and cannot be undone.';
     moduleActionConfirm.textContent = 'Remove module';
     moduleActionDialog.returnValue = '';
@@ -535,8 +561,22 @@
   function requestModuleUpgrade(id) {
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, kind: 'upgrade' };
-    moduleActionDescription.textContent = 'Upgrade this module to its latest version? Existing configuration and credentials will be preserved.';
+    const module = renderedModules.find(function(candidate) { return candidate.id === id; });
+    const knownSource = module?.source || "";
+    moduleActionDescription.textContent = knownSource
+      ? "Upgrade module '" + id + "' to its latest version from source '" + knownSource + "'? Existing configuration and credentials will be preserved."
+      : "Upgrade module '" + id + "' to its latest version? Existing configuration and credentials will be preserved.";
     moduleActionConfirm.textContent = 'Upgrade module';
+
+    const upgradeInputs = byId("module-action-upgrade-inputs");
+    const sourceField = byId("module-action-source");
+    const branchField = byId("module-action-branch");
+    if (upgradeInputs) {
+      upgradeInputs.style.display = "block";
+      if (sourceField) sourceField.value = knownSource;
+      if (branchField) branchField.value = "";
+    }
+
     moduleActionDialog.returnValue = '';
     moduleActionDialog.showModal();
   }
@@ -575,6 +615,7 @@
         "<div><strong>Capabilities:</strong><br>" + capabilities + "</div>" +
         "<div><strong>Nested Providers:</strong><ul>" + providers + "</ul></div>" +
         "<div class=\"btns\" style=\"margin-top:12px;\">" +
+          "<button class=\"btn module-test\" data-module-id=\"" + escapeHtml(module.id) + "\">Test Module</button> " +
           (module.kind !== "builtin" ? ("<button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(module.id) + "\">Upgrade Module</button> ") : "") +
           "<a class=\"btn primary btn-primary\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Configure in Provider Settings</a> " +
           "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config ↗</a>" +
@@ -602,12 +643,13 @@
       " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
     const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
       " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
+    const testBtn = " <button class=\"btn module-test\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Test module execution and health\">Test</button>";
     let personalBtns = "";
     if (!isBuiltin) {
       personalBtns = " <button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Upgrade module to latest version\">Upgrade</button>" +
         " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
     }
-    return toggleBtn + configBtns + posSelect + orderBtns + personalBtns;
+    return toggleBtn + testBtn + configBtns + posSelect + orderBtns + personalBtns;
   }
 
   function renderModules(modules, isFiltered) {
@@ -734,6 +776,39 @@
       btn.textContent = "Installing...";
       executeModuleInstall({ id: id }, btn);
     });
+  }
+
+  function testModule(id, btn) {
+    if (!id) return;
+    const origText = btn ? btn.textContent : "Test";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Testing...";
+    }
+    showModulesFeedback("Testing module '" + id + "'...", false);
+    postJson("/api/v1/dashboard/modules/test", { id: id })
+      .then(function(result) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+        if (!result.ok) {
+          const errMsg = result.json?.message || ("HTTP " + result.status);
+          showModulesFeedback("Module test failed: " + errMsg, true);
+        } else {
+          const data = result.json;
+          const latency = data.latency_ms != null ? (" (" + data.latency_ms + "ms)") : "";
+          const msg = data.message || "Module is healthy";
+          showModulesFeedback("Module '" + id + "' test " + (data.ok ? "passed" : "failed") + latency + ": " + msg, !data.ok);
+        }
+      })
+      .catch(function(err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+        showModulesFeedback("Network error testing module: " + err.message, true);
+      });
   }
 
   function executeModuleUpgrade(payload, catalogButton) {
@@ -1090,15 +1165,22 @@
     );
   };
 
-  window.upgradeModule = function(id) {
+  window.upgradeModule = function(id, source, branch) {
+    const payload = { id: id };
+    if (source?.trim()) payload.source = source.trim();
+    if (branch?.trim()) payload.branch = branch.trim();
     sendModuleRequest(
       id,
       "/api/v1/dashboard/modules/upgrade",
-      { id: id },
+      payload,
       "Upgrading personal module '" + id + "'...",
       "Personal module '" + id + "' was successfully upgraded to the latest version.",
       "Failed to upgrade module"
     );
+  };
+
+  window.testModule = function(id) {
+    testModule(id);
   };
 
   function clearInstallModuleInputs() {

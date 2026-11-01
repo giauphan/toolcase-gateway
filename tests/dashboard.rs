@@ -15,3 +15,6 @@ mod module_ui_position_tests;
 
 #[path = "dashboard/module_upgrade_tests.rs"]
 mod module_upgrade_tests;
+
+#[path = "dashboard/module_test_action_tests.rs"]
+mod module_test_action_tests;

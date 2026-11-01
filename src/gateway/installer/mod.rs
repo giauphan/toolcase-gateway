@@ -85,7 +85,10 @@ fn try_register_module_from_dir(
 
     for name in CANDIDATES {
         let mpath = path.join(name);
-        if let Some(manifest) = read_module_manifest(&mpath, path) {
+        if let Some(mut manifest) = read_module_manifest(&mpath, path) {
+            if manifest.source.is_none() {
+                manifest.source = Some(path.to_string_lossy().to_string());
+            }
             if registry.get_module(&manifest.id).is_none() {
                 let _ = registry.register_personal_module(manifest);
             }

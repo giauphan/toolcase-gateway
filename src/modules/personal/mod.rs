@@ -65,7 +65,7 @@ exec python3 "$SCRIPT_DIR/adapter.py" "$@"
     }
 }
 
-fn build_command(manifest: &PersonalManifest, sub_provider_id: Option<&str>) -> Command {
+pub(crate) fn build_command(manifest: &PersonalManifest, sub_provider_id: Option<&str>) -> Command {
     let entry_path = std::path::Path::new(&manifest.entrypoint);
     let resolved_entrypoint = if entry_path.is_file() {
         heal_legacy_adapter_script(entry_path);
@@ -102,7 +102,7 @@ fn build_command(manifest: &PersonalManifest, sub_provider_id: Option<&str>) -> 
     cmd
 }
 
-fn spawn_stderr_reader(
+pub(crate) fn spawn_stderr_reader(
     stderr: Option<std::process::ChildStderr>,
 ) -> (
     std::sync::mpsc::Receiver<String>,

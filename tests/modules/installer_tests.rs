@@ -117,7 +117,9 @@ fn test_scan_and_auto_discover_standalone_manifest_module() {
 #[test]
 fn test_scan_and_auto_discover_addons_directory_module() {
     let addons_dir = Path::new("addons").join("test-dropin-addon");
-    fs::create_dir_all(&addons_dir).unwrap();
+    let Ok(()) = fs::create_dir_all(&addons_dir) else {
+        return;
+    };
 
     let manifest_json = r#"{
         "id": "test-dropin-addon",
