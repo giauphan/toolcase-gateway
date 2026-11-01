@@ -29,6 +29,15 @@ When the gateway initializes and handles requests, configuration resolves in the
 
 ## 2. Environment Variables Reference
 
+> [!NOTE]
+> Currently, there isn't a dedicated standalone file in the root that only generates the key—the existing `--generate-key` flag is built into the gateway seeder:
+> ```bash
+> # In 1 command (generates key into .env AND seeds the database):
+> python3 scripts/seed_gateway.py --generate-key
+> # Or via the shell wrapper:
+> ./scripts/seed_gateway.sh --generate-key
+> ```
+
 | Variable | Default | Type | Subsystem | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `GW_STATE_DIR` | `.gw_state` | path | Core | Working state directory holding SQLite DB (`gateway.db`), job metadata, and dynamic personal modules. |
