@@ -220,4 +220,16 @@ def test_apply_accounts_idempotency_with_encryption_key(tmp_path: Path):
     assert reused_auto[2] == "Updated Encrypted Auto Account"
     assert unprotect_credential(reused_auto[1], enc_key) == "sk-jev-confidential-key"
 
+    # Third seeding supplying the already-encrypted string without explicit ID
+    stored_enc_key = reused_auto[1]
+    enc_input_accounts = [
+        {"key": stored_enc_key, "label": "Preserved Encrypted Input Account"},
+    ]
+    apply_accounts(conn, "jev", enc_input_accounts, enc_key=enc_key)
+    cur.execute("SELECT id, key, label FROM accounts WHERE provider = 'jev'")
+    final_rows = cur.fetchall()
+    assert len(final_rows) == 2
+    matched_by_enc_input = next(r for r in final_rows if r[0] == auto_id)
+    assert matched_by_enc_input[2] == "Preserved Encrypted Input Account"
+
     conn.close()

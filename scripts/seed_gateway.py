@@ -287,9 +287,12 @@ def _find_matching_account_id(
     cur = conn.cursor()
     cur.execute("SELECT id, key FROM accounts WHERE provider = ?", (provider,))
     undecryptable = 0
+    target_plain = unprotect_credential(raw_key, enc_key) if raw_key.startswith(ENCRYPTED_PREFIX) else raw_key
     for existing_id, existing_key in cur.fetchall():
+        if existing_key == raw_key:
+            return existing_id, undecryptable
         plain = unprotect_credential(existing_key, enc_key)
-        if plain == raw_key:
+        if plain == target_plain:
             return existing_id, undecryptable
         if plain == existing_key and existing_key.startswith(ENCRYPTED_PREFIX):
             undecryptable += 1
