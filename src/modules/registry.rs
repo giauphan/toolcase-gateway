@@ -120,7 +120,12 @@ impl ModuleRegistry {
             ),
             sub_provider("image", "Muse Image Generation", "/image", &["image"]),
             sub_provider("video", "Muse Video Generation", "/video", &["video"]),
-            sub_provider("threads", "Muse Thread Memory", "/threads", &["threads"]),
+            sub_provider(
+                "threads",
+                "Muse Thread Memory & Cleanup Cron",
+                "/threads",
+                &["threads", "cron", "cleanup"],
+            ),
         ];
 
         registry.register_builtin(
@@ -132,6 +137,8 @@ impl ModuleRegistry {
                 "models".to_string(),
                 "video".to_string(),
                 "image".to_string(),
+                "threads".to_string(),
+                "cron".to_string(),
             ],
             Some(muse_providers),
         );

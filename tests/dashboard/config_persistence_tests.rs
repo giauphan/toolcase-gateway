@@ -337,3 +337,87 @@ fn test_dashboard_update_muse_config_nested_approval_and_overview_sync() {
     let _ = fs::remove_file(tmp_env);
     let _ = fs::remove_file(tmp_json);
 }
+
+#[test]
+fn test_dashboard_muse_cleanup_cron_config_and_manual_trigger() {
+    let tmp_env = std::env::temp_dir().join(format!("test_env_{}", uuid::Uuid::new_v4()));
+    let tmp_json = std::env::temp_dir().join(format!("test_cfg_{}.json", uuid::Uuid::new_v4()));
+    let env_initial_content = "GW_LISTEN_PORT=20130\n";
+    fs::write(&tmp_env, env_initial_content).unwrap();
+
+    let store = ConfigStore::new_with_limits_and_config_file(
+        test_config(),
+        tmp_env.clone(),
+        tmp_json.clone(),
+        256,
+        1024 * 1024,
+    );
+
+    // 1. Update cleanup cronjob configuration via dashboard
+    let update_payload = serde_json::json!({
+        "auto_cleanup_threads": false,
+        "thread_retention_secs": 3600,
+        "cleanup_interval_secs": 120
+    });
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/muse-config",
+        &serde_json::to_vec(&update_payload).unwrap(),
+        &store,
+    );
+    assert_eq!(head.status, 200);
+
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["museai"]["auto_cleanup_threads"], false);
+    assert_eq!(json["museai"]["thread_retention_secs"], 3600);
+    assert_eq!(json["museai"]["cleanup_interval_secs"], 120);
+    assert!(json["museai"]["cleanup_stats"].is_object());
+
+    // 2. Verify in-memory snapshot updated
+    let snapshot = store.snapshot();
+    assert!(!snapshot.museai_auto_cleanup_threads);
+    assert_eq!(snapshot.museai_thread_retention_secs, 3600);
+    assert_eq!(snapshot.museai_cleanup_interval_secs, 120);
+
+    // 3. Verify saved to persistent JSON file
+    assert!(tmp_json.exists());
+    let loaded = load_persistent_config(&tmp_json).expect("failed to load persistent json");
+    assert_eq!(loaded.museai_auto_cleanup_threads, Some(false));
+    assert_eq!(loaded.museai_thread_retention_secs, Some(3600));
+    assert_eq!(loaded.museai_cleanup_interval_secs, Some(120));
+
+    // 4. Trigger on-demand manual cleanup endpoint
+    let (clean_head, clean_body) =
+        request_gateway("POST", "/api/v1/dashboard/muse/cleanup", b"", &store);
+    assert_eq!(clean_head.status, 200);
+    let clean_res: serde_json::Value = serde_json::from_slice(&clean_body).unwrap();
+    assert_eq!(clean_res["ok"], true);
+    assert_eq!(clean_res["status"], "completed");
+    assert_eq!(clean_res["auto_cleanup_threads"], false);
+    assert_eq!(clean_res["thread_retention_secs"], 3600);
+    assert_eq!(clean_res["cleanup_interval_secs"], 120);
+    assert!(clean_res["threads_purged"].is_number());
+    assert!(clean_res["stats"].is_object());
+
+    // 5. Verify overview endpoint surfaces cleanup settings and stats
+    let (ov_head, ov_body) = request_gateway("GET", "/api/v1/dashboard/overview", b"", &store);
+    assert_eq!(ov_head.status, 200);
+    let overview: serde_json::Value = serde_json::from_slice(&ov_body).unwrap();
+    assert_eq!(
+        overview["providers"]["museai"]["auto_cleanup_threads"],
+        false
+    );
+    assert_eq!(
+        overview["providers"]["museai"]["thread_retention_secs"],
+        3600
+    );
+    assert_eq!(
+        overview["providers"]["museai"]["cleanup_interval_secs"],
+        120
+    );
+    assert!(overview["providers"]["museai"]["cleanup_stats"].is_object());
+
+    let _ = fs::remove_file(tmp_env);
+    let _ = fs::remove_file(tmp_json);
+}

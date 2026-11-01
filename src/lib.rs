@@ -81,6 +81,9 @@ pub fn run() -> io::Result<()> {
         museai_thread_retention_secs: env_or("GW_MUSEAI_THREAD_RETENTION_SECS", "172800")
             .parse()
             .unwrap_or(172800),
+        museai_cleanup_interval_secs: env_or("GW_MUSEAI_CLEANUP_INTERVAL_SECS", "300")
+            .parse()
+            .unwrap_or(300),
         jev_api_keys: crate::config::parse_jev_api_keys(&env_or("GW_JEV_API_KEYS", "")),
         jev_base_url: env_or("GW_JEV_BASE_URL", "https://jev-ai.org"),
         jev_openrouter_base_url: env_or("GW_JEV_OPENROUTER_BASE_URL", "https://openrouter.ai"),
@@ -219,9 +222,7 @@ pub fn run() -> io::Result<()> {
             ),
         );
     }
-    if config.museai_auto_cleanup_threads && config.museai_thread_retention_secs > 0 {
-        crate::museai::start_cleanup_worker_with_store(store.clone());
-    }
+    crate::museai::start_cleanup_worker_with_store(store.clone());
     let admission = store.admission();
     for stream in listener.incoming() {
         let Ok(client) = stream else { continue };

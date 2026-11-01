@@ -233,3 +233,26 @@ def test_apply_accounts_idempotency_with_encryption_key(tmp_path: Path):
     assert matched_by_enc_input[2] == "Preserved Encrypted Input Account"
 
     conn.close()
+
+
+def test_parse_cli_args_options_and_overrides():
+    test_args = [
+        "seed_gateway.py",
+        "--generate-key",
+        "--set", "target_port=28131",
+        "--set=target_host=10.0.0.1",
+        "--set", "boolean_flag",
+        "custom_db.sqlite",
+        "custom_cfg.json",
+        "--show",
+    ]
+    with patch.object(sys, "argv", test_args):
+        db_arg, cfg_arg, auto_gen, show_only, overrides = parse_cli_args()
+        assert auto_gen is True
+        assert show_only is True
+        assert db_arg == "custom_db.sqlite"
+        assert cfg_arg == "custom_cfg.json"
+        assert overrides["target_port"] == "28131"
+        assert overrides["target_host"] == "10.0.0.1"
+        assert overrides["boolean_flag"] == "true"
+

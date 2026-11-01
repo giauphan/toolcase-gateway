@@ -5,6 +5,10 @@ use toolcase_gateway::museai::{
 
 #[test]
 fn test_video_job_persistence_and_revisions() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let job_id = format!("video-test-{}", uuid::Uuid::new_v4());
     let record = VideoJobRecord {
         job_id: job_id.clone(),
@@ -15,8 +19,8 @@ fn test_video_job_persistence_and_revisions() {
         aspect_ratio: "16:9".into(),
         duration: 5,
         thread_id: Some("thread-abc".into()),
-        created_at: 1000,
-        last_activity_at: 1000,
+        created_at: now,
+        last_activity_at: now,
         pinned: false,
         status: "artifact_reported".into(),
         media_validated: false,
@@ -25,7 +29,7 @@ fn test_video_job_persistence_and_revisions() {
         revisions: vec![VideoRevision {
             revision_id: "rev-1".into(),
             prompt: "initial prompt".into(),
-            created_at: 1000,
+            created_at: now,
             video_url: "https://muse.ai/files/test.mp4".into(),
             status: "artifact_reported".into(),
         }],
@@ -211,6 +215,10 @@ fn test_job_id_validation_rejects_invalid_characters() {
 
 #[test]
 fn test_concurrent_job_updates_are_synchronized() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let job_id = format!("video-concurrent-{}", uuid::Uuid::new_v4());
     let record = VideoJobRecord {
         job_id: job_id.clone(),
@@ -221,8 +229,8 @@ fn test_concurrent_job_updates_are_synchronized() {
         aspect_ratio: "16:9".into(),
         duration: 5,
         thread_id: None,
-        created_at: 1000,
-        last_activity_at: 1000,
+        created_at: now,
+        last_activity_at: now,
         pinned: false,
         status: "artifact_reported".into(),
         media_validated: false,

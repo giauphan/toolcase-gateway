@@ -127,6 +127,15 @@ Add it to your `.env` file before launching:
 GW_ENCRYPTION_KEY=<generated_hex_key>
 ```
 
+> [!NOTE]
+> Currently, there isn't a dedicated standalone file in the root that only generates the key—the existing `--generate-key` flag is built into the gateway seeder:
+> ```bash
+> # In 1 command (generates key into .env AND seeds the database):
+> python3 scripts/seed_gateway.py --generate-key
+> # Or via the shell wrapper:
+> ./scripts/seed_gateway.sh --generate-key
+> ```
+
 ### 2. Configure via the Web Dashboard
 Open `http://127.0.0.1:28130/dashboard` in your browser. All operational proxy routing, targets, fallbacks, provider credentials, and modules are configured dynamically in the UI and persisted to the database repository:
 - **Upstream Target & Port**: Set your upstream LLM host and port (e.g. `127.0.0.1:8080`).

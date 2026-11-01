@@ -153,6 +153,10 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
                     "max_decisions": config.muse_approval.max_decisions_per_job,
                     "timeout_secs": config.muse_approval.approval_timeout_secs,
                 },
+                "auto_cleanup_threads": config.museai_auto_cleanup_threads,
+                "thread_retention_secs": config.museai_thread_retention_secs,
+                "cleanup_interval_secs": config.museai_cleanup_interval_secs,
+                "cleanup_stats": crate::museai::get_cleanup_stats(),
             }
         },
         "modules": store.module_registry().read().map(|r| r.list_modules()).unwrap_or_default(),

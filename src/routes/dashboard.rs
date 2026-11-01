@@ -102,6 +102,11 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_update_muse_config(c, b, store)
             })
         }
+        "/api/v1/dashboard/muse/cleanup" | "/api/v1/dashboard/muse-config/cleanup" => {
+            handle_post(client, request, "dashboard muse cleanup", |c, b| {
+                crate::features::dashboard::handle_muse_manual_cleanup(c, b, store)
+            })
+        }
         "/api/v1/dashboard/jev-config" => {
             handle_post(client, request, "dashboard jev-config", |c, b| {
                 crate::features::dashboard::handle_update_jev_config(c, b, store)

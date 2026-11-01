@@ -261,7 +261,7 @@ pub fn builtin_ui_defaults(
         "muse" => (
             20,
             "✦".to_string(),
-            "Chat completions, image and video pipeline with Sentinel approvals".to_string(),
+            "Chat completions, image and video pipeline with Sentinel approvals and thread cleanup cronjob".to_string(),
             "/muse-config".to_string(),
             "muse".to_string(),
             Some(default_module_config_schema(id, name, namespace)),
