@@ -209,7 +209,7 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
             {
                 let reg = store.module_registry();
                 let mut guard = reg.write().map_err(|e| e.to_string())?;
-                if let Err(e) = guard.register_personal_module(manifest) {
+                if let Err(e) = guard.register_personal_module(manifest.clone()) {
                     drop(guard);
                     if installed_from_source {
                         crate::gateway::installer::cleanup_module_files(&id, &state_dir);
@@ -217,6 +217,7 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
                     return Err(e.to_string());
                 }
             }
+            let _ = store.storage.save_module_with_status(&manifest, true);
             store
                 .save_to_persistent_file()
                 .map_err(|e| format!("Module state updated but persistence failed: {e}"))?;
@@ -242,6 +243,7 @@ pub fn call_tool(name: &str, params: &Value, store: &ConfigStore) -> Result<Valu
             }
             let state_dir = crate::gateway::installer::get_state_dir();
             crate::gateway::installer::cleanup_module_files(id, &state_dir);
+            let _ = store.storage.remove_module(id);
             store
                 .save_to_persistent_file()
                 .map_err(|e| format!("Module state updated but persistence failed: {e}"))?;

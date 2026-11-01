@@ -13,6 +13,7 @@ pub struct ConfigStore {
     pub jev_pool: Arc<crate::providers::jev::accounts::JevAccountPool>,
     admission: Arc<crate::runtime::admission::AdmissionController>,
     pub module_registry: Arc<RwLock<crate::gateway::modules::ModuleRegistry>>,
+    pub storage: Arc<dyn crate::storage::StorageRepository>,
 }
 
 impl ConfigStore {
@@ -57,6 +58,52 @@ impl ConfigStore {
         config_file: PathBuf,
         max_connections: usize,
         max_in_flight_bytes: usize,
+    ) -> Self {
+        let state_dir = config_file
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty() && *p != std::path::Path::new("."))
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(crate::gateway::installer::get_state_dir);
+        let engine = crate::storage::parse_database_url(
+            std::env::var("DATABASE_URL").ok().as_deref(),
+            &state_dir,
+        )
+        .unwrap_or_else(|_| crate::storage::DatabaseEngine::Sqlite(state_dir.join("gateway.db")));
+        let storage: Arc<dyn crate::storage::StorageRepository> =
+            match crate::storage::SqliteStorage::open(engine, &state_dir) {
+                Ok(s) => Arc::new(s),
+                Err(e) => {
+                    eprintln!(
+                        "warning: failed to open sqlite storage at {:?}: {e}; using memory fallback",
+                        state_dir
+                    );
+                    Arc::new(
+                        crate::storage::SqliteStorage::open(
+                            crate::storage::DatabaseEngine::Sqlite(PathBuf::from(":memory:")),
+                            &state_dir,
+                        )
+                        .expect("in-memory sqlite storage must initialize"),
+                    )
+                }
+            };
+
+        Self::new_with_limits_config_file_and_storage(
+            config,
+            env_file,
+            config_file,
+            max_connections,
+            max_in_flight_bytes,
+            storage,
+        )
+    }
+
+    pub fn new_with_limits_config_file_and_storage(
+        config: Config,
+        env_file: PathBuf,
+        config_file: PathBuf,
+        max_connections: usize,
+        max_in_flight_bytes: usize,
+        storage: Arc<dyn crate::storage::StorageRepository>,
     ) -> Self {
         let base_accounts = if !config.jev_labeled_accounts.is_empty() {
             config.jev_labeled_accounts.clone()
@@ -107,22 +154,60 @@ impl ConfigStore {
         );
         pool.add_keys(&config.jev_api_keys);
 
+        let state_dir = config_file
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty() && *p != std::path::Path::new("."))
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(crate::gateway::installer::get_state_dir);
+
         let mut reg = crate::gateway::modules::ModuleRegistry::new();
+
+        // 1. Authoritative hydration from SQLite modules table
+        let stored_modules = storage.get_stored_modules().unwrap_or_default();
+        for sm in &stored_modules {
+            if let Err(e) = reg.register_personal_module(sm.manifest.clone()) {
+                eprintln!(
+                    "warning: skipping stored personal module '{}': {e}",
+                    sm.manifest.id
+                );
+            } else {
+                let status = if sm.enabled {
+                    crate::gateway::modules::ModuleStatus::Enabled
+                } else {
+                    crate::gateway::modules::ModuleStatus::Disabled
+                };
+                let _ = reg.set_module_status(&sm.manifest.id, status);
+            }
+        }
+
+        // 2. Discover modules on disk (addons, modules dir)
+        crate::gateway::installer::scan_and_register_modules(&mut reg, &state_dir);
+
+        // 3. Fallback / supplementary configurations from persistent config (positions, configs, built-in enablement)
         if let Some(persistent) = load_persistent_config(&config_file) {
             if let Some(ref personal) = persistent.personal_modules {
                 for manifest in personal {
-                    if let Err(e) = reg.register_personal_module(manifest.clone()) {
-                        eprintln!(
-                            "warning: skipping persisted personal module '{}': {e}",
-                            manifest.id
-                        );
+                    if reg.get_module(&manifest.id).is_none() {
+                        if let Err(e) = reg.register_personal_module(manifest.clone()) {
+                            eprintln!(
+                                "warning: skipping persisted personal module '{}': {e}",
+                                manifest.id
+                            );
+                        }
                     }
                 }
             }
-            let state_dir = crate::gateway::installer::get_state_dir();
-            crate::gateway::installer::scan_and_register_modules(&mut reg, &state_dir);
             if let Some(ref enabled_map) = persistent.enabled_modules {
                 reg.apply_enablement_map(enabled_map);
+            }
+            // Re-apply SQLite stored module status to ensure SQLite remains authoritative for personal modules
+            for sm in &stored_modules {
+                let status = if sm.enabled {
+                    crate::gateway::modules::ModuleStatus::Enabled
+                } else {
+                    crate::gateway::modules::ModuleStatus::Disabled
+                };
+                let _ = reg.set_module_status(&sm.manifest.id, status);
             }
             if let Some(ref pos_map) = persistent.module_positions {
                 reg.apply_module_positions(pos_map);
@@ -130,9 +215,6 @@ impl ConfigStore {
             if let Some(ref cfg_map) = persistent.module_configs {
                 reg.apply_module_configs(cfg_map);
             }
-        } else {
-            let state_dir = crate::gateway::installer::get_state_dir();
-            crate::gateway::installer::scan_and_register_modules(&mut reg, &state_dir);
         }
         let module_registry = Arc::new(RwLock::new(reg));
 
@@ -146,7 +228,17 @@ impl ConfigStore {
                 max_in_flight_bytes,
             )),
             module_registry,
+            storage,
         }
+    }
+
+    pub fn storage(&self) -> Arc<dyn crate::storage::StorageRepository> {
+        self.storage.clone()
+    }
+
+    pub fn with_storage(mut self, storage: Arc<dyn crate::storage::StorageRepository>) -> Self {
+        self.storage = storage;
+        self
     }
 
     pub fn module_registry(&self) -> Arc<RwLock<crate::gateway::modules::ModuleRegistry>> {

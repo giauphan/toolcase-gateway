@@ -5,12 +5,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::{DatabaseEngine, StorageError, StorageRepository, StoredAccount};
+use super::{DatabaseEngine, StorageError, StorageRepository, StoredAccount, StoredModule};
 use crate::gateway::modules::PersonalManifest;
 
 /// Embedded SQLite storage implementation.
 pub struct SqliteStorage {
-    conn: Mutex<Connection>,
+    pub(crate) conn: Mutex<Connection>,
     db_path: PathBuf,
     encryption_key: String,
 }
@@ -108,11 +108,47 @@ impl SqliteStorage {
         Ok(())
     }
 
-    /// Automatically migrates accounts and settings from legacy JSON files into SQLite on first run.
+    /// Automatically migrates accounts, modules, and settings from legacy JSON files into SQLite on first run.
     fn migrate_legacy_json_files(&self, state_dir: &Path) -> Result<(), StorageError> {
         self.migrate_legacy_accounts(state_dir)?;
+        self.migrate_legacy_modules(state_dir)?;
         self.migrate_legacy_setting(state_dir, "gateway_config.json", "gateway_config")?;
         self.migrate_legacy_setting(state_dir, "muse_config.json", "muse_config")?;
+        Ok(())
+    }
+
+    pub(crate) fn migrate_legacy_modules(&self, state_dir: &Path) -> Result<(), StorageError> {
+        let config_path = state_dir.join("gateway_config.json");
+        if !config_path.is_file() {
+            return Ok(());
+        }
+
+        let existing = self.get_stored_modules()?;
+        let Ok(content) = fs::read_to_string(&config_path) else {
+            return Ok(());
+        };
+
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return Ok(());
+        };
+
+        let enabled_map: std::collections::HashMap<String, bool> = val
+            .get("enabled_modules")
+            .and_then(|m| serde_json::from_value(m.clone()).ok())
+            .unwrap_or_default();
+
+        if let Some(personal_arr) = val.get("personal_modules").and_then(|v| v.as_array()) {
+            for item in personal_arr {
+                if let Ok(manifest) = serde_json::from_value::<PersonalManifest>(item.clone()) {
+                    let already_in_db = existing.iter().any(|m| m.manifest.id == manifest.id);
+                    if !already_in_db {
+                        let is_enabled = enabled_map.get(&manifest.id).copied().unwrap_or(true);
+                        let _ = self.save_module_with_status(&manifest, is_enabled);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -275,25 +311,32 @@ impl StorageRepository for SqliteStorage {
         Ok(())
     }
 
-    fn get_modules(&self) -> Result<Vec<PersonalManifest>, StorageError> {
+    fn get_stored_modules(&self) -> Result<Vec<StoredModule>, StorageError> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| StorageError::Database(e.to_string()))?;
-        let mut stmt = conn.prepare("SELECT manifest_json FROM modules ORDER BY id ASC")?;
+        let mut stmt =
+            conn.prepare("SELECT manifest_json, enabled FROM modules ORDER BY id ASC")?;
         let rows = stmt.query_map([], |row| {
             let json_str: String = row.get(0)?;
-            Ok(json_str)
+            let enabled_int: i32 = row.get(1)?;
+            Ok((json_str, enabled_int != 0))
         })?;
 
         let mut list = Vec::new();
         for r in rows {
-            let json_str = r?;
+            let (json_str, enabled) = r?;
             if let Ok(manifest) = serde_json::from_str::<PersonalManifest>(&json_str) {
-                list.push(manifest);
+                list.push(StoredModule { manifest, enabled });
             }
         }
         Ok(list)
+    }
+
+    fn get_modules(&self) -> Result<Vec<PersonalManifest>, StorageError> {
+        self.get_stored_modules()
+            .map(|mods| mods.into_iter().map(|m| m.manifest).collect())
     }
 
     fn save_module(&self, manifest: &PersonalManifest) -> Result<(), StorageError> {
@@ -315,6 +358,52 @@ impl StorageRepository for SqliteStorage {
         Ok(())
     }
 
+    fn save_module_with_status(
+        &self,
+        manifest: &PersonalManifest,
+        enabled: bool,
+    ) -> Result<(), StorageError> {
+        let json_str = serde_json::to_string(manifest)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO modules (id, namespace, name, manifest_json, enabled, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+             ON CONFLICT(id) DO UPDATE SET
+                namespace = excluded.namespace,
+                name = excluded.name,
+                manifest_json = excluded.manifest_json,
+                enabled = excluded.enabled,
+                updated_at = CURRENT_TIMESTAMP",
+            params![
+                manifest.id,
+                manifest.namespace,
+                manifest.name,
+                json_str,
+                if enabled { 1 } else { 0 }
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn set_module_enabled(&self, id: &str, enabled: bool) -> Result<(), StorageError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let affected = conn.execute(
+            "UPDATE modules SET enabled = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![if enabled { 1 } else { 0 }, id],
+        )?;
+        if affected == 0 {
+            Err(StorageError::NotFound(id.to_string()))
+        } else {
+            Ok(())
+        }
+    }
+
     fn remove_module(&self, id: &str) -> Result<(), StorageError> {
         let conn = self
             .conn
@@ -326,122 +415,5 @@ impl StorageRepository for SqliteStorage {
         } else {
             Ok(())
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sqlite_storage_lifecycle_and_migration() {
-        let temp_dir = std::env::temp_dir().join(format!("test_sqlite_{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        // 1. Create a legacy accounts.json file
-        let legacy_accounts = temp_dir.join("accounts.json");
-        fs::write(
-            &legacy_accounts,
-            r#"{"accounts": [{"id": "acc_1", "provider": "openrouter", "key": "sk-or-v1-test", "label": "Dev"}]}"#,
-        )
-        .unwrap();
-
-        // 2. Open SQLite storage
-        let storage =
-            SqliteStorage::open(DatabaseEngine::Sqlite(PathBuf::from(":memory:")), &temp_dir)
-                .unwrap();
-
-        // 3. Test settings roundtrip
-        storage
-            .set_setting("gateway_config", r#"{"listen_port": 8080}"#)
-            .unwrap();
-        let cfg = storage.get_setting("gateway_config").unwrap();
-        assert_eq!(cfg.as_deref(), Some(r#"{"listen_port": 8080}"#));
-
-        // 4. Test module storage
-        let manifest = PersonalManifest {
-            id: "my-tool".into(),
-            name: "My Tool".into(),
-            short_name: None,
-            version: "1.0.0".into(),
-            namespace: "/custom/tool".into(),
-            entrypoint: "/bin/echo".into(),
-            protocol: "stdio-stream".into(),
-            capabilities: vec!["chat".into()],
-            icon: None,
-            config_schema: None,
-            permissions: vec![],
-            group: None,
-            source: None,
-        };
-        storage.save_module(&manifest).unwrap();
-        let modules = storage.get_modules().unwrap();
-        assert_eq!(modules.len(), 1);
-        assert_eq!(modules[0].id, "my-tool");
-
-        // 5. Test module removal
-        storage.remove_module("my-tool").unwrap();
-        assert!(storage.get_modules().unwrap().is_empty());
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_sqlite_account_credential_encryption_and_decryption() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("test_sqlite_enc_{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        let master_key = "test-master-encryption-key-999".to_string();
-        let storage = SqliteStorage::open_with_key(
-            DatabaseEngine::Sqlite(PathBuf::from(":memory:")),
-            &temp_dir,
-            master_key,
-        )
-        .unwrap();
-
-        let acc = StoredAccount {
-            id: "acc_enc_1".into(),
-            provider: "openrouter".into(),
-            key: "sk-or-v1-my-secret-credential".into(),
-            label: Some("Encrypted Account".into()),
-            is_active: true,
-        };
-
-        storage.save_accounts(&[acc]).unwrap();
-
-        // Verify stored in DB as enc:v1:
-        {
-            let conn = storage.conn.lock().unwrap();
-            let mut stmt = conn
-                .prepare("SELECT key FROM accounts WHERE id = 'acc_enc_1'")
-                .unwrap();
-            let raw_key: String = stmt.query_row([], |row| row.get(0)).unwrap();
-            assert!(raw_key.starts_with("enc:v1:"));
-            assert!(!raw_key.contains("sk-or-v1-my-secret-credential"));
-        }
-
-        // Verify decrypted in memory via get_accounts()
-        let retrieved = storage.get_accounts().unwrap();
-        assert_eq!(retrieved.len(), 1);
-        assert_eq!(retrieved[0].key, "sk-or-v1-my-secret-credential");
-
-        // Verify legacy unencrypted row compatibility
-        {
-            let conn = storage.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO accounts (id, provider, key, label, is_active)
-                 VALUES ('legacy_acc', 'jev', 'sk-jev-legacy-plain', 'Legacy Plain', 1)",
-                [],
-            )
-            .unwrap();
-        }
-
-        let all_accs = storage.get_accounts().unwrap();
-        assert_eq!(all_accs.len(), 2);
-        let legacy = all_accs.iter().find(|a| a.id == "legacy_acc").unwrap();
-        assert_eq!(legacy.key, "sk-jev-legacy-plain");
-
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
