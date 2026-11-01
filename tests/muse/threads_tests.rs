@@ -311,3 +311,24 @@ fn test_handle_museai_threads_cleanup_run() {
     assert!(client_res.contains(r#""retention_secs":7200"#));
     assert!(client_res.contains(r#""status":"completed""#));
 }
+
+#[test]
+fn test_cleanup_stats_and_worker_config() {
+    let _lock = TEST_MUTEX.lock().unwrap();
+    let mut config = test_config();
+    config.museai_auto_cleanup_threads = true;
+    config.museai_thread_retention_secs = 1800;
+    config.museai_cleanup_interval_secs = 60;
+
+    let initial_stats = toolcase_gateway::museai::get_cleanup_stats();
+    let initial_cycles = initial_stats.total_cycles_run;
+
+    let (_threads_purged, _jobs_purged) = toolcase_gateway::museai::cleanup_cycle_with_config(
+        config.museai_thread_retention_secs,
+        &config,
+    );
+
+    let updated_stats = toolcase_gateway::museai::get_cleanup_stats();
+    assert!(updated_stats.total_cycles_run > initial_cycles);
+    assert!(updated_stats.last_run_timestamp > 0);
+}

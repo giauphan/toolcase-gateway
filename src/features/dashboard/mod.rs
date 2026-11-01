@@ -15,7 +15,7 @@ pub use modules::{
     handle_install_personal_module, handle_remove_personal_module, handle_set_module_state,
     handle_test_personal_module, handle_upgrade_personal_module,
 };
-pub use muse::handle_update_muse_config;
+pub use muse::{handle_muse_manual_cleanup, handle_update_muse_config};
 pub use service::{
     handle_add_provider_accounts, handle_dashboard_asset, handle_dashboard_overview,
     handle_dashboard_page, handle_save_provider_settings, handle_update_gateway_config, mask_key,

@@ -1,7 +1,7 @@
+use super::registry::unregister_thread;
 use super::remote::{cvm_json_headers, debug_log, extract_session_timestamp};
 use crate::config::Config;
 use crate::providers::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
-use crate::providers::museai::threads::registry::unregister_thread;
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 

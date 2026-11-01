@@ -93,6 +93,11 @@
   const cfgMuseApprovalDestinations = byId("cfg-muse-approval-destinations");
   const cfgMuseApprovalTypes = byId("cfg-muse-approval-types");
   const cfgMuseApprovalTimeout = byId("cfg-muse-approval-timeout");
+  const cfgMuseAutoCleanup = byId("cfg-muse-auto-cleanup");
+  const cfgMuseThreadRetention = byId("cfg-muse-thread-retention");
+  const cfgMuseCleanupInterval = byId("cfg-muse-cleanup-interval");
+  const runMuseCleanupBtn = byId("run-muse-cleanup-btn");
+  const museCleanupMsg = byId("muse-cleanup-msg");
   const saveMuseBtn = byId("save-muse-btn");
   const museOkMsg = byId("muse-ok-msg");
   const museErrMsg = byId("muse-err-msg");
@@ -1365,6 +1370,11 @@
     setValue(cfgMuseApprovalTimeout, approval.timeout_secs != null ? approval.timeout_secs : 30);
     setValue(cfgMuseApprovalDestinations, (approval.allowed_destinations || []).join(", "));
     setValue(cfgMuseApprovalTypes, (approval.allowed_types || []).join(", "));
+    if (cfgMuseAutoCleanup) {
+      cfgMuseAutoCleanup.checked = muse.auto_cleanup_threads !== false && config.museai_auto_cleanup_threads !== false;
+    }
+    setValue(cfgMuseThreadRetention, muse.thread_retention_secs != null ? muse.thread_retention_secs : (config.museai_thread_retention_secs || 172800));
+    setValue(cfgMuseCleanupInterval, muse.cleanup_interval_secs != null ? muse.cleanup_interval_secs : (config.museai_cleanup_interval_secs || 300));
   }
 
   function populateProviderConfigForms(config, providers) {
@@ -1508,7 +1518,10 @@
           timeout_secs: cfgMuseApprovalTimeout ? Number.parseInt(cfgMuseApprovalTimeout.value, 10) : undefined,
           allowed_destinations: destinationsArray,
           allowed_types: typesArray,
-        }
+        },
+        auto_cleanup_threads: cfgMuseAutoCleanup ? cfgMuseAutoCleanup.checked : undefined,
+        thread_retention_secs: cfgMuseThreadRetention?.value ? Number.parseInt(cfgMuseThreadRetention.value, 10) : undefined,
+        cleanup_interval_secs: cfgMuseCleanupInterval?.value ? Number.parseInt(cfgMuseCleanupInterval.value, 10) : undefined,
       };
 
       postJson("/api/v1/dashboard/muse-config", payload)
@@ -1538,6 +1551,33 @@
         setMessageVisible(museErrMsg, true);
       });
     });
+
+    if (runMuseCleanupBtn) {
+      runMuseCleanupBtn.addEventListener("click", function() {
+        runMuseCleanupBtn.disabled = true;
+        runMuseCleanupBtn.textContent = "Running cleanup...";
+        setMessageVisible(museCleanupMsg, false);
+        const ttl = cfgMuseThreadRetention?.value ? Number.parseInt(cfgMuseThreadRetention.value, 10) : undefined;
+        postJson("/api/v1/dashboard/muse/cleanup", { ttl_secs: ttl })
+          .then(function(result) {
+            runMuseCleanupBtn.disabled = false;
+            runMuseCleanupBtn.textContent = "Run Cleanup Now";
+            if (museCleanupMsg) {
+              museCleanupMsg.textContent = result.json.message || "Cleanup cycle completed.";
+              setMessageVisible(museCleanupMsg, true);
+            }
+            loadOverview();
+          })
+          .catch(function(err) {
+            runMuseCleanupBtn.disabled = false;
+            runMuseCleanupBtn.textContent = "Run Cleanup Now";
+            if (museCleanupMsg) {
+              museCleanupMsg.textContent = "Cleanup failed: " + err.message;
+              setMessageVisible(museCleanupMsg, true);
+            }
+          });
+      });
+    }
   }
 
   // Jev Form Submission

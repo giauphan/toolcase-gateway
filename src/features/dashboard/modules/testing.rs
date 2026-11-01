@@ -309,17 +309,27 @@ fn probe_builtin_module(
             "Built-in Omniroute gateway router is active and healthy".to_string(),
             serde_json::json!({}),
         ),
-        "museai" => {
+        "muse" | "museai" => {
             let conf = store.snapshot();
             let has_token = !conf.museai_access_token.is_empty() || !conf.museai_cookie.is_empty();
             let text = if has_token {
-                "Built-in MuseAI provider module is configured and ready"
+                format!(
+                    "Built-in Muse AI module is ready (thread cleanup: {}, TTL: {}s, interval: {}s)",
+                    if conf.museai_auto_cleanup_threads { "enabled" } else { "disabled" },
+                    conf.museai_thread_retention_secs,
+                    conf.museai_cleanup_interval_secs,
+                )
             } else {
-                "Built-in MuseAI provider module is enabled (credentials not yet configured)"
+                "Built-in Muse AI module is enabled (credentials not yet configured)".to_string()
             };
             (
-                text.to_string(),
-                serde_json::json!({ "configured": has_token }),
+                text,
+                serde_json::json!({
+                    "configured": has_token,
+                    "auto_cleanup_threads": conf.museai_auto_cleanup_threads,
+                    "thread_retention_secs": conf.museai_thread_retention_secs,
+                    "cleanup_interval_secs": conf.museai_cleanup_interval_secs,
+                }),
             )
         }
         "jev" => {

@@ -215,6 +215,9 @@ def _merge_settings_env(
         "GW_TARGET_PORT": "target_port",
         "GW_IO_TIMEOUT_SECS": "io_timeout_secs",
         "MUSE_LIVE_VIDEO_PROMPT": "default_video_prompt",
+        "GW_MUSEAI_AUTO_CLEANUP_THREADS": "museai_auto_cleanup_threads",
+        "GW_MUSEAI_THREAD_RETENTION_SECS": "museai_thread_retention_secs",
+        "GW_MUSEAI_CLEANUP_INTERVAL_SECS": "museai_cleanup_interval_secs",
     }
     for env_k, cfg_k in env_mappings.items():
         if env.get(env_k):
@@ -224,6 +227,14 @@ def _merge_settings_env(
 
 
 def _build_muse_payload(merged: dict) -> dict:
+    raw_auto_cleanup = merged.get("museai_auto_cleanup_threads")
+    if raw_auto_cleanup is None:
+        auto_cleanup = True
+    elif isinstance(raw_auto_cleanup, bool):
+        auto_cleanup = raw_auto_cleanup
+    else:
+        auto_cleanup = str(raw_auto_cleanup).strip().lower() in ("true", "1", "yes")
+
     return {
         "base_url": merged.get("museai_base_url") or merged.get("base_url") or "https://muse.ai",
         "ws_url": merged.get("museai_ws_url") or merged.get("ws_url") or "wss://hatch.metaaivm.com/v1/noise",
@@ -235,7 +246,10 @@ def _build_muse_payload(merged: dict) -> dict:
         "approval_mode": merged.get("muse_approval_mode") or merged.get("approval_mode") or "on",
         "allowed_destinations": merged.get("muse_approval_allowed_destinations") or ["muse.ai"],
         "allowed_types": merged.get("muse_approval_allowed_types") or ["network"],
-        "timeout_secs": merged.get("muse_approval_timeout_secs") or merged.get("timeout_secs") or 30,
+        "timeout_secs": int(merged.get("muse_approval_timeout_secs") or merged.get("timeout_secs") or 30),
+        "auto_cleanup_threads": auto_cleanup,
+        "thread_retention_secs": int(merged.get("museai_thread_retention_secs") or 172800),
+        "cleanup_interval_secs": int(merged.get("museai_cleanup_interval_secs") or 300),
     }
 
 

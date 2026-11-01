@@ -1,4 +1,6 @@
 use crate::config::Config;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -10,6 +12,46 @@ mod remote;
 pub use remote::*;
 mod spawn;
 pub use spawn::*;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+pub struct CleanupStats {
+    pub last_run_timestamp: u64,
+    pub last_threads_purged: usize,
+    pub last_jobs_purged: usize,
+    pub total_cycles_run: u64,
+}
+
+static CLEANUP_STATS: Mutex<CleanupStats> = Mutex::new(CleanupStats {
+    last_run_timestamp: 0,
+    last_threads_purged: 0,
+    last_jobs_purged: 0,
+    total_cycles_run: 0,
+});
+
+static CLEANUP_RUNNING: AtomicBool = AtomicBool::new(false);
+static WORKER_SPAWNED: AtomicBool = AtomicBool::new(false);
+
+pub fn get_cleanup_stats() -> CleanupStats {
+    CLEANUP_STATS
+        .lock()
+        .map(|s| *s)
+        .unwrap_or_else(|e| *e.into_inner())
+}
+
+pub fn update_cleanup_stats(threads: usize, jobs: usize) {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut s = match CLEANUP_STATS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    s.last_run_timestamp = now;
+    s.last_threads_purged = threads;
+    s.last_jobs_purged = jobs;
+    s.total_cycles_run = s.total_cycles_run.saturating_add(1);
+}
 
 pub fn cleanup_tracked_threads_once() -> usize {
     let global_ttl = std::env::var("GW_MUSEAI_THREAD_RETENTION_SECS")
@@ -70,6 +112,10 @@ pub fn config_from_env() -> Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(7200),
+        museai_cleanup_interval_secs: std::env::var("GW_MUSEAI_CLEANUP_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(300),
         ..Default::default()
     }
 }
@@ -90,6 +136,25 @@ pub fn cleanup_cycle_with_ttl(ttl_secs: u64) -> (usize, usize) {
 }
 
 pub fn cleanup_cycle_with_config(ttl_secs: u64, config: &Config) -> (usize, usize) {
+    if CLEANUP_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        crate::runtime::logger::log_message(
+            "INFO",
+            "museai:cleanup",
+            "cleanup cycle already in progress, skipping concurrent run",
+        );
+        return (0, 0);
+    }
+    struct RunGuard;
+    impl Drop for RunGuard {
+        fn drop(&mut self) {
+            CLEANUP_RUNNING.store(false, Ordering::SeqCst);
+        }
+    }
+    let _guard = RunGuard;
+
     let remote_purged = purge_remote_cvm_threads_older_than(ttl_secs, config).unwrap_or(0);
     let threads_cleaned = cleanup_tracked_threads_with_ttl(ttl_secs);
 
@@ -110,6 +175,7 @@ pub fn cleanup_cycle_with_config(ttl_secs: u64, config: &Config) -> (usize, usiz
 
     let logs_cleaned = crate::runtime::logger::cleanup_expired_logs_default().unwrap_or(0);
     let total_threads_cleaned = threads_cleaned + remote_purged;
+    update_cleanup_stats(total_threads_cleaned, jobs_cleaned);
     if total_threads_cleaned > 0 || jobs_cleaned > 0 || logs_cleaned > 0 {
         crate::runtime::logger::log_message(
             "INFO",
@@ -132,13 +198,23 @@ pub fn start_cleanup_worker_with_interval(interval: Duration) {
 }
 
 pub fn start_cleanup_worker_with_store(store: crate::config::ConfigStore) {
-    start_cleanup_worker_with_store_and_interval(Some(store), Duration::from_secs(300));
+    let initial_interval = {
+        let cfg = store.snapshot();
+        Duration::from_secs(cfg.museai_cleanup_interval_secs.max(10))
+    };
+    start_cleanup_worker_with_store_and_interval(Some(store), initial_interval);
 }
 
 pub fn start_cleanup_worker_with_store_and_interval(
     store: Option<crate::config::ConfigStore>,
     interval: Duration,
 ) {
+    if WORKER_SPAWNED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
     crate::runtime::logger::log_message(
         "INFO",
         "museai:cleanup",
@@ -162,7 +238,13 @@ pub fn start_cleanup_worker_with_store_and_interval(
         // Run immediately on start so threads older than 2 hours are cleared right away
         run_cycle(&store);
         loop {
-            thread::sleep(interval);
+            let sleep_interval = if let Some(ref s) = store {
+                let cfg = s.snapshot();
+                Duration::from_secs(cfg.museai_cleanup_interval_secs.max(10))
+            } else {
+                interval
+            };
+            thread::sleep(sleep_interval);
             run_cycle(&store);
         }
     });

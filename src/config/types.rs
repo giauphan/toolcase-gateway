@@ -91,6 +91,7 @@ pub struct Config {
     pub museai_vm_id: String,
     pub museai_auto_cleanup_threads: bool,
     pub museai_thread_retention_secs: u64,
+    pub museai_cleanup_interval_secs: u64,
     pub jev_api_keys: Vec<String>,
     /// Labeled accounts loaded from persistent storage.
     /// When non-empty, pool is initialized from these (with labels), then
@@ -132,6 +133,7 @@ impl Default for Config {
             museai_vm_id: "".into(),
             museai_auto_cleanup_threads: true,
             museai_thread_retention_secs: 172800,
+            museai_cleanup_interval_secs: 300,
             jev_api_keys: vec![],
             jev_labeled_accounts: vec![],
             jev_base_url: "https://jev-ai.org".into(),

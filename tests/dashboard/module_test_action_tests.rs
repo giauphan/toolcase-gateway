@@ -256,3 +256,30 @@ fn test_dashboard_test_module_local_http() {
     let _ = server_handle.join();
     let _ = fs::remove_file(&tmp_env);
 }
+
+#[test]
+fn test_dashboard_test_module_muse_builtin_healthy() {
+    let tmp_env = std::env::temp_dir().join(format!("test_mod_test_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    let test_payload = serde_json::json!({ "id": "muse" });
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/test",
+        &serde_json::to_vec(&test_payload).unwrap(),
+        &store,
+    );
+    assert_eq!(head.status, 200);
+    let res: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(res["ok"], true);
+    assert_eq!(res["id"], "muse");
+    assert_eq!(res["status"], "healthy");
+    assert_eq!(res["protocol"], "builtin");
+    assert_eq!(res["details"]["kind"], "builtin");
+    assert_eq!(res["details"]["namespace"], "/muse-ai");
+    assert_eq!(res["details"]["auto_cleanup_threads"], true);
+    assert_eq!(res["details"]["thread_retention_secs"], 86400);
+    assert_eq!(res["details"]["cleanup_interval_secs"], 300);
+
+    let _ = fs::remove_file(&tmp_env);
+}

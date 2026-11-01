@@ -50,6 +50,12 @@ pub struct PersistentConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub museai_vm_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_auto_cleanup_threads: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_thread_retention_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub museai_cleanup_interval_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_video_prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub muse_approval_mode: Option<String>,
@@ -110,6 +116,9 @@ impl PersistentConfig {
             museai_notary_token: (!config.museai_notary_token.is_empty())
                 .then(|| config.museai_notary_token.clone()),
             museai_vm_id: (!config.museai_vm_id.is_empty()).then(|| config.museai_vm_id.clone()),
+            museai_auto_cleanup_threads: Some(config.museai_auto_cleanup_threads),
+            museai_thread_retention_secs: Some(config.museai_thread_retention_secs),
+            museai_cleanup_interval_secs: Some(config.museai_cleanup_interval_secs),
             default_video_prompt: (!config.default_video_prompt.is_empty())
                 .then(|| config.default_video_prompt.clone()),
             muse_approval_mode: Some(config.muse_approval.mode.as_str().to_string()),
@@ -220,6 +229,15 @@ impl PersistentConfig {
         }
         if let Some(ref vm) = self.museai_vm_id {
             config.museai_vm_id = vm.clone();
+        }
+        if let Some(auto_cleanup) = self.museai_auto_cleanup_threads {
+            config.museai_auto_cleanup_threads = auto_cleanup;
+        }
+        if let Some(retention) = self.museai_thread_retention_secs {
+            config.museai_thread_retention_secs = retention;
+        }
+        if let Some(interval) = self.museai_cleanup_interval_secs {
+            config.museai_cleanup_interval_secs = interval;
         }
         if let Some(ref prompt) = self.default_video_prompt {
             config.default_video_prompt = prompt.clone();

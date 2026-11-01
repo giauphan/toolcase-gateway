@@ -549,11 +549,30 @@
                   <input type="text" id="cfg-muse-approval-types" name="allowed_types" placeholder="video/mp4, image/png">
                 </div>
               </div>
+              <div class="field-group formgroup">
+                <label>
+                  <input type="checkbox" id="cfg-muse-auto-cleanup" name="auto_cleanup_threads" checked>
+                  Enable Automated Thread Cleanup Cronjob
+                </label>
+                <div class="field-hint">Periodically prunes stale local tracked threads, remote CVM sessions, and expired video jobs.</div>
+              </div>
+              <div class="grid-2 formgrid">
+                <div class="field-group formgroup">
+                  <label for="cfg-muse-thread-retention">Thread Retention TTL (seconds)</label>
+                  <input type="number" id="cfg-muse-thread-retention" name="thread_retention_secs" placeholder="172800" min="60">
+                </div>
+                <div class="field-group formgroup">
+                  <label for="cfg-muse-cleanup-interval">Cleanup Cronjob Interval (seconds)</label>
+                  <input type="number" id="cfg-muse-cleanup-interval" name="cleanup_interval_secs" placeholder="300" min="10">
+                </div>
+              </div>
               <div class="btns">
                 <button id="save-muse-btn" type="submit" class="btn primary btn-primary">Save Muse AI Settings</button>
+                <button id="run-muse-cleanup-btn" type="button" class="btn secondary">Run Cleanup Now</button>
               </div>
               <div class="ok-box" id="muse-ok-msg"></div>
               <div class="err-box" id="muse-err-msg"></div>
+              <div class="ok-box is-hidden" id="muse-cleanup-msg"></div>
             </form>
           </div>
           <div id="dynamic-provider-panels"></div>

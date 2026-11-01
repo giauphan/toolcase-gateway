@@ -34,6 +34,9 @@ pub struct UpdateMuseConfigPayload {
     pub allow_always: Option<bool>,
     pub max_decisions: Option<usize>,
     pub timeout_secs: Option<u64>,
+    pub auto_cleanup_threads: Option<bool>,
+    pub thread_retention_secs: Option<u64>,
+    pub cleanup_interval_secs: Option<u64>,
 }
 
 fn validate_muse_config_payload(payload: &UpdateMuseConfigPayload) -> Result<(), &'static str> {
@@ -143,6 +146,9 @@ fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
         allow_always,
         max_decisions,
         timeout_secs,
+        auto_cleanup_threads,
+        thread_retention_secs,
+        cleanup_interval_secs,
     } = payload;
 
     update_non_empty_string(&mut conf.museai_base_url, base_url);
@@ -152,6 +158,20 @@ fn apply_muse_payload(conf: &mut Config, payload: UpdateMuseConfigPayload) {
     update_non_empty_string(&mut conf.museai_notary_token, notary_token);
     update_non_empty_string(&mut conf.museai_cookie, cookie);
     update_non_empty_string(&mut conf.default_video_prompt, default_video_prompt);
+
+    if let Some(cleanup) = auto_cleanup_threads {
+        conf.museai_auto_cleanup_threads = cleanup;
+    }
+    if let Some(retention) = thread_retention_secs {
+        if retention > 0 {
+            conf.museai_thread_retention_secs = retention;
+        }
+    }
+    if let Some(interval) = cleanup_interval_secs {
+        if interval > 0 {
+            conf.museai_cleanup_interval_secs = interval;
+        }
+    }
 
     let mut app = approval.unwrap_or_default();
     app.mode = app.mode.or(approval_mode);
@@ -213,8 +233,60 @@ pub fn handle_update_muse_config(
                 "max_decisions": snapshot.muse_approval.max_decisions_per_job,
                 "timeout_secs": snapshot.muse_approval.approval_timeout_secs,
             },
+            "auto_cleanup_threads": snapshot.museai_auto_cleanup_threads,
+            "thread_retention_secs": snapshot.museai_thread_retention_secs,
+            "cleanup_interval_secs": snapshot.museai_cleanup_interval_secs,
+            "cleanup_stats": crate::museai::get_cleanup_stats(),
             "config_storage": store.config_file.file_name().unwrap_or_default().to_string_lossy(),
         }
+    });
+
+    let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        resp_bytes.len()
+    )?;
+    client.write_all(&resp_bytes)?;
+    client.flush()
+}
+
+pub fn handle_muse_manual_cleanup(
+    client: &mut TcpStream,
+    body: &[u8],
+    store: &ConfigStore,
+) -> io::Result<()> {
+    let req_ttl = if !body.is_empty() {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| {
+                v.get("older_than_secs")
+                    .or_else(|| v.get("ttl_secs"))
+                    .or_else(|| v.get("retention_secs"))
+                    .and_then(|n| n.as_u64())
+            })
+    } else {
+        None
+    };
+
+    let snapshot = store.snapshot();
+    let ttl_secs = req_ttl.unwrap_or(snapshot.museai_thread_retention_secs);
+
+    let (threads_purged, jobs_purged) =
+        crate::museai::cleanup_cycle_with_config(ttl_secs, &snapshot);
+
+    let stats = crate::museai::get_cleanup_stats();
+    let resp = serde_json::json!({
+        "ok": true,
+        "status": "completed",
+        "message": format!("Muse AI cleanup cycle completed: {threads_purged} thread(s) and {jobs_purged} job(s) purged"),
+        "auto_cleanup_threads": snapshot.museai_auto_cleanup_threads,
+        "thread_retention_secs": snapshot.museai_thread_retention_secs,
+        "cleanup_interval_secs": snapshot.museai_cleanup_interval_secs,
+        "retention_secs": ttl_secs,
+        "threads_purged": threads_purged,
+        "jobs_purged": jobs_purged,
+        "stats": stats,
     });
 
     let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
