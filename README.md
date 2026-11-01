@@ -121,6 +121,8 @@ To enable AES-256-GCM credential envelope encryption at rest in SQLite, generate
 # Generate a secure 256-bit encryption key
 openssl rand -hex 32
 # Alternative: python3 -c "import secrets; print(secrets.token_hex(32))"
+# Or auto-generate and append directly to .env:
+python3 scripts/seed_gateway.py --generate-key
 ```
 Add it to your `.env` file before launching:
 ```bash
