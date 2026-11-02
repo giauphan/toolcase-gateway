@@ -226,30 +226,38 @@ def _merge_settings_env(
     return merged
 
 
-def _build_muse_payload(merged: dict) -> dict:
-    raw_auto_cleanup = merged.get("museai_auto_cleanup_threads")
-    if raw_auto_cleanup is None:
-        auto_cleanup = True
-    elif isinstance(raw_auto_cleanup, bool):
-        auto_cleanup = raw_auto_cleanup
-    else:
-        auto_cleanup = str(raw_auto_cleanup).strip().lower() in ("true", "1", "yes")
+def _first_truthy(data: dict, *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        val = data.get(key)
+        if val:
+            return val
+    return default
 
+
+def _parse_bool(val: Any, default: bool = True) -> bool:
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ("true", "1", "yes")
+
+
+def _build_muse_payload(merged: dict) -> dict:
     return {
-        "base_url": merged.get("museai_base_url") or merged.get("base_url") or "https://muse.ai",
-        "ws_url": merged.get("museai_ws_url") or merged.get("ws_url") or "wss://hatch.metaaivm.com/v1/noise",
-        "vm_id": merged.get("museai_vm_id") or merged.get("vm_id") or "",
-        "access_token": merged.get("museai_access_token") or merged.get("access_token") or "",
-        "notary_token": merged.get("museai_notary_token") or merged.get("notary_token") or "",
-        "cookie": merged.get("museai_cookie") or merged.get("cookie") or "",
-        "default_video_prompt": merged.get("default_video_prompt") or "",
-        "approval_mode": merged.get("muse_approval_mode") or merged.get("approval_mode") or "on",
-        "allowed_destinations": merged.get("muse_approval_allowed_destinations") or ["muse.ai"],
-        "allowed_types": merged.get("muse_approval_allowed_types") or ["network"],
-        "timeout_secs": int(merged.get("muse_approval_timeout_secs") or merged.get("timeout_secs") or 30),
-        "auto_cleanup_threads": auto_cleanup,
-        "thread_retention_secs": int(merged.get("museai_thread_retention_secs") or 172800),
-        "cleanup_interval_secs": int(merged.get("museai_cleanup_interval_secs") or 300),
+        "base_url": _first_truthy(merged, "museai_base_url", "base_url", default="https://muse.ai"),
+        "ws_url": _first_truthy(merged, "museai_ws_url", "ws_url", default="wss://hatch.metaaivm.com/v1/noise"),
+        "vm_id": _first_truthy(merged, "museai_vm_id", "vm_id", default=""),
+        "access_token": _first_truthy(merged, "museai_access_token", "access_token", default=""),
+        "notary_token": _first_truthy(merged, "museai_notary_token", "notary_token", default=""),
+        "cookie": _first_truthy(merged, "museai_cookie", "cookie", default=""),
+        "default_video_prompt": _first_truthy(merged, "default_video_prompt", default=""),
+        "approval_mode": _first_truthy(merged, "muse_approval_mode", "approval_mode", default="on"),
+        "allowed_destinations": _first_truthy(merged, "muse_approval_allowed_destinations", default=["muse.ai"]),
+        "allowed_types": _first_truthy(merged, "muse_approval_allowed_types", default=["network"]),
+        "timeout_secs": int(_first_truthy(merged, "muse_approval_timeout_secs", "timeout_secs", default=30)),
+        "auto_cleanup_threads": _parse_bool(merged.get("museai_auto_cleanup_threads"), default=True),
+        "thread_retention_secs": int(_first_truthy(merged, "museai_thread_retention_secs", default=172800)),
+        "cleanup_interval_secs": int(_first_truthy(merged, "museai_cleanup_interval_secs", default=300)),
     }
 
 
