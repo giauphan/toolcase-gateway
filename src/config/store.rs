@@ -137,6 +137,27 @@ impl ConfigStore {
         self.module_registry.clone()
     }
 
+    /// Automatically rescans `addons/` and `$GW_STATE_DIR/modules` on disk,
+    /// registering and persisting any newly added modules.
+    pub fn rescan_addons(&self) -> Vec<String> {
+        let state_dir = resolve_state_dir(&self.config_file);
+        let mut reg_guard = match self.module_registry.write() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        let discovered =
+            crate::gateway::installer::scan_and_register_modules(&mut reg_guard, &state_dir);
+        drop(reg_guard);
+
+        for manifest in &discovered {
+            let _ = self.storage.save_module_with_status(manifest, true);
+        }
+        if !discovered.is_empty() {
+            let _ = self.save_to_persistent_file();
+        }
+        discovered.into_iter().map(|m| m.id).collect()
+    }
+
     pub fn snapshot(&self) -> Config {
         self.inner.read().unwrap().clone()
     }
@@ -363,7 +384,10 @@ fn build_module_registry(
     hydrate_stored_modules(&mut reg, &stored_modules);
 
     // 2. Discover modules on disk (addons, modules dir)
-    crate::gateway::installer::scan_and_register_modules(&mut reg, state_dir);
+    let discovered = crate::gateway::installer::scan_and_register_modules(&mut reg, state_dir);
+    for manifest in &discovered {
+        let _ = storage.save_module_with_status(manifest, true);
+    }
 
     // 3. Fallback / supplementary configurations from persistent config (positions, configs, built-in enablement)
     if let Some(persistent) = persistent {

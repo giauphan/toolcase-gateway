@@ -136,6 +136,35 @@ pub fn dispatch_module_route(
             })
     };
 
+    let matched = match matched {
+        Some(m) => Some(m),
+        None => {
+            let new_addons = store.rescan_addons();
+            if !new_addons.is_empty() {
+                let reg = store.module_registry();
+                let reg_guard = match reg.read() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        write_error(client, 500, "Internal Error", &e.to_string())?;
+                        return Ok(Some(500));
+                    }
+                };
+                reg_guard
+                    .match_path_with_provider(clean_path)
+                    .map(|(d, s, p)| {
+                        (
+                            d.clone(),
+                            s.to_string(),
+                            p.cloned(),
+                            reg_guard.get_personal_manifest(&d.id).cloned(),
+                        )
+                    })
+            } else {
+                None
+            }
+        }
+    };
+
     let Some((desc, subpath, sub_prov, personal_manifest)) = matched else {
         return Ok(None);
     };

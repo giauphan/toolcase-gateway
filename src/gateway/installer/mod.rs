@@ -49,25 +49,31 @@ pub fn get_state_dir() -> PathBuf {
 pub fn scan_and_register_modules(
     registry: &mut crate::gateway::modules::ModuleRegistry,
     state_dir: &Path,
-) {
+) -> Vec<PersonalManifest> {
     let search_roots = [
         state_dir.join("modules"),
         PathBuf::from("modules"),
         PathBuf::from("addons"),
     ];
+    let mut newly_registered = Vec::new();
     for root in &search_roots {
-        scan_directory_for_modules(root, registry);
+        scan_directory_for_modules(root, registry, &mut newly_registered);
     }
+    newly_registered
 }
 
-fn scan_directory_for_modules(root: &Path, registry: &mut crate::gateway::modules::ModuleRegistry) {
+fn scan_directory_for_modules(
+    root: &Path,
+    registry: &mut crate::gateway::modules::ModuleRegistry,
+    newly_registered: &mut Vec<PersonalManifest>,
+) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            try_register_module_from_dir(&path, registry);
+            try_register_module_from_dir(&path, registry, newly_registered);
         }
     }
 }
@@ -75,6 +81,7 @@ fn scan_directory_for_modules(root: &Path, registry: &mut crate::gateway::module
 fn try_register_module_from_dir(
     path: &Path,
     registry: &mut crate::gateway::modules::ModuleRegistry,
+    newly_registered: &mut Vec<PersonalManifest>,
 ) {
     const CANDIDATES: &[&str] = &[
         "module.json",
@@ -90,7 +97,9 @@ fn try_register_module_from_dir(
                 manifest.source = Some(path.to_string_lossy().to_string());
             }
             if registry.get_module(&manifest.id).is_none() {
-                let _ = registry.register_personal_module(manifest);
+                if registry.register_personal_module(manifest.clone()).is_ok() {
+                    newly_registered.push(manifest);
+                }
             }
             break;
         }

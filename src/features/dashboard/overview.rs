@@ -64,6 +64,7 @@ pub fn handle_dashboard_asset(
 }
 
 pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) -> io::Result<()> {
+    let _ = store.rescan_addons();
     let config = store.snapshot();
     let pool = store.jev_pool();
     let jev_accounts: Vec<serde_json::Value> = pool
