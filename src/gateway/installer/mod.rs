@@ -271,6 +271,13 @@ mod tests {
         assert!(manifest.entrypoint.ends_with("run.sh"));
         assert!(Path::new(&manifest.entrypoint).is_file());
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let ep_meta = fs::metadata(&manifest.entrypoint).unwrap();
+            assert_eq!(ep_meta.permissions().mode() & 0o777, 0o700);
+        }
+
         cleanup_module_files("test-py-module", &temp_state);
         assert!(!temp_state.join("modules").join("test-py-module").exists());
 

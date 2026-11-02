@@ -28,10 +28,10 @@ exec python3 "$SCRIPT_DIR/adapter.py" "$@"
                     {
                         use std::os::unix::fs::PermissionsExt;
                         let _ =
-                            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
+                            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
                         let _ = std::fs::set_permissions(
                             &adapter_py,
-                            std::fs::Permissions::from_mode(0o755),
+                            std::fs::Permissions::from_mode(0o700),
                         );
                     }
                 }
@@ -52,7 +52,7 @@ pub(crate) fn build_command(manifest: &PersonalManifest, sub_provider_id: Option
                 if mode & 0o111 == 0 {
                     let _ = std::fs::set_permissions(
                         entry_path,
-                        std::fs::Permissions::from_mode(mode | 0o755),
+                        std::fs::Permissions::from_mode(mode | 0o700),
                     );
                 }
             }
@@ -109,7 +109,7 @@ pub(crate) fn build_fallback_interpreter_command(
         return None;
     }
 
-    let ext = resolved.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let ext = resolved.extension().and_then(std::ffi::OsStr::to_str).unwrap_or("");
     let interpreter = if ext == "sh" {
         Some("/bin/sh")
     } else if ext == "py" {

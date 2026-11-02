@@ -220,13 +220,12 @@ pub fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// Ingests source files from any supported source into a staging directory and unwraps top-level folders.
-pub(super) fn ingest_source_into_staging(
+fn dispatch_source_ingest(
     source: &InstallSource,
     branch: Option<&str>,
     staging_dir: &Path,
 ) -> Result<(), ModuleError> {
-    let ingest_result = match source {
+    match source {
         InstallSource::GitHubUrl(url) => ingest_github(url, branch, staging_dir),
         InstallSource::ZipUrl(url) => ingest_zip_url(url, staging_dir),
         InstallSource::ZipFile(path) => ingest_zip_file(path, staging_dir),
@@ -235,59 +234,78 @@ pub(super) fn ingest_source_into_staging(
             .map_err(|e| ModuleError::InvalidManifest(e.to_string())),
         InstallSource::LocalDir(dir) => copy_dir_all(dir, staging_dir)
             .map_err(|e| ModuleError::InvalidManifest(format!("Failed to copy directory: {e}"))),
-    };
+    }
+}
 
-    if let Err(e) = ingest_result {
+fn extract_github_tree_subpath(url: &str) -> Option<String> {
+    let clean = url.trim().trim_end_matches('/');
+    let path = clean
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("github.com/");
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() >= 5 && parts[2] == "tree" {
+        Some(parts[4..].join("/"))
+    } else {
+        None
+    }
+}
+
+fn find_staged_subpath_dir(staging_dir: &Path, subpath: &str) -> Option<PathBuf> {
+    let direct = staging_dir.join(subpath);
+    if direct.is_dir() {
+        return Some(direct);
+    }
+    let entries = fs::read_dir(staging_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.join(subpath).is_dir() {
+            return Some(path.join(subpath));
+        }
+    }
+    None
+}
+
+fn hoist_directory_to_staging(sub_dir: &Path, staging_dir: &Path) {
+    let temp_hoist = staging_dir.with_file_name(format!(".tmp_hoist_{}", uuid::Uuid::new_v4()));
+    let moved =
+        fs::rename(sub_dir, &temp_hoist).is_ok() || copy_dir_all(sub_dir, &temp_hoist).is_ok();
+    if !moved {
+        return;
+    }
+    let _ = fs::remove_dir_all(staging_dir);
+    if fs::rename(&temp_hoist, staging_dir).is_err() {
+        let _ = fs::create_dir_all(staging_dir);
+        let _ = copy_dir_all(&temp_hoist, staging_dir);
+        let _ = fs::remove_dir_all(&temp_hoist);
+    }
+}
+
+fn hoist_github_subpath_if_needed(source: &InstallSource, staging_dir: &Path) {
+    let InstallSource::GitHubUrl(url) = source else {
+        return;
+    };
+    let Some(subpath) = extract_github_tree_subpath(url) else {
+        return;
+    };
+    if let Some(sub_dir) = find_staged_subpath_dir(staging_dir, &subpath) {
+        hoist_directory_to_staging(&sub_dir, staging_dir);
+    }
+}
+
+/// Ingests source files from any supported source into a staging directory and unwraps top-level folders.
+pub(super) fn ingest_source_into_staging(
+    source: &InstallSource,
+    branch: Option<&str>,
+    staging_dir: &Path,
+) -> Result<(), ModuleError> {
+    if let Err(e) = dispatch_source_ingest(source, branch, staging_dir) {
         let _ = fs::remove_dir_all(staging_dir);
         return Err(e);
     }
 
     unwrap_single_top_level_directory(staging_dir);
-
-    // If GitHub URL points to a specific subpath (e.g. /tree/main/modules/daily-news), hoist that directory
-    if let InstallSource::GitHubUrl(url) = source {
-        let clean = url.trim().trim_end_matches('/');
-        let path = clean
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .trim_start_matches("github.com/");
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        if parts.len() >= 5 && parts[2] == "tree" {
-            let subpath = parts[4..].join("/");
-            let sub_dir_opt = if staging_dir.join(&subpath).is_dir() {
-                Some(staging_dir.join(&subpath))
-            } else {
-                let mut found = None;
-                if let Ok(entries) = fs::read_dir(staging_dir) {
-                    for entry in entries.flatten() {
-                        if entry.path().is_dir() && entry.path().join(&subpath).is_dir() {
-                            found = Some(entry.path().join(&subpath));
-                            break;
-                        }
-                    }
-                }
-                found
-            };
-
-            if let Some(sub_dir) = sub_dir_opt {
-                let temp_hoist =
-                    staging_dir.with_file_name(format!(".tmp_hoist_{}", uuid::Uuid::new_v4()));
-                let moved = if fs::rename(&sub_dir, &temp_hoist).is_ok() {
-                    true
-                } else {
-                    copy_dir_all(&sub_dir, &temp_hoist).is_ok()
-                };
-                if moved {
-                    let _ = fs::remove_dir_all(staging_dir);
-                    if fs::rename(&temp_hoist, staging_dir).is_err() {
-                        let _ = fs::create_dir_all(staging_dir);
-                        let _ = copy_dir_all(&temp_hoist, staging_dir);
-                        let _ = fs::remove_dir_all(&temp_hoist);
-                    }
-                }
-            }
-        }
-    }
+    hoist_github_subpath_if_needed(source, staging_dir);
 
     Ok(())
 }

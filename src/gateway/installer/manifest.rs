@@ -4,7 +4,7 @@ use super::InstallOptions;
 use crate::gateway::modules::{normalize_module_config_schema, ModuleError, PersonalManifest};
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(super) fn read_module_manifest(mpath: &Path, base_dir: &Path) -> Option<PersonalManifest> {
     if !mpath.is_file() {
@@ -37,104 +37,111 @@ pub(super) fn read_module_manifest(mpath: &Path, base_dir: &Path) -> Option<Pers
     Some(manifest)
 }
 
-pub(super) fn discover_or_synthesize_manifest(
-    dir: &Path,
-    options: &InstallOptions,
-) -> Result<PersonalManifest, ModuleError> {
-    let candidate_manifests = [
-        "module.json",
-        "manifest.json",
-        "__manifest__.json",
-        "toolcase-module.json",
-    ];
+const CANDIDATE_MANIFESTS: &[&str] = &[
+    "module.json",
+    "manifest.json",
+    "__manifest__.json",
+    "toolcase-module.json",
+];
 
-    for name in candidate_manifests {
-        let manifest_file = dir.join(name);
-        if manifest_file.is_file() {
-            if let Ok(content) = fs::read_to_string(&manifest_file) {
-                if let Ok(mut manifest) = serde_json::from_str::<PersonalManifest>(&content) {
-                    apply_overrides(&mut manifest, options);
-                    return Ok(manifest);
-                }
-            }
-        }
+fn try_read_manifest_file(path: &Path, options: &InstallOptions) -> Option<PersonalManifest> {
+    if !path.is_file() {
+        return None;
     }
+    let content = fs::read_to_string(path).ok()?;
+    let mut manifest = serde_json::from_str::<PersonalManifest>(&content).ok()?;
+    apply_overrides(&mut manifest, options);
+    Some(manifest)
+}
 
-    // Also check inside modules/ or subdirectories if not found at repository root
+fn find_manifest_in_dir(dir: &Path, options: &InstallOptions) -> Option<PersonalManifest> {
+    CANDIDATE_MANIFESTS
+        .iter()
+        .find_map(|name| try_read_manifest_file(&dir.join(name), options))
+}
+
+fn collect_candidate_subdirs(dir: &Path, target_id: Option<&str>) -> Vec<PathBuf> {
     let mut candidate_subdirs = Vec::new();
-    if let Some(ref target_id) = options.id {
+    if let Some(target_id) = target_id {
         candidate_subdirs.push(dir.join("modules").join(target_id));
         candidate_subdirs.push(dir.join(target_id));
     }
     if let Ok(entries) = fs::read_dir(dir.join("modules")) {
         for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                candidate_subdirs.push(entry.path());
+            let path = entry.path();
+            if path.is_dir() {
+                candidate_subdirs.push(path);
             }
         }
     }
+    candidate_subdirs
+}
 
+fn find_manifest_in_subdirs(dir: &Path, options: &InstallOptions) -> Option<PersonalManifest> {
+    let candidate_subdirs = collect_candidate_subdirs(dir, options.id.as_deref());
     for subdir in candidate_subdirs {
-        for name in candidate_manifests {
-            let manifest_file = subdir.join(name);
-            if manifest_file.is_file() {
-                if let Ok(content) = fs::read_to_string(&manifest_file) {
-                    if let Ok(mut manifest) = serde_json::from_str::<PersonalManifest>(&content) {
-                        apply_overrides(&mut manifest, options);
-                        let _ = super::ingest::copy_dir_all(&subdir, dir);
-                        return Ok(manifest);
-                    }
-                }
-            }
+        if let Some(manifest) = find_manifest_in_dir(&subdir, options) {
+            let _ = super::ingest::copy_dir_all(&subdir, dir);
+            return Some(manifest);
         }
     }
+    None
+}
 
-    // Auto-synthesize manifest from repository structure
-    let id = options.id.clone().unwrap_or_else(|| {
-        if let Some(ref ns) = options.namespace {
-            let clean = ns.trim_matches('/').replace('/', "-");
-            let filtered: String = clean
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-                .collect();
-            if !filtered.is_empty() {
-                return filtered;
-            }
+fn synthesize_id(dir: &Path, options: &InstallOptions) -> String {
+    if let Some(ref id) = options.id {
+        return id.clone();
+    }
+    if let Some(ref ns) = options.namespace {
+        let clean = ns.trim_matches('/').replace('/', "-");
+        let filtered: String = clean
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !filtered.is_empty() {
+            return filtered;
         }
-        let stem = dir
-            .file_name()
-            .and_then(std::ffi::OsStr::to_str)
-            .unwrap_or("custom-module");
-        sanitize_id(stem)
-    });
+    }
+    let stem = dir
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("custom-module");
+    sanitize_id(stem)
+}
 
-    let name = options.name.clone().unwrap_or_else(|| {
-        id.split(['-', '_'])
-            .map(|w| {
-                let mut c = w.chars();
-                match c.next() {
-                    None => String::new(),
-                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    });
+fn synthesize_name(id: &str, options: &InstallOptions) -> String {
+    if let Some(ref name) = options.name {
+        return name.clone();
+    }
+    id.split(['-', '_'])
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
+fn auto_synthesize_manifest(
+    dir: &Path,
+    options: &InstallOptions,
+) -> Result<PersonalManifest, ModuleError> {
+    let id = synthesize_id(dir, options);
+    let name = synthesize_name(&id, options);
     let namespace = options
         .namespace
         .clone()
         .unwrap_or_else(|| format!("/custom/{id}"));
-
     let protocol = options
         .protocol
         .clone()
         .unwrap_or_else(|| "stdio-stream".to_string());
-
-    let entrypoint = if let Some(ref ep) = options.entrypoint {
-        ep.clone()
-    } else {
-        detect_or_generate_entrypoint(dir)?
+    let entrypoint = match options.entrypoint {
+        Some(ref ep) => ep.clone(),
+        None => detect_or_generate_entrypoint(dir)?,
     };
 
     Ok(PersonalManifest {
@@ -152,6 +159,19 @@ pub(super) fn discover_or_synthesize_manifest(
         group: None,
         source: None,
     })
+}
+
+pub(super) fn discover_or_synthesize_manifest(
+    dir: &Path,
+    options: &InstallOptions,
+) -> Result<PersonalManifest, ModuleError> {
+    if let Some(manifest) = find_manifest_in_dir(dir, options) {
+        return Ok(manifest);
+    }
+    if let Some(manifest) = find_manifest_in_subdirs(dir, options) {
+        return Ok(manifest);
+    }
+    auto_synthesize_manifest(dir, options)
 }
 
 fn detect_or_generate_entrypoint(dir: &Path) -> Result<String, ModuleError> {
@@ -280,16 +300,16 @@ pub(super) fn finalize_module_entrypoint(
         {
             use std::os::unix::fs::PermissionsExt;
             if resolved_ep.is_file() {
-                let _ = fs::set_permissions(&resolved_ep, fs::Permissions::from_mode(0o755));
+                let _ = fs::set_permissions(&resolved_ep, fs::Permissions::from_mode(0o700));
             } else if let Ok(can_ep) = resolved_ep.canonicalize() {
                 if can_ep.is_file() {
-                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o755));
+                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
                 }
             }
             if let Some(parent) = resolved_ep.parent() {
                 let adapter_py = parent.join("adapter.py");
                 if adapter_py.is_file() {
-                    let _ = fs::set_permissions(&adapter_py, fs::Permissions::from_mode(0o755));
+                    let _ = fs::set_permissions(&adapter_py, fs::Permissions::from_mode(0o700));
                 }
             }
         }

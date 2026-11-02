@@ -124,4 +124,43 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_heal_legacy_adapter_script_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = std::env::temp_dir().join(format!("test_heal_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let run_sh = temp_dir.join("run.sh");
+        let legacy_content = "#!/bin/sh\ncat << 'EOF' | python3\nprint('hello')\nEOF\n";
+        std::fs::write(&run_sh, legacy_content).unwrap();
+
+        let manifest = PersonalManifest {
+            id: "test-legacy".to_string(),
+            name: "Test Legacy".to_string(),
+            short_name: None,
+            version: "1.0.0".to_string(),
+            namespace: "/custom/legacy".to_string(),
+            entrypoint: run_sh.to_string_lossy().to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            icon: None,
+            config_schema: None,
+            permissions: vec![],
+            group: None,
+            source: None,
+        };
+
+        let _cmd = build_command(&manifest, None);
+
+        let run_meta = std::fs::metadata(&run_sh).unwrap();
+        assert_eq!(run_meta.permissions().mode() & 0o777, 0o700);
+
+        let adapter_py = temp_dir.join("adapter.py");
+        assert!(adapter_py.is_file());
+        let py_meta = std::fs::metadata(&adapter_py).unwrap();
+        assert_eq!(py_meta.permissions().mode() & 0o777, 0o700);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
