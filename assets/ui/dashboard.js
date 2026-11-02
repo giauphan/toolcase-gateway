@@ -667,7 +667,7 @@
     if (!modules.length) {
       const emptyMsg = isFiltered ? "No modules match the current filters." : "No modules registered.";
       if (modulesTbody) {
-        modulesTbody.innerHTML = "<tr><td colspan=\"7\" class=\"empty-hint\">" + emptyMsg + "</td></tr>";
+        modulesTbody.innerHTML = "<tr><td colspan=\"8\" class=\"empty-hint\">" + emptyMsg + "</td></tr>";
       }
       if (modulesCardsWrap) {
         modulesCardsWrap.innerHTML = "<div class=\"empty-hint ui-grid-full\">" + emptyMsg + "</div>";
@@ -686,10 +686,12 @@
         }).join("");
 
         const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
+        const versionStr = m.version ? ("v" + escapeHtml(m.version)) : "—";
 
         return "<tr>" +
           "<td><button class=\"name-link module-detail\" data-module-id=\"" + escapeHtml(m.id) + "\">" + escapeHtml(m.id) + "</button></td>" +
           "<td>" + escapeHtml(m.name) + "</td>" +
+          "<td><span class=\"pill gray\">" + versionStr + "</span></td>" +
           "<td><span class=\"pill " + (isBuiltin ? "gray" : "personal") + "\">" + escapeHtml(m.kind) + "</span></td>" +
           "<td><code>" + escapeHtml(m.namespace) + "</code></td>" +
           "<td>" + (caps || "<span class=\"hint\">None</span>") + "</td>" +
@@ -710,11 +712,13 @@
         }).join(" ");
 
         const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
+        const versionBadge = m.version ? (" <span class=\"pill gray\">v" + escapeHtml(m.version) + "</span>") : "";
 
         return "<div class=\"card catalogitem\">" +
           "<div class=\"catalogtitle\">" +
             "<button class=\"name-link module-detail\" data-module-id=\"" + escapeHtml(m.id) + "\">" + escapeHtml(m.name) + "</button> " +
             "<span class=\"pill " + (isBuiltin ? "gray" : "personal") + "\">" + escapeHtml(m.kind) + "</span>" +
+            versionBadge +
           "</div>" +
           "<div class=\"catalogdesc\"><code>" + escapeHtml(m.namespace) + "</code><br>" + (caps || "None") + "</div>" +
           "<div class=\"minirow\">" +
@@ -746,9 +750,11 @@
       const sourceHtml = item.source
         ? ("<br><span class=\"hint\">Repo: <code>" + escapeHtml(item.source) + "</code></span>")
         : "";
+      const versionBadge = item.version ? (" <span class=\"pill gray\">v" + escapeHtml(item.version) + "</span>") : "";
 
       return "<div class=\"card catalogitem\">" +
         "<span class=\"pill gray\">Catalog template</span>" +
+        versionBadge +
         "<div class=\"catalogtitle\">" + escapeHtml(item.name) + "</div>" +
         "<div class=\"catalogdesc\">" + escapeHtml(item.description) + "<br><code>" + escapeHtml(item.namespace) + "</code>" + sourceHtml + "<br>" + caps + "</div>" +
         "<div class=\"minirow\">" +
