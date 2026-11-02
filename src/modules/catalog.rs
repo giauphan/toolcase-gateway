@@ -210,5 +210,34 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 ],
             )),
         },
+        SystemCatalogModule {
+            id: "daily-news".to_string(),
+            name: "Daily News & Content Discovery Service".to_string(),
+            short_name: Some("Daily News".to_string()),
+            description: "Daily automated news and latest content discovery, canonicalization, and tiered ranking adapter".to_string(),
+            namespace: "/custom/daily-news".to_string(),
+            version: "1.0.0".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![
+                "news".to_string(),
+                "content_discovery".to_string(),
+                "chat_completions".to_string(),
+                "models".to_string(),
+            ],
+            icon: Some("📰".to_string()),
+            source: Some("https://github.com/giauphan/gateway-modules/tree/main/modules/daily-news".to_string()),
+            config_schema: Some(config_schema(
+                "Daily News & Content Discovery Service Config",
+                "daily-news",
+                "/custom/daily-news",
+                "/custom/daily-news/api/v1/config",
+                "Configure upstream NewsNow API endpoint and freshness windows",
+                vec![
+                    text_field("newsnow_url", "NewsNow Base URL", "http://127.0.0.1:4444", "Primary upstream NewsNow feed service URL"),
+                    bool_field("require_latest_news", "Strict Latest News", true, "Prioritize latest breaking news with verified timestamps"),
+                    text_field("default_sources", "Default Feeds", "hackernews,github,producthunt", "Comma-separated feed sources to query"),
+                ],
+            )),
+        },
     ]
 }

@@ -60,6 +60,35 @@ pub(super) fn discover_or_synthesize_manifest(
         }
     }
 
+    // Also check inside modules/ or subdirectories if not found at repository root
+    let mut candidate_subdirs = Vec::new();
+    if let Some(ref target_id) = options.id {
+        candidate_subdirs.push(dir.join("modules").join(target_id));
+        candidate_subdirs.push(dir.join(target_id));
+    }
+    if let Ok(entries) = fs::read_dir(dir.join("modules")) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                candidate_subdirs.push(entry.path());
+            }
+        }
+    }
+
+    for subdir in candidate_subdirs {
+        for name in candidate_manifests {
+            let manifest_file = subdir.join(name);
+            if manifest_file.is_file() {
+                if let Ok(content) = fs::read_to_string(&manifest_file) {
+                    if let Ok(mut manifest) = serde_json::from_str::<PersonalManifest>(&content) {
+                        apply_overrides(&mut manifest, options);
+                        let _ = super::ingest::copy_dir_all(&subdir, dir);
+                        return Ok(manifest);
+                    }
+                }
+            }
+        }
+    }
+
     // Auto-synthesize manifest from repository structure
     let id = options.id.clone().unwrap_or_else(|| {
         if let Some(ref ns) = options.namespace {
@@ -250,11 +279,17 @@ pub(super) fn finalize_module_entrypoint(
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let (Ok(can_ep), Ok(can_target)) =
-                (resolved_ep.canonicalize(), abs_target_dir.canonicalize())
-            {
-                if can_ep.starts_with(&can_target) && can_ep.is_file() {
-                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o700));
+            if resolved_ep.is_file() {
+                let _ = fs::set_permissions(&resolved_ep, fs::Permissions::from_mode(0o755));
+            } else if let Ok(can_ep) = resolved_ep.canonicalize() {
+                if can_ep.is_file() {
+                    let _ = fs::set_permissions(&can_ep, fs::Permissions::from_mode(0o755));
+                }
+            }
+            if let Some(parent) = resolved_ep.parent() {
+                let adapter_py = parent.join("adapter.py");
+                if adapter_py.is_file() {
+                    let _ = fs::set_permissions(&adapter_py, fs::Permissions::from_mode(0o755));
                 }
             }
         }

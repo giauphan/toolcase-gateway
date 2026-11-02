@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::Path;
 use toolcase_gateway::gateway::installer::{
-    cleanup_module_files, install_module, scan_and_register_modules, InstallOptions, InstallSource,
+    cleanup_module_files, install_module, scan_and_register_modules, upgrade_module,
+    InstallOptions, InstallSource,
 };
 use toolcase_gateway::gateway::modules::ModuleRegistry;
 
@@ -354,4 +355,71 @@ fn test_scan_and_auto_discover_facebook_suite_addon() {
     assert!(fb.capabilities.contains(&"upload".to_string()));
     assert!(fb.capabilities.contains(&"publish".to_string()));
     assert!(fb.capabilities.contains(&"reels".to_string()));
+}
+
+#[test]
+fn test_upgrade_monorepo_subpath() {
+    let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
+    let initial_manifest = r#"{
+        "id": "monorepo-sub",
+        "name": "Sub Module",
+        "version": "1.0.0",
+        "namespace": "/custom/monorepo-sub",
+        "entrypoint": "run.sh",
+        "protocol": "stdio-stream",
+        "capabilities": ["news"]
+    }"#;
+    let initial_script = b"#!/bin/sh\necho '{\"status\": 200, \"body\": \"v1\"}'\n";
+    let zip_v1 = build_stored_zip(&[
+        ("module.json", initial_manifest.as_bytes()),
+        ("run.sh", &initial_script[..]),
+    ]);
+
+    let _ = install_module(
+        InstallSource::ZipBytes(zip_v1),
+        InstallOptions::default(),
+        &temp_state,
+    )
+    .expect("initial install succeeds");
+
+    let upgraded_manifest = r#"{
+        "id": "monorepo-sub",
+        "name": "Sub Module Upgraded",
+        "version": "1.1.0",
+        "namespace": "/custom/monorepo-sub",
+        "entrypoint": "run.sh",
+        "protocol": "stdio-stream",
+        "capabilities": ["news", "discovery"]
+    }"#;
+    let upgraded_script = b"#!/bin/sh\necho '{\"status\": 200, \"body\": \"v2\"}'\n";
+
+    let monorepo_dir = std::env::temp_dir().join(format!("test_monorepo_{}", uuid::Uuid::new_v4()));
+    let sub_dir = monorepo_dir.join("modules").join("monorepo-sub");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("module.json"), upgraded_manifest).unwrap();
+    fs::write(sub_dir.join("run.sh"), upgraded_script).unwrap();
+
+    let upgraded = upgrade_module(
+        "monorepo-sub",
+        InstallSource::LocalDir(monorepo_dir.clone()),
+        InstallOptions {
+            id: Some("monorepo-sub".to_string()),
+            ..Default::default()
+        },
+        &temp_state,
+        None,
+    )
+    .expect("monorepo subpath upgrade succeeds");
+
+    assert_eq!(upgraded.version, "1.1.0");
+    assert_eq!(upgraded.name, "Sub Module Upgraded");
+    assert!(temp_state
+        .join("modules")
+        .join("monorepo-sub")
+        .join("module.json")
+        .is_file());
+
+    cleanup_module_files("monorepo-sub", &temp_state);
+    let _ = fs::remove_dir_all(&temp_state);
+    let _ = fs::remove_dir_all(&monorepo_dir);
 }

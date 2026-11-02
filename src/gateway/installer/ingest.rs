@@ -60,13 +60,15 @@ pub(super) fn ingest_github(
     git_cmd
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null());
-    git_cmd.args([
-        "clone",
-        "--depth",
-        "1",
-        url,
-        target_dir.to_str().unwrap_or(""),
-    ]);
+    let clone_repo_url = format!("https://github.com/{owner}/{repo}.git");
+    let mut clone_args = vec!["clone", "--depth", "1"];
+    if let Some(b) = inferred_branch {
+        clone_args.push("--branch");
+        clone_args.push(b);
+    }
+    clone_args.push(&clone_repo_url);
+    clone_args.push(target_dir.to_str().unwrap_or(""));
+    git_cmd.args(&clone_args);
     if let Ok(status) = git_cmd.status() {
         if status.success() {
             let _ = fs::remove_dir_all(target_dir.join(".git"));
@@ -241,6 +243,52 @@ pub(super) fn ingest_source_into_staging(
     }
 
     unwrap_single_top_level_directory(staging_dir);
+
+    // If GitHub URL points to a specific subpath (e.g. /tree/main/modules/daily-news), hoist that directory
+    if let InstallSource::GitHubUrl(url) = source {
+        let clean = url.trim().trim_end_matches('/');
+        let path = clean
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_start_matches("github.com/");
+        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() >= 5 && parts[2] == "tree" {
+            let subpath = parts[4..].join("/");
+            let sub_dir_opt = if staging_dir.join(&subpath).is_dir() {
+                Some(staging_dir.join(&subpath))
+            } else {
+                let mut found = None;
+                if let Ok(entries) = fs::read_dir(staging_dir) {
+                    for entry in entries.flatten() {
+                        if entry.path().is_dir() && entry.path().join(&subpath).is_dir() {
+                            found = Some(entry.path().join(&subpath));
+                            break;
+                        }
+                    }
+                }
+                found
+            };
+
+            if let Some(sub_dir) = sub_dir_opt {
+                let temp_hoist =
+                    staging_dir.with_file_name(format!(".tmp_hoist_{}", uuid::Uuid::new_v4()));
+                let moved = if fs::rename(&sub_dir, &temp_hoist).is_ok() {
+                    true
+                } else {
+                    copy_dir_all(&sub_dir, &temp_hoist).is_ok()
+                };
+                if moved {
+                    let _ = fs::remove_dir_all(staging_dir);
+                    if fs::rename(&temp_hoist, staging_dir).is_err() {
+                        let _ = fs::create_dir_all(staging_dir);
+                        let _ = copy_dir_all(&temp_hoist, staging_dir);
+                        let _ = fs::remove_dir_all(&temp_hoist);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
