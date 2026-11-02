@@ -378,6 +378,8 @@ fn build_module_registry(
     persistent: Option<&PersistentConfig>,
 ) -> crate::gateway::modules::ModuleRegistry {
     let mut reg = crate::gateway::modules::ModuleRegistry::new();
+    let uninstalled = storage.get_uninstalled_modules().unwrap_or_default();
+    reg.set_uninstalled(uninstalled);
     let stored_modules = storage.get_stored_modules().unwrap_or_default();
 
     // 1. Authoritative hydration from SQLite modules table

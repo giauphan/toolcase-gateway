@@ -8,7 +8,7 @@ use super::manifest::{
 use super::validation::{
     validate_module_id, validate_module_namespace, validate_module_protocol, validate_sub_providers,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Registry of authoritative built-in and dynamically installed personal modules.
 #[derive(Debug, Clone, Default)]
@@ -16,6 +16,7 @@ pub struct ModuleRegistry {
     pub(super) modules: HashMap<String, ModuleDescriptor>,
     pub(super) personal_manifests: HashMap<String, PersonalManifest>,
     pub(super) module_configs: HashMap<String, serde_json::Map<String, serde_json::Value>>,
+    pub(super) uninstalled: HashSet<String>,
 }
 
 fn build_sub_providers(
@@ -87,6 +88,7 @@ impl ModuleRegistry {
             modules: HashMap::new(),
             personal_manifests: HashMap::new(),
             module_configs: HashMap::new(),
+            uninstalled: HashSet::new(),
         };
 
         super::builtins::register_default_builtins(&mut registry);
@@ -234,6 +236,7 @@ impl ModuleRegistry {
 
         self.modules.insert(id.clone(), desc.clone());
         self.personal_manifests.insert(id.clone(), manifest);
+        self.uninstalled.remove(&id);
         self.sync_module_config_from_disk(&id);
         Ok(desc)
     }
@@ -254,9 +257,22 @@ impl ModuleRegistry {
         }
 
         self.modules.remove(id);
+        self.uninstalled.insert(id.to_string());
         self.personal_manifests
             .remove(id)
             .ok_or_else(|| ModuleError::NotFound(id.to_string()))
+    }
+
+    pub fn is_uninstalled(&self, id: &str) -> bool {
+        self.uninstalled.contains(id)
+    }
+
+    pub fn set_uninstalled(&mut self, ids: Vec<String>) {
+        self.uninstalled.extend(ids);
+    }
+
+    pub fn clear_uninstalled(&mut self, id: &str) {
+        self.uninstalled.remove(id);
     }
 
     /// Sets the enablement status of a module.

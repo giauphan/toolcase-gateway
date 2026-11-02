@@ -102,6 +102,11 @@ impl SqliteStorage {
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS uninstalled_modules (
+                id TEXT PRIMARY KEY,
+                uninstalled_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE INDEX IF NOT EXISTS idx_accounts_provider ON accounts(provider);
             CREATE INDEX IF NOT EXISTS idx_modules_namespace ON modules(namespace);",
         )?;
@@ -339,11 +344,6 @@ impl StorageRepository for SqliteStorage {
         Ok(list)
     }
 
-    fn get_modules(&self) -> Result<Vec<PersonalManifest>, StorageError> {
-        self.get_stored_modules()
-            .map(|mods| mods.into_iter().map(|m| m.manifest).collect())
-    }
-
     fn save_module(&self, manifest: &PersonalManifest) -> Result<(), StorageError> {
         let json_str = serde_json::to_string(manifest)?;
         let conn = self
@@ -360,6 +360,10 @@ impl StorageRepository for SqliteStorage {
                 updated_at = CURRENT_TIMESTAMP",
             params![manifest.id, manifest.namespace, manifest.name, json_str],
         )?;
+        let _ = conn.execute(
+            "DELETE FROM uninstalled_modules WHERE id = ?1",
+            params![manifest.id],
+        );
         Ok(())
     }
 
@@ -390,6 +394,10 @@ impl StorageRepository for SqliteStorage {
                 if enabled { 1 } else { 0 }
             ],
         )?;
+        let _ = conn.execute(
+            "DELETE FROM uninstalled_modules WHERE id = ?1",
+            params![manifest.id],
+        );
         Ok(())
     }
 
@@ -410,15 +418,26 @@ impl StorageRepository for SqliteStorage {
     }
 
     fn remove_module(&self, id: &str) -> Result<(), StorageError> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let conn = self.conn.lock().map_err(|e| StorageError::Database(e.to_string()))?;
+        let _ = conn.execute("INSERT OR REPLACE INTO uninstalled_modules (id) VALUES (?1)", params![id]);
         let affected = conn.execute("DELETE FROM modules WHERE id = ?1", params![id])?;
         if affected == 0 {
             Err(StorageError::NotFound(id.to_string()))
         } else {
             Ok(())
         }
+    }
+
+    fn get_uninstalled_modules(&self) -> Result<Vec<String>, StorageError> {
+        let conn = self.conn.lock().map_err(|e| StorageError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT id FROM uninstalled_modules")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    fn clear_module_uninstalled(&self, id: &str) -> Result<(), StorageError> {
+        let conn = self.conn.lock().map_err(|e| StorageError::Database(e.to_string()))?;
+        let _ = conn.execute("DELETE FROM uninstalled_modules WHERE id = ?1", params![id]);
+        Ok(())
     }
 }

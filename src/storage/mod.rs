@@ -173,6 +173,16 @@ pub trait StorageRepository: Send + Sync {
 
     /// Removes an installed personal module by id.
     fn remove_module(&self, id: &str) -> Result<(), StorageError>;
+
+    /// Returns all module IDs marked as explicitly uninstalled.
+    fn get_uninstalled_modules(&self) -> Result<Vec<String>, StorageError> {
+        Ok(Vec::new())
+    }
+
+    /// Clears the uninstalled tombstone when explicitly reinstalled.
+    fn clear_module_uninstalled(&self, _id: &str) -> Result<(), StorageError> {
+        Ok(())
+    }
 }
 
 /// Atomically writes content to a temporary file in the target directory and renames it into place

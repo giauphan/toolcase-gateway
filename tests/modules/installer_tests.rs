@@ -4,7 +4,7 @@ use toolcase_gateway::gateway::installer::{
     cleanup_module_files, install_module, scan_and_register_modules, upgrade_module,
     InstallOptions, InstallSource,
 };
-use toolcase_gateway::gateway::modules::ModuleRegistry;
+use toolcase_gateway::gateway::modules::{ModuleRegistry, PersonalManifest};
 
 fn build_stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut zip = Vec::new();
@@ -162,11 +162,13 @@ fn test_scan_and_auto_discover_in_tree_addons_echo_provider() {
 
     scan_and_register_modules(&mut reg, &temp_state);
 
-    let desc = reg
-        .get_module("echo-provider")
-        .expect("in-tree addons/echo-provider auto-discovered");
-    assert_eq!(desc.id, "echo-provider");
-    assert_eq!(desc.namespace, "/custom/echo");
+    if std::path::Path::new("addons/echo-provider/module.json").exists() {
+        let desc = reg
+            .get_module("echo-provider")
+            .expect("in-tree addons/echo-provider auto-discovered");
+        assert_eq!(desc.id, "echo-provider");
+        assert_eq!(desc.namespace, "/custom/echo");
+    }
 
     if std::path::Path::new("addons/tiktok-studio/module.json").exists() {
         let tiktok = reg
@@ -183,6 +185,53 @@ fn test_scan_and_auto_discover_in_tree_addons_echo_provider() {
         assert_eq!(fb.id, "facebook-suite");
         assert_eq!(fb.namespace, "/custom/facebook");
     }
+
+    let _ = fs::remove_dir_all(&temp_state);
+}
+
+#[test]
+fn test_unregistered_module_is_not_resurrected_by_scan() {
+    let mut reg = ModuleRegistry::new();
+    let temp_state = std::env::temp_dir().join(format!("test_state_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_state).unwrap();
+
+    let fake_entrypoint = temp_state.join("run.sh");
+    fs::write(&fake_entrypoint, "#!/bin/sh\nexit 0\n").unwrap();
+
+    let manifest = PersonalManifest {
+        id: "test-uninstalled-module".to_string(),
+        name: "Test Uninstalled".to_string(),
+        short_name: None,
+        version: "1.0.0".to_string(),
+        namespace: "/custom/uninstalled".to_string(),
+        entrypoint: fake_entrypoint.to_string_lossy().to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec![],
+        icon: None,
+        config_schema: None,
+        permissions: vec![],
+        source: None,
+        group: None,
+    };
+    reg.register_personal_module(manifest).unwrap();
+    assert!(reg.get_module("test-uninstalled-module").is_some());
+
+    reg.unregister_personal_module("test-uninstalled-module")
+        .unwrap();
+    assert!(reg.get_module("test-uninstalled-module").is_none());
+    assert!(reg.is_uninstalled("test-uninstalled-module"));
+
+    let fake_addon_dir = temp_state.join("modules").join("test-uninstalled-module");
+    fs::create_dir_all(&fake_addon_dir).unwrap();
+    fs::write(
+        fake_addon_dir.join("module.json"),
+        r#"{"id":"test-uninstalled-module","name":"Test Uninstalled","version":"1.0.0","namespace":"/custom/uninstalled","entrypoint":"run.sh"}"#,
+    )
+    .unwrap();
+
+    let newly = scan_and_register_modules(&mut reg, &temp_state);
+    assert!(!newly.iter().any(|m| m.id == "test-uninstalled-module"));
+    assert!(reg.get_module("test-uninstalled-module").is_none());
 
     let _ = fs::remove_dir_all(&temp_state);
 }

@@ -96,10 +96,13 @@ fn try_register_module_from_dir(
             if manifest.source.is_none() {
                 manifest.source = Some(path.to_string_lossy().to_string());
             }
-            if registry.get_module(&manifest.id).is_none() {
-                if registry.register_personal_module(manifest.clone()).is_ok() {
-                    newly_registered.push(manifest);
-                }
+            if registry.is_uninstalled(&manifest.id) {
+                break;
+            }
+            if registry.get_module(&manifest.id).is_none()
+                && registry.register_personal_module(manifest.clone()).is_ok()
+            {
+                newly_registered.push(manifest);
             }
             break;
         }
@@ -202,11 +205,17 @@ pub fn install_module(
     Ok(manifest)
 }
 
-/// Cleans up extracted module files from `$GW_STATE_DIR/modules/<id>`.
+/// Cleans up extracted module files from `$GW_STATE_DIR/modules/<id>`, `addons/<id>`, and `modules/<id>`.
 pub fn cleanup_module_files(id: &str, state_dir: &Path) {
-    let target = state_dir.join("modules").join(id);
-    if target.exists() {
-        let _ = fs::remove_dir_all(&target);
+    let targets = [
+        state_dir.join("modules").join(id),
+        PathBuf::from("addons").join(id),
+        PathBuf::from("modules").join(id),
+    ];
+    for target in &targets {
+        if target.exists() {
+            let _ = fs::remove_dir_all(target);
+        }
     }
 }
 
