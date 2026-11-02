@@ -45,7 +45,26 @@ pub fn handle_set_module_state(
     if let Err(e) = guard.set_module_status(&payload.id, status) {
         return write_error(client, 400, "Bad Request", &e.to_string());
     }
+    let personal_manifest = guard.get_personal_manifest(&payload.id).cloned();
     drop(guard);
+
+    // Persist to authoritative SQLite modules table
+    if let Err(e) = store
+        .storage
+        .set_module_enabled(&payload.id, payload.enabled)
+    {
+        if let Some(manifest) = personal_manifest {
+            let _ = store
+                .storage
+                .save_module_with_status(&manifest, payload.enabled);
+        } else {
+            eprintln!(
+                "info: module '{}' not found in database modules table: {e}",
+                payload.id
+            );
+        }
+    }
+
     if let Err(e) = store.save_to_persistent_file() {
         return write_error(
             client,
@@ -134,6 +153,7 @@ pub fn handle_install_personal_module(
             serde_json::to_string_pretty(&manifest).unwrap_or_default(),
         );
     }
+    let _ = store.storage.save_module_with_status(&manifest, true);
     if let Err(e) = store.save_to_persistent_file() {
         return write_error(
             client,
@@ -182,6 +202,15 @@ pub fn handle_remove_personal_module(
     drop(guard);
     let state_dir = get_state_dir();
     cleanup_module_files(&payload.id, &state_dir);
+    match store.storage.remove_module(&payload.id) {
+        Ok(()) | Err(crate::storage::StorageError::NotFound(_)) => {}
+        Err(e) => {
+            eprintln!(
+                "warning: failed to remove module '{}' from storage: {e:?}",
+                payload.id
+            );
+        }
+    }
     if let Err(e) = store.save_to_persistent_file() {
         return write_error(
             client,
@@ -315,7 +344,7 @@ pub fn handle_upgrade_personal_module(
         Ok(g) => g,
         Err(e) => return write_error(client, 500, "Internal Error", &e.to_string()),
     };
-    let updated_desc = match write_guard.upgrade_personal_module(new_manifest) {
+    let updated_desc = match write_guard.upgrade_personal_module(new_manifest.clone()) {
         Ok(d) => d,
         Err(e) => {
             drop(write_guard);
@@ -324,6 +353,7 @@ pub fn handle_upgrade_personal_module(
     };
     drop(write_guard);
 
+    let _ = store.storage.save_module(&new_manifest);
     if let Err(e) = store.save_to_persistent_file() {
         return write_error(
             client,

@@ -1,6 +1,9 @@
 use std::fs;
+use toolcase_gateway::config::{Config, ConfigStore};
 use toolcase_gateway::gateway::installer::{install_module, InstallOptions, InstallSource};
-use toolcase_gateway::gateway::modules::{ModuleError, ModuleRegistry, PersonalManifest};
+use toolcase_gateway::gateway::modules::{
+    ModuleError, ModuleRegistry, ModuleStatus, PersonalManifest,
+};
 use toolcase_gateway::storage::{
     parse_database_url, DatabaseEngine, SqliteStorage, StorageRepository, StoredAccount,
 };
@@ -225,6 +228,154 @@ fn test_database_storage_url_parsing_and_sqlite_operations() {
     assert_eq!(retrieved.len(), 2);
     assert_eq!(retrieved[0].id, "acc_1");
     assert_eq!(retrieved[1].key, "jev_key_2");
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_config_store_sqlite_module_hydration_and_toggle_persistence() {
+    let temp_dir = std::env::temp_dir().join(format!("test_store_hydr_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // 1. Pre-populate SQLite with a disabled module
+    let db_engine = DatabaseEngine::Sqlite(temp_dir.join("gateway.db"));
+    let storage = SqliteStorage::open(db_engine.clone(), &temp_dir).unwrap();
+    let manifest = PersonalManifest {
+        id: "hydrated-tool".into(),
+        name: "Hydrated Tool".into(),
+        short_name: None,
+        version: "1.0.0".into(),
+        namespace: "/custom/hydrated".into(),
+        entrypoint: "/bin/echo".into(),
+        protocol: "stdio-stream".into(),
+        capabilities: vec!["chat".into()],
+        icon: None,
+        config_schema: None,
+        permissions: vec![],
+        group: None,
+        source: None,
+    };
+    storage.save_module_with_status(&manifest, false).unwrap();
+    drop(storage);
+
+    // 2. Initialize ConfigStore with storage connected to the same SQLite database
+    let storage_repo =
+        std::sync::Arc::new(SqliteStorage::open(db_engine.clone(), &temp_dir).unwrap());
+    let config_file = temp_dir.join("gateway_config.json");
+    let env_file = temp_dir.join(".env");
+    let store = ConfigStore::new_with_limits_config_file_and_storage(
+        Config::default(),
+        env_file.clone(),
+        config_file.clone(),
+        100,
+        1024 * 1024,
+        storage_repo,
+    );
+
+    // Verify registry hydrated the module from SQLite as disabled
+    {
+        let reg = store.module_registry();
+        let guard = reg.read().unwrap();
+        let desc = guard
+            .get_module("hydrated-tool")
+            .expect("hydrated-tool should be loaded");
+        assert_eq!(desc.status, ModuleStatus::Disabled);
+    }
+
+    // 3. Toggle to enabled via storage and registry
+    store
+        .storage
+        .set_module_enabled("hydrated-tool", true)
+        .unwrap();
+    {
+        let reg = store.module_registry();
+        let mut guard = reg.write().unwrap();
+        guard
+            .set_module_status("hydrated-tool", ModuleStatus::Enabled)
+            .unwrap();
+    }
+
+    // 4. Restart simulation: create a new ConfigStore pointing to the same DB
+    let restart_storage = std::sync::Arc::new(SqliteStorage::open(db_engine, &temp_dir).unwrap());
+    let restart_store = ConfigStore::new_with_limits_config_file_and_storage(
+        Config::default(),
+        env_file,
+        config_file,
+        100,
+        1024 * 1024,
+        restart_storage,
+    );
+
+    {
+        let reg = restart_store.module_registry();
+        let guard = reg.read().unwrap();
+        let desc = guard
+            .get_module("hydrated-tool")
+            .expect("hydrated-tool should survive restart");
+        assert_eq!(
+            desc.status,
+            ModuleStatus::Enabled,
+            "Module should hydrate with enabled status after reboot"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_config_store_migrates_legacy_json_into_sqlite() {
+    let temp_dir = std::env::temp_dir().join(format!("test_store_mig_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let legacy_json = r#"{
+        "personal_modules": [
+            {
+                "id": "legacy-auto-mig",
+                "name": "Legacy Auto Migrated",
+                "version": "1.0.0",
+                "namespace": "/custom/legacy",
+                "entrypoint": "/bin/run.py",
+                "protocol": "stdio-stream",
+                "capabilities": ["chat"]
+            }
+        ],
+        "enabled_modules": {
+            "legacy-auto-mig": false
+        }
+    }"#;
+    let config_file = temp_dir.join("gateway_config.json");
+    fs::write(&config_file, legacy_json).unwrap();
+
+    let db_engine = DatabaseEngine::Sqlite(temp_dir.join("gateway.db"));
+    let storage = std::sync::Arc::new(SqliteStorage::open(db_engine, &temp_dir).unwrap());
+    let env_file = temp_dir.join(".env");
+
+    let store = ConfigStore::new_with_limits_config_file_and_storage(
+        Config::default(),
+        env_file,
+        config_file,
+        100,
+        1024 * 1024,
+        storage,
+    );
+
+    // Verify module was migrated into SQLite storage
+    let stored = store.storage.get_stored_modules().unwrap();
+    let mod_entry = stored
+        .iter()
+        .find(|m| m.manifest.id == "legacy-auto-mig")
+        .expect("legacy-auto-mig should be in SQLite modules");
+    assert!(!mod_entry.enabled);
+
+    // Verify registry hydrated it with disabled status
+    {
+        let reg = store.module_registry();
+        let guard = reg.read().unwrap();
+        let desc = guard
+            .get_module("legacy-auto-mig")
+            .expect("legacy-auto-mig should be registered");
+        assert_eq!(desc.status, ModuleStatus::Disabled);
+    }
 
     let _ = fs::remove_dir_all(&temp_dir);
 }

@@ -112,7 +112,10 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_update_jev_config(c, b, store)
             })
         }
-        "/api/v1/dashboard/modules/state" => {
+        "/api/v1/dashboard/modules/state"
+        | "/api/v1/dashboard/modules/toggle"
+        | "/api/v1/modules/toggle"
+        | "/api/v1/modules/state" => {
             handle_post(client, request, "dashboard modules/state", |c, b| {
                 crate::features::dashboard::handle_set_module_state(c, b, store)
             })

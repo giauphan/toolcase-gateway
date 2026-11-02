@@ -1,9 +1,9 @@
 //! Authoritative registry for built-in and dynamically installed modules.
 
 use super::manifest::{
-    builtin_ui_defaults, default_menu_position, default_module_config_schema,
-    normalize_module_config_schema, ModuleDescriptor, ModuleError, ModuleKind, ModuleStatus,
-    PersonalManifest, SubProviderDescriptor,
+    default_menu_position, default_module_config_schema, normalize_module_config_schema,
+    ModuleDescriptor, ModuleError, ModuleKind, ModuleStatus, PersonalManifest,
+    SubProviderDescriptor,
 };
 use super::validation::{
     validate_module_id, validate_module_namespace, validate_module_protocol, validate_sub_providers,
@@ -16,16 +16,6 @@ pub struct ModuleRegistry {
     pub(super) modules: HashMap<String, ModuleDescriptor>,
     pub(super) personal_manifests: HashMap<String, PersonalManifest>,
     pub(super) module_configs: HashMap<String, serde_json::Map<String, serde_json::Value>>,
-}
-
-fn sub_provider(id: &str, name: &str, subpath: &str, caps: &[&str]) -> SubProviderDescriptor {
-    SubProviderDescriptor {
-        id: id.to_string(),
-        name: name.to_string(),
-        subpath: subpath.to_string(),
-        capabilities: caps.iter().map(ToString::to_string).collect(),
-        status: ModuleStatus::Enabled,
-    }
 }
 
 fn build_sub_providers(
@@ -99,109 +89,13 @@ impl ModuleRegistry {
             module_configs: HashMap::new(),
         };
 
-        registry.register_builtin(
-            "omniroute",
-            "OmniRoute LLM Proxy",
-            "/ominroute",
-            vec![
-                "chat_completions".to_string(),
-                "models".to_string(),
-                "failover".to_string(),
-            ],
-            None,
-        );
-
-        let muse_providers = vec![
-            sub_provider(
-                "chat",
-                "Muse Chat Completions",
-                "/chat",
-                &["chat", "models"],
-            ),
-            sub_provider("image", "Muse Image Generation", "/image", &["image"]),
-            sub_provider("video", "Muse Video Generation", "/video", &["video"]),
-            sub_provider(
-                "threads",
-                "Muse Thread Memory & Cleanup Cron",
-                "/threads",
-                &["threads", "cron", "cleanup"],
-            ),
-        ];
-
-        registry.register_builtin(
-            "muse",
-            "Muse AI Provider",
-            "/muse-ai",
-            vec![
-                "chat".to_string(),
-                "models".to_string(),
-                "video".to_string(),
-                "image".to_string(),
-                "threads".to_string(),
-                "cron".to_string(),
-            ],
-            Some(muse_providers),
-        );
-
-        let jev_providers = vec![
-            sub_provider(
-                "decisions",
-                "Jev Decision Engine",
-                "/decisions",
-                &["decisions"],
-            ),
-            sub_provider("models", "Jev Model Sampler", "/models", &["models"]),
-        ];
-
-        registry.register_builtin(
-            "jev",
-            "Jev Decision Provider",
-            "/jev",
-            vec!["decisions".to_string(), "models".to_string()],
-            Some(jev_providers),
-        );
+        super::builtins::register_default_builtins(&mut registry);
 
         registry
     }
 
-    fn register_builtin(
-        &mut self,
-        id: &str,
-        name: &str,
-        namespace: &str,
-        capabilities: Vec<String>,
-        providers: Option<Vec<SubProviderDescriptor>>,
-    ) {
-        let clean_ns = namespace.trim_end_matches('/').to_string();
-        let (order, icon, desc, config_url, tab, schema) = builtin_ui_defaults(id, name, &clean_ns);
-        let short_name = match id {
-            "omniroute" => Some("OmniRoute".to_string()),
-            "muse" => Some("Muse AI".to_string()),
-            "jev" => Some("Jev Decision".to_string()),
-            _ => None,
-        };
-        self.modules.insert(
-            id.to_string(),
-            ModuleDescriptor {
-                id: id.to_string(),
-                name: name.to_string(),
-                short_name,
-                namespace: clean_ns,
-                kind: ModuleKind::BuiltIn,
-                status: ModuleStatus::Enabled,
-                capabilities,
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
-                providers,
-                menu_position: default_menu_position(),
-                menu_order: order,
-                icon: Some(icon),
-                description: Some(desc),
-                config_url: Some(config_url),
-                settings_tab: Some(tab),
-                config_schema: schema,
-                source: None,
-            },
-        );
+    pub(crate) fn insert_builtin_descriptor(&mut self, desc: ModuleDescriptor) {
+        self.modules.insert(desc.id.clone(), desc);
     }
 
     /// Validates and registers an out-of-tree personal module manifest.
@@ -435,6 +329,8 @@ impl ModuleRegistry {
 
         for desc in self.modules.values() {
             let ns_str = desc.namespace.as_str();
+            let tt_prefixes = ["/custom/tiktok", "/tiktok", ns_str];
+            let fb_prefixes = ["/custom/facebook", "/facebook", ns_str];
             let prefixes: &[&str] = if desc.id == "omniroute" {
                 &["/ominroute", "/omniroute"]
             } else if desc.id == "jev" {
@@ -442,7 +338,9 @@ impl ModuleRegistry {
             } else if desc.id == "muse" {
                 &["/muse-ai", "/v1/images/generations", "/video/v1/providers"]
             } else if desc.id == "tiktok-studio" || desc.id == "TikTok-Creator-Studio-Adapter" {
-                &["/custom/tiktok", "/tiktok"]
+                &tt_prefixes
+            } else if desc.id == "facebook-suite" || desc.id == "Facebook-Suite" {
+                &fb_prefixes
             } else {
                 std::slice::from_ref(&ns_str)
             };

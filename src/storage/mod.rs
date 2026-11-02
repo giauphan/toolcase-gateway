@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 pub mod crypto;
 pub mod sqlite;
+#[cfg(test)]
+mod sqlite_tests;
 
 pub use sqlite::SqliteStorage;
 
@@ -122,6 +124,13 @@ pub struct StoredAccount {
     pub is_active: bool,
 }
 
+/// Installed personal module record stored in repository, including its enabled/disabled status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredModule {
+    pub manifest: crate::gateway::modules::PersonalManifest,
+    pub enabled: bool,
+}
+
 /// Outward Port declaring abstract repository persistence operations.
 /// Domain services interact solely with this trait, decoupling all database engines.
 pub trait StorageRepository: Send + Sync {
@@ -137,14 +146,30 @@ pub trait StorageRepository: Send + Sync {
     /// Saves or updates the account collection atomically.
     fn save_accounts(&self, accounts: &[StoredAccount]) -> Result<(), StorageError>;
 
-    /// Retrieves all installed personal module manifests.
-    fn get_modules(&self) -> Result<Vec<crate::gateway::modules::PersonalManifest>, StorageError>;
+    /// Retrieves all installed personal module manifests with their enabled/disabled status.
+    fn get_stored_modules(&self) -> Result<Vec<StoredModule>, StorageError>;
 
-    /// Persists or updates a personal module manifest.
+    /// Retrieves all installed personal module manifests.
+    fn get_modules(&self) -> Result<Vec<crate::gateway::modules::PersonalManifest>, StorageError> {
+        self.get_stored_modules()
+            .map(|mods| mods.into_iter().map(|m| m.manifest).collect())
+    }
+
+    /// Persists or updates a personal module manifest. Preserves existing enabled status on update.
     fn save_module(
         &self,
         manifest: &crate::gateway::modules::PersonalManifest,
     ) -> Result<(), StorageError>;
+
+    /// Persists or updates a personal module manifest with an explicit enabled status.
+    fn save_module_with_status(
+        &self,
+        manifest: &crate::gateway::modules::PersonalManifest,
+        enabled: bool,
+    ) -> Result<(), StorageError>;
+
+    /// Updates the enabled/disabled status of an installed personal module by id.
+    fn set_module_enabled(&self, id: &str, enabled: bool) -> Result<(), StorageError>;
 
     /// Removes an installed personal module by id.
     fn remove_module(&self, id: &str) -> Result<(), StorageError>;
