@@ -96,4 +96,21 @@ Write the plan as requirements and outcomes, not as an implementation recipe:
   - Fail-closed route dispatching in `src/routes.rs`.
   - Subsystem facade encapsulation (`pub(crate) use` in `mod.rs`).
 
+## Module & Extension Governance: Top-Priority Rust Native
+
+- **Rust as Top Priority**: All feature modules, extensions, and personal modules for Toolcase Gateway MUST top-prioritize Rust as their primary implementation language.
+- **Zero-Python Runtime Policy**: Production modules must not rely on Python or interpreted runtimes. Modules must compile to a self-contained, native Rust binary (`target/release/<module_id>`) to eliminate interpreter startup overhead, GIL contention, packaging fragility, and external runtime dependencies.
+- **Module Packaging Standard**:
+  - Each module under `modules/<module-id>/` must be a self-contained Rust crate (`Cargo.toml`, `src/`, `tests/`).
+  - Provide a prebuilt release binary and an executable `run.sh` entrypoint launcher that executes the precompiled binary directly, falling back to `cargo run --release` only if the binary is absent.
+  - Manifest `module.json` defines namespace, protocol (`stdio-stream` or `http`), and capabilities.
+- **Clean Architecture & Sizing for Modules**:
+  - Adhere to DDD layer separation (domain entities, inbound/outbound ports, domain service, infrastructure adapters).
+  - Target **under 450 lines** per module file (hard ceiling: **800 lines** max).
+  - Maintain comprehensive unit and integration test coverage (`cargo test`) for all business rules, normalization, and failure modes.
+- **Zero-Async Host Boundary**:
+  - The gateway host remains synchronous (`std::net`, `std::thread`).
+  - Modules interact over standard Unix stdio streams or loopback sockets without leaking transport types into domain models.
+
+
 
