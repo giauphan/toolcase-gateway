@@ -109,7 +109,10 @@ pub(crate) fn build_fallback_interpreter_command(
         return None;
     }
 
-    let ext = resolved.extension().and_then(std::ffi::OsStr::to_str).unwrap_or("");
+    let ext = resolved
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("");
     let interpreter = if ext == "sh" {
         Some("/bin/sh")
     } else if ext == "py" {

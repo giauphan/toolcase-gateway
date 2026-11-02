@@ -418,8 +418,14 @@ impl StorageRepository for SqliteStorage {
     }
 
     fn remove_module(&self, id: &str) -> Result<(), StorageError> {
-        let conn = self.conn.lock().map_err(|e| StorageError::Database(e.to_string()))?;
-        let _ = conn.execute("INSERT OR REPLACE INTO uninstalled_modules (id) VALUES (?1)", params![id]);
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO uninstalled_modules (id) VALUES (?1)",
+            params![id],
+        );
         let affected = conn.execute("DELETE FROM modules WHERE id = ?1", params![id])?;
         if affected == 0 {
             Err(StorageError::NotFound(id.to_string()))
@@ -429,14 +435,20 @@ impl StorageRepository for SqliteStorage {
     }
 
     fn get_uninstalled_modules(&self) -> Result<Vec<String>, StorageError> {
-        let conn = self.conn.lock().map_err(|e| StorageError::Database(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
         let mut stmt = conn.prepare("SELECT id FROM uninstalled_modules")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
     fn clear_module_uninstalled(&self, id: &str) -> Result<(), StorageError> {
-        let conn = self.conn.lock().map_err(|e| StorageError::Database(e.to_string()))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
         let _ = conn.execute("DELETE FROM uninstalled_modules WHERE id = ?1", params![id]);
         Ok(())
     }
