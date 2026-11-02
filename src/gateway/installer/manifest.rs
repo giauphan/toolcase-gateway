@@ -318,3 +318,80 @@ pub(super) fn finalize_module_entrypoint(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_discover_manifest_in_root() {
+        let temp_dir = std::env::temp_dir().join(format!("test_mf_{}", uuid::Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let mpath = temp_dir.join("module.json");
+        let manifest_json = r#"{
+            "id": "my-mod",
+            "name": "My Mod",
+            "version": "1.0.0",
+            "namespace": "/custom/my-mod",
+            "entrypoint": "main.py",
+            "protocol": "stdio-stream",
+            "capabilities": []
+        }"#;
+        fs::write(&mpath, manifest_json).unwrap();
+
+        let options = InstallOptions::default();
+        let manifest = discover_or_synthesize_manifest(&temp_dir, &options).expect("discovered");
+        assert_eq!(manifest.id, "my-mod");
+        assert_eq!(manifest.name, "My Mod");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_discover_manifest_in_subdir() {
+        let temp_dir = std::env::temp_dir().join(format!("test_mf_sub_{}", uuid::Uuid::new_v4()));
+        let sub = temp_dir.join("modules").join("sub-mod");
+        let _ = fs::create_dir_all(&sub);
+        let mpath = sub.join("module.json");
+        let manifest_json = r#"{
+            "id": "sub-mod",
+            "name": "Sub Mod",
+            "version": "1.0.0",
+            "namespace": "/custom/sub-mod",
+            "entrypoint": "app.py",
+            "protocol": "stdio-stream",
+            "capabilities": []
+        }"#;
+        fs::write(&mpath, manifest_json).unwrap();
+
+        let options = InstallOptions {
+            id: Some("sub-mod".to_string()),
+            ..Default::default()
+        };
+        let manifest = discover_or_synthesize_manifest(&temp_dir, &options).expect("discovered");
+        assert_eq!(manifest.id, "sub-mod");
+        assert_eq!(manifest.name, "Sub Mod");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_synthesize_manifest_fallback() {
+        let temp_dir = std::env::temp_dir().join(format!("test_mf_syn_{}", uuid::Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let py = temp_dir.join("main.py");
+        fs::write(&py, "print('hi')").unwrap();
+
+        let options = InstallOptions {
+            id: Some("syn-mod".to_string()),
+            namespace: Some("/custom/syn".to_string()),
+            ..Default::default()
+        };
+        let manifest = discover_or_synthesize_manifest(&temp_dir, &options).expect("synthesized");
+        assert_eq!(manifest.id, "syn-mod");
+        assert_eq!(manifest.namespace, "/custom/syn");
+        assert_eq!(manifest.entrypoint, "run.sh");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}

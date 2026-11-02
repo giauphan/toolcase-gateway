@@ -320,3 +320,37 @@ pub(super) fn extract_source_url(source: &InstallSource) -> Option<String> {
         InstallSource::ZipBytes(_) => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_github_tree_subpath() {
+        let url = "https://github.com/org/repo/tree/main/modules/news";
+        assert_eq!(
+            extract_github_tree_subpath(url),
+            Some("modules/news".to_string())
+        );
+
+        let url_no_tree = "https://github.com/org/repo";
+        assert_eq!(extract_github_tree_subpath(url_no_tree), None);
+    }
+
+    #[test]
+    fn test_hoist_github_subpath_if_needed() {
+        let temp_dir = std::env::temp_dir().join(format!("test_hoist_{}", uuid::Uuid::new_v4()));
+        let sub = temp_dir.join("modules").join("news");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("main.py"), "print('news')").unwrap();
+
+        let source = InstallSource::GitHubUrl(
+            "https://github.com/org/repo/tree/main/modules/news".to_string(),
+        );
+        hoist_github_subpath_if_needed(&source, &temp_dir);
+
+        assert!(temp_dir.join("main.py").is_file());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}
