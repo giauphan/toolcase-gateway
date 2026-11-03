@@ -186,7 +186,11 @@ pub fn write_error(
 ) -> io::Result<()> {
     let escaped = escape_json_string(message);
     let body = format!("{{\"error\":{{\"message\":\"{escaped}\"}},\"message\":\"{escaped}\"}}");
-    write!(client, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{body}", body.len())
+    write!(
+        client,
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
 }
 
 /// Maps a numeric HTTP status code to its standard reason phrase.

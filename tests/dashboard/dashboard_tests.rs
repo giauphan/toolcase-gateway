@@ -96,8 +96,17 @@ fn dashboard_page_route_serves_html_and_rejects_post() {
     assert_eq!(head.status, 200);
     let content_type = header_value(&head.headers, "content-type").unwrap();
     assert!(content_type.contains("text/html"));
+    let csp = header_value(&head.headers, "content-security-policy").unwrap();
+    assert!(
+        csp.contains("style-src 'self' 'unsafe-inline'"),
+        "CSP must permit unsafe-inline for styles: {csp}"
+    );
     let body_str = String::from_utf8_lossy(&body);
     assert!(body_str.contains("Gateway Dashboard"));
+    assert!(
+        !body_str.contains("style="),
+        "Dashboard HTML must not declare inline style attributes"
+    );
 
     // GET /dashboard/ (with trailing slash)
     let (head_slash, body_slash) = request_gateway("GET", "/dashboard/", b"", &store);

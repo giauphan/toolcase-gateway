@@ -76,6 +76,19 @@ pub(super) fn ingest_github(
         }
     }
 
+    // Fall back to checking local sibling repository checkout if available (e.g. offline/airgap)
+    if let Some(local_repo) = super::resolve_local_directory_path(repo)
+        .or_else(|| super::resolve_local_directory_path(&format!("../{repo}")))
+    {
+        if local_repo.is_dir() {
+            copy_dir_all(&local_repo, target_dir).map_err(|e| {
+                ModuleError::InvalidManifest(format!("Failed to copy local repo: {e}"))
+            })?;
+            let _ = fs::remove_dir_all(target_dir.join(".git"));
+            return Ok(());
+        }
+    }
+
     Err(ModuleError::InvalidManifest(format!(
         "Failed to download module from GitHub: {last_err}"
     )))

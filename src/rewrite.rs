@@ -1,5 +1,20 @@
 pub fn escape_json_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(value.len() + 16);
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c < ' ' => {
+                use std::fmt::Write;
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 pub fn json_string_value(text: &str, key: &str) -> Option<String> {
@@ -87,4 +102,23 @@ pub fn rewrite_tool_names(body: &[u8], request_body: &[u8]) -> Vec<u8> {
         }
     }
     output.into_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_json_string_multiline_and_control_chars() {
+        let input = "Hello\nWorld\r\n\tWith \"quotes\" and \\backslash\\ and \u{0000}null";
+        let escaped = escape_json_string(input);
+        let wrapped = format!("\"{escaped}\"");
+        let parsed: Result<String, _> = serde_json::from_str(&wrapped);
+        assert!(
+            parsed.is_ok(),
+            "Escaped string must parse validly into JSON string: {:?}",
+            parsed.err()
+        );
+        assert_eq!(parsed.unwrap(), input);
+    }
 }

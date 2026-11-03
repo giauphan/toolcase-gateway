@@ -63,12 +63,32 @@ pub fn resolve_local_directory_path(raw: &str) -> Option<PathBuf> {
         return Some(direct);
     }
 
-    // Try relative to the parent of the state directory (e.g. workspace root when state is in .gw_state)
+    // Try relative to the parent of the state directory or sibling checkouts
     let state_dir = get_state_dir();
     if let Some(parent) = state_dir.parent() {
         let candidate = parent.join(trimmed);
         if candidate.is_dir() {
             return Some(candidate);
+        }
+        if let Some(workspace_parent) = parent.parent() {
+            let candidate = workspace_parent.join(trimmed);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // Try relative to current working directory or sibling checkouts
+    if let Ok(cwd) = std::env::current_dir() {
+        let candidate = cwd.join(trimmed);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if let Some(parent) = cwd.parent() {
+            let candidate = parent.join(trimmed);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
         }
     }
 

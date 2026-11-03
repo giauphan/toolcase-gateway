@@ -345,8 +345,34 @@ fn test_dashboard_upgrade_module_with_nonexistent_local_dir() {
         resp_str
     );
 
+    // Verify valid JSON parseability and CORS header on error response
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&body).expect("Error response must be valid JSON");
+    assert!(parsed["message"].is_string());
+    assert_eq!(
+        toolcase_gateway::http::header_value(&head.headers, "access-control-allow-origin"),
+        Some("*")
+    );
+
     let _ = fs::remove_dir_all(&mod_dir);
     let _ = fs::remove_file(&tmp_bin);
     let _ = fs::remove_file(&tmp_env);
     let _ = fs::remove_file(&store.config_file);
+}
+
+#[test]
+fn test_write_error_multiline_json_integrity() {
+    let msg_with_newlines =
+        "Error on line 1: syntax error\n\tDetailed trace:\r\n  \"foo\": \"bar\"";
+    let escaped = toolcase_gateway::rewrite::escape_json_string(msg_with_newlines);
+    let raw_json = format!("{{\"error\":{{\"message\":\"{escaped}\"}},\"message\":\"{escaped}\"}}");
+
+    let parsed: Result<serde_json::Value, _> = serde_json::from_str(&raw_json);
+    assert!(
+        parsed.is_ok(),
+        "Raw JSON must parse without control character errors: {:?}",
+        parsed.err()
+    );
+    let json_val = parsed.unwrap();
+    assert_eq!(json_val["message"].as_str().unwrap(), msg_with_newlines);
 }

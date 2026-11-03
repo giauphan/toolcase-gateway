@@ -502,7 +502,7 @@
       const action = pendingModuleAction;
       pendingModuleAction = null;
       const upgradeInputs = byId("module-action-upgrade-inputs");
-      if (upgradeInputs) upgradeInputs.style.display = "none";
+      if (upgradeInputs) upgradeInputs.classList.add("u-hidden");
       if (moduleActionDialog.returnValue !== "confirm" || !action) return;
       if (action.kind === "remove") {
         window.removeModule(action.id);
@@ -543,7 +543,7 @@
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, enable: enable, kind: 'state' };
     const upgradeInputs = byId("module-action-upgrade-inputs");
-    if (upgradeInputs) upgradeInputs.style.display = "none";
+    if (upgradeInputs) upgradeInputs.classList.add("u-hidden");
     moduleActionDescription.textContent = enable
       ? 'Enable this module? Its registered routes will accept requests again.'
       : 'Disable this module? Its registered routes will fail closed with HTTP 503 until it is re-enabled.';
@@ -556,7 +556,7 @@
     if (!id || !moduleActionDialog) return;
     pendingModuleAction = { id: id, kind: 'remove' };
     const upgradeInputs = byId("module-action-upgrade-inputs");
-    if (upgradeInputs) upgradeInputs.style.display = "none";
+    if (upgradeInputs) upgradeInputs.classList.add("u-hidden");
     moduleActionDescription.textContent = 'Remove this personal module? This removes its installed files and cannot be undone.';
     moduleActionConfirm.textContent = 'Remove module';
     moduleActionDialog.returnValue = '';
@@ -577,7 +577,7 @@
     const sourceField = byId("module-action-source");
     const branchField = byId("module-action-branch");
     if (upgradeInputs) {
-      upgradeInputs.style.display = "block";
+      upgradeInputs.classList.remove("u-hidden");
       if (sourceField) sourceField.value = knownSource;
       if (branchField) branchField.value = "";
     }

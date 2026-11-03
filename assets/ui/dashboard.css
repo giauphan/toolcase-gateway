@@ -917,12 +917,21 @@ tbody tr:hover {
   display: block;
 }
 
-body .is-hidden {
-  display: none;
+body .is-hidden,
+.u-hidden {
+  display: none !important;
 }
 
 body .is-visible {
   display: block;
+}
+
+.mt-8 {
+  margin-top: 8px !important;
+}
+
+.mt-12 {
+  margin-top: 12px !important;
 }
 
 /* DIALOGS */

@@ -1,8 +1,10 @@
 //! Dashboard personal module management handlers and route dispatchers.
 
+mod source;
 mod synthesis;
 mod testing;
 
+use source::resolve_upgrade_source_candidate;
 pub use synthesis::{generate_module_adapter_script, parse_or_synthesize_manifest, InstallPayload};
 pub use testing::handle_test_personal_module;
 
@@ -382,52 +384,4 @@ pub fn handle_upgrade_personal_module(
     )?;
     client.write_all(&resp_bytes)?;
     client.flush()
-}
-
-fn resolve_candidate_source(source: Option<&str>) -> Option<String> {
-    let raw = source?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    if raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("git@") {
-        return Some(raw.to_string());
-    }
-    crate::gateway::installer::resolve_local_directory_path(raw)
-        .map(|p| p.to_string_lossy().to_string())
-}
-
-fn resolve_upgrade_source_candidate(
-    payload_source: Option<&str>,
-    existing_desc: &crate::gateway::modules::ModuleDescriptor,
-    resolved_id: &str,
-) -> Option<String> {
-    if let Some(explicit) = payload_source.filter(|s| !s.trim().is_empty()) {
-        let trimmed = explicit.trim();
-        if trimmed.starts_with("http://")
-            || trimmed.starts_with("https://")
-            || trimmed.starts_with("git@")
-        {
-            return Some(trimmed.to_string());
-        }
-        return Some(
-            crate::gateway::installer::resolve_local_directory_path(trimmed)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| trimmed.to_string()),
-        );
-    }
-
-    resolve_candidate_source(existing_desc.source.as_deref())
-        .or_else(|| {
-            crate::gateway::modules::get_system_module_catalog()
-                .into_iter()
-                .find(|c| c.id == resolved_id || c.namespace == existing_desc.namespace)
-                .and_then(|c| resolve_candidate_source(c.source.as_deref()))
-        })
-        .or_else(|| {
-            ["addons", "modules"].into_iter().find_map(|dir_name| {
-                let rel = format!("{dir_name}/{resolved_id}");
-                crate::gateway::installer::resolve_local_directory_path(&rel)
-                    .map(|p| p.to_string_lossy().to_string())
-            })
-        })
 }
