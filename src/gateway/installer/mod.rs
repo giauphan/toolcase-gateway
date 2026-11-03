@@ -45,6 +45,47 @@ pub fn get_state_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(".gw_state"))
 }
 
+/// Resolves a local directory path across working directory, gateway state directory root,
+/// and executable ancestor boundaries.
+pub fn resolve_local_directory_path(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("git@")
+    {
+        return None;
+    }
+
+    let direct = PathBuf::from(trimmed);
+    if direct.is_dir() {
+        return Some(direct);
+    }
+
+    // Try relative to the parent of the state directory (e.g. workspace root when state is in .gw_state)
+    let state_dir = get_state_dir();
+    if let Some(parent) = state_dir.parent() {
+        let candidate = parent.join(trimmed);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+
+    // Try relative to ancestor directories of the current executable
+    if let Ok(exe) = std::env::current_exe() {
+        let mut curr = exe.parent();
+        while let Some(parent) = curr {
+            let candidate = parent.join(trimmed);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+            curr = parent.parent();
+        }
+    }
+
+    None
+}
+
 /// Auto-discovers self-contained modules from directories (modular plugin paradigm).
 pub fn scan_and_register_modules(
     registry: &mut crate::gateway::modules::ModuleRegistry,
@@ -241,6 +282,24 @@ mod tests {
             InstallSource::ZipUrl(u) => assert!(u.contains("archive.zip")),
             _ => panic!("Expected ZipUrl"),
         }
+    }
+
+    #[test]
+    fn test_resolve_local_directory_path() {
+        assert_eq!(
+            resolve_local_directory_path("https://github.com/foo/bar"),
+            None
+        );
+        assert_eq!(resolve_local_directory_path(""), None);
+        assert_eq!(resolve_local_directory_path("nonexistent_dir_12345"), None);
+
+        let src_dir = std::env::temp_dir().join(format!("test_resolve_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&src_dir).unwrap();
+        assert_eq!(
+            resolve_local_directory_path(&src_dir.to_string_lossy()),
+            Some(src_dir.clone())
+        );
+        let _ = fs::remove_dir_all(&src_dir);
     }
 
     #[test]

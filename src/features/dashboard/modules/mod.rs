@@ -384,32 +384,50 @@ pub fn handle_upgrade_personal_module(
     client.flush()
 }
 
+fn resolve_candidate_source(source: Option<&str>) -> Option<String> {
+    let raw = source?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("git@") {
+        return Some(raw.to_string());
+    }
+    crate::gateway::installer::resolve_local_directory_path(raw)
+        .map(|p| p.to_string_lossy().to_string())
+}
+
 fn resolve_upgrade_source_candidate(
     payload_source: Option<&str>,
     existing_desc: &crate::gateway::modules::ModuleDescriptor,
     resolved_id: &str,
 ) -> Option<String> {
-    payload_source
-        .filter(|s| !s.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| existing_desc.source.clone())
+    if let Some(explicit) = payload_source.filter(|s| !s.trim().is_empty()) {
+        let trimmed = explicit.trim();
+        if trimmed.starts_with("http://")
+            || trimmed.starts_with("https://")
+            || trimmed.starts_with("git@")
+        {
+            return Some(trimmed.to_string());
+        }
+        return Some(
+            crate::gateway::installer::resolve_local_directory_path(trimmed)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| trimmed.to_string()),
+        );
+    }
+
+    resolve_candidate_source(existing_desc.source.as_deref())
         .or_else(|| {
             crate::gateway::modules::get_system_module_catalog()
                 .into_iter()
                 .find(|c| c.id == resolved_id || c.namespace == existing_desc.namespace)
-                .and_then(|c| c.source)
+                .and_then(|c| resolve_candidate_source(c.source.as_deref()))
         })
         .or_else(|| {
-            let addons = std::path::Path::new("addons").join(resolved_id);
-            if addons.is_dir() {
-                Some(addons.to_string_lossy().to_string())
-            } else {
-                let modules = std::path::Path::new("modules").join(resolved_id);
-                if modules.is_dir() {
-                    Some(modules.to_string_lossy().to_string())
-                } else {
-                    None
-                }
-            }
+            ["addons", "modules"].into_iter().find_map(|dir_name| {
+                let rel = format!("{dir_name}/{resolved_id}");
+                crate::gateway::installer::resolve_local_directory_path(&rel)
+                    .map(|p| p.to_string_lossy().to_string())
+            })
         })
 }

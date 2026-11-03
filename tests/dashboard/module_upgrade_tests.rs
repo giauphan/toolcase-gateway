@@ -264,9 +264,10 @@ fn test_dashboard_upgrade_module_resolves_catalog_and_addon_source() {
         let resp_str = String::from_utf8_lossy(&body);
         assert_eq!(head.status, 400, "Expected 400 bad request: {}", resp_str);
         assert!(
-            resp_str.contains("Module upgrade failed")
-                && (resp_str.contains("Failed to copy directory")
-                    || resp_str.contains("is not currently installed")),
+            resp_str.contains("has no configured source repository")
+                || resp_str.contains("Local module source directory")
+                || resp_str.contains("Failed to copy directory")
+                || resp_str.contains("is not currently installed"),
             "Expected failure due to missing source directory or installation in CI, got: {}",
             resp_str
         );
@@ -289,6 +290,62 @@ fn test_dashboard_upgrade_module_resolves_catalog_and_addon_source() {
         let _ = fs::remove_dir_all(&installed_dir);
     }
 
+    let _ = fs::remove_file(&tmp_bin);
+    let _ = fs::remove_file(&tmp_env);
+    let _ = fs::remove_file(&store.config_file);
+}
+
+#[test]
+fn test_dashboard_upgrade_module_with_nonexistent_local_dir() {
+    let tmp_env =
+        std::env::temp_dir().join(format!("test_nonexistent_upg_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    let tmp_bin = std::env::temp_dir().join(format!("test_entry_{}.sh", uuid::Uuid::new_v4()));
+    fs::write(&tmp_bin, "#!/bin/sh\nexit 0\n").unwrap();
+
+    let mod_dir = toolcase_gateway::gateway::installer::get_state_dir()
+        .join("modules")
+        .join("dummy-test-mod");
+    fs::create_dir_all(&mod_dir).unwrap();
+    fs::write(mod_dir.join("module.json"), "{}").unwrap();
+
+    {
+        let reg = store.module_registry();
+        let mut guard = reg.write().unwrap();
+        let manifest = toolcase_gateway::gateway::modules::PersonalManifest {
+            id: "dummy-test-mod".to_string(),
+            name: "Dummy Test Module".to_string(),
+            short_name: None,
+            version: "1.0.0".to_string(),
+            namespace: "/custom/dummy".to_string(),
+            entrypoint: tmp_bin.to_string_lossy().to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec!["test".to_string()],
+            icon: None,
+            config_schema: None,
+            permissions: Vec::new(),
+            group: None,
+            source: None,
+        };
+        guard.register_personal_module(manifest).unwrap();
+    }
+
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/upgrade",
+        br#"{"id": "dummy-test-mod", "source": "addons/nonexistent-dummy-dir-xyz"}"#,
+        &store,
+    );
+    let resp_str = String::from_utf8_lossy(&body);
+    assert_eq!(head.status, 400, "Expected 400 bad request: {}", resp_str);
+    assert!(
+        resp_str.contains("does not exist or is not a directory"),
+        "Expected clean not-found directory error, got: {}",
+        resp_str
+    );
+
+    let _ = fs::remove_dir_all(&mod_dir);
     let _ = fs::remove_file(&tmp_bin);
     let _ = fs::remove_file(&tmp_env);
     let _ = fs::remove_file(&store.config_file);

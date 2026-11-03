@@ -232,8 +232,18 @@ fn dispatch_source_ingest(
         InstallSource::ZipBytes(bytes) => extract_zip(bytes, staging_dir)
             .map(|_| ())
             .map_err(|e| ModuleError::InvalidManifest(e.to_string())),
-        InstallSource::LocalDir(dir) => copy_dir_all(dir, staging_dir)
-            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to copy directory: {e}"))),
+        InstallSource::LocalDir(dir) => {
+            let target_dir = super::resolve_local_directory_path(&dir.to_string_lossy())
+                .unwrap_or_else(|| dir.clone());
+            if !target_dir.is_dir() {
+                return Err(ModuleError::NotFound(format!(
+                    "Local module source directory '{}' does not exist or is not a directory",
+                    dir.display()
+                )));
+            }
+            copy_dir_all(&target_dir, staging_dir)
+                .map_err(|e| ModuleError::InvalidManifest(format!("Failed to copy directory: {e}")))
+        }
     }
 }
 
