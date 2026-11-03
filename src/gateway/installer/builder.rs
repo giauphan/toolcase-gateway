@@ -93,34 +93,66 @@ pub fn is_binary_fresh(dir: &Path, binary_path: &Path) -> bool {
     true
 }
 
+/// Resolves a path to an absolute path so child processes with `current_dir` do not double-prefix relative paths.
+fn resolve_absolute_path(path: &Path) -> PathBuf {
+    if let Ok(canon) = fs::canonicalize(path) {
+        return canon;
+    }
+    if path.is_relative() {
+        if let Ok(cwd) = std::env::current_dir() {
+            return cwd.join(path);
+        }
+    }
+    path.to_path_buf()
+}
+
+fn ensure_executable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(path, perms);
+        }
+    }
+}
+
 /// Compiles a Rust module in staging if `Cargo.toml` is present and binary needs building.
 pub fn build_rust_module_if_present(
     staging_dir: &Path,
     module_id: &str,
 ) -> Result<Option<PathBuf>, ModuleError> {
-    let cargo_toml = staging_dir.join("Cargo.toml");
+    let abs_staging = resolve_absolute_path(staging_dir);
+    let cargo_toml = abs_staging.join("Cargo.toml");
     if !cargo_toml.is_file() {
         return Ok(None);
     }
 
     let bin_name = detect_crate_binary_name(&cargo_toml, module_id);
-    let target_bin = staging_dir.join(&bin_name);
+    let target_bin = abs_staging.join(&bin_name);
+    let release_subdir_bin = abs_staging.join("target").join("release").join(&bin_name);
 
-    if is_binary_fresh(staging_dir, &target_bin) {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = fs::metadata(&target_bin) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o755);
-                let _ = fs::set_permissions(&target_bin, perms);
-            }
-        }
+    if is_binary_fresh(&abs_staging, &target_bin) {
+        ensure_executable(&target_bin);
+        return Ok(Some(target_bin));
+    }
+
+    if is_binary_fresh(&abs_staging, &release_subdir_bin) {
+        let _ = fs::copy(&release_subdir_bin, &target_bin);
+        ensure_executable(&release_subdir_bin);
+        ensure_executable(&target_bin);
         return Ok(Some(target_bin));
     }
 
     if !is_cargo_available() {
         if target_bin.is_file() {
+            ensure_executable(&target_bin);
+            return Ok(Some(target_bin));
+        }
+        if release_subdir_bin.is_file() {
+            let _ = fs::copy(&release_subdir_bin, &target_bin);
+            ensure_executable(&target_bin);
             return Ok(Some(target_bin));
         }
         return Err(ModuleError::InvalidManifest(format!(
@@ -128,17 +160,15 @@ pub fn build_rust_module_if_present(
         )));
     }
 
-    // Run cargo build --release
+    // Run cargo build --release using absolute paths so current_dir does not double-prefix relative staging paths
+    let module_target_dir = abs_staging.join("target");
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--release")
         .arg("--manifest-path")
         .arg(&cargo_toml)
-        .current_dir(staging_dir);
-
-    // Ensure the module builds into its own isolated staging target directory
-    let module_target_dir = staging_dir.join("target");
-    cmd.env("CARGO_TARGET_DIR", &module_target_dir);
+        .current_dir(&abs_staging)
+        .env("CARGO_TARGET_DIR", &module_target_dir);
 
     let output = cmd.output().map_err(|e| {
         ModuleError::InvalidManifest(format!("Failed to execute 'cargo build': {e}"))
@@ -154,25 +184,16 @@ pub fn build_rust_module_if_present(
     // Locate compiled binary in target/release/<bin_name> or fallback
     let release_bin = module_target_dir.join("release").join(&bin_name);
     let final_bin = if release_bin.is_file() {
-        let dest = staging_dir.join(&bin_name);
-        if release_bin != dest {
-            let _ = fs::copy(&release_bin, &dest);
+        if release_bin != target_bin {
+            let _ = fs::copy(&release_bin, &target_bin);
         }
-        dest
+        ensure_executable(&release_bin);
+        target_bin
     } else {
         target_bin
     };
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(&final_bin) {
-            let mut perms = meta.permissions();
-            perms.set_mode(0o755);
-            let _ = fs::set_permissions(&final_bin, perms);
-        }
-    }
-
+    ensure_executable(&final_bin);
     Ok(Some(final_bin))
 }
 
@@ -231,5 +252,36 @@ version = "0.1.0"
         let bin = temp.join("nonexistent");
         assert!(!is_binary_fresh(&temp, &bin));
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_build_rust_module_with_relative_staging_path() {
+        let abs_base =
+            std::env::temp_dir().join(format!("test_rel_stage_{}", uuid::Uuid::new_v4()));
+        let src_dir = abs_base.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(
+            abs_base.join("Cargo.toml"),
+            "[package]\nname = \"mini-rel-mod\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}\n").unwrap();
+
+        // Construct a relative path from current_dir to abs_base (e.g. "../../../../tmp/test_rel_stage_...")
+        let cwd = std::env::current_dir().unwrap();
+        let depth = cwd.components().count();
+        let mut rel_path = PathBuf::new();
+        for _ in 0..depth.saturating_sub(1) {
+            rel_path.push("..");
+        }
+        rel_path.push(abs_base.strip_prefix("/").unwrap_or(&abs_base));
+        assert!(rel_path.is_relative());
+
+        let built = build_rust_module_if_present(&rel_path, "mini-rel-mod")
+            .expect("relative staging path build should succeed")
+            .expect("binary path returned");
+        assert!(built.is_file());
+
+        let _ = fs::remove_dir_all(&abs_base);
     }
 }
