@@ -4,6 +4,7 @@
 //! zip archives, or local directories with automated manifest discovery,
 //! conversion, path sanitization, and execution wrapping.
 
+pub mod builder;
 mod ingest;
 mod manifest;
 mod upgrade;
@@ -215,6 +216,12 @@ pub fn install_module(
             let _ = fs::remove_dir_all(&staging_dir);
             return Err(e);
         }
+    }
+
+    // Compile Rust module in staging if Cargo.toml is present
+    if let Err(e) = builder::build_rust_module_if_present(&staging_dir, &manifest.id) {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(e);
     }
 
     // Determine final module directory

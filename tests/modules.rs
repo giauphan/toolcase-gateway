@@ -6,3 +6,6 @@ mod registry_storage_tests;
 
 #[path = "modules/dashboard_catalog_tests.rs"]
 mod dashboard_catalog_tests;
+
+#[path = "modules/builder_tests.rs"]
+mod builder_tests;

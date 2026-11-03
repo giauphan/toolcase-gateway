@@ -213,8 +213,22 @@ fn detect_or_generate_entrypoint(dir: &Path) -> Result<String, ModuleError> {
         }
     }
 
+    let cargo_toml = dir.join("Cargo.toml");
+    if cargo_toml.is_file() {
+        let wrapper = dir.join("run.sh");
+        let bin_name = super::builder::detect_crate_binary_name(&cargo_toml, "module");
+        let content = format!(
+            "#!/bin/sh\nSCRIPT_DIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\nif [ -x \"$SCRIPT_DIR/{bin_name}\" ]; then\n    exec \"$SCRIPT_DIR/{bin_name}\" \"$@\"\nfi\nif [ -x \"$SCRIPT_DIR/target/release/{bin_name}\" ]; then\n    exec \"$SCRIPT_DIR/target/release/{bin_name}\" \"$@\"\nfi\nif command -v cargo >/dev/null 2>&1; then\n    exec cargo run --release --manifest-path \"$SCRIPT_DIR/Cargo.toml\" -- \"$@\"\nfi\necho '{{\"error\":\"Native binary {bin_name} not found and cargo is not installed\"}}' >&2\nexit 1\n"
+        );
+        let mut f = File::create(&wrapper)
+            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to create wrapper: {e}")))?;
+        f.write_all(content.as_bytes())
+            .map_err(|e| ModuleError::InvalidManifest(format!("Failed to write wrapper: {e}")))?;
+        return Ok("run.sh".to_string());
+    }
+
     Err(ModuleError::InvalidManifest(
-        "No manifest or recognizable entrypoint found (looked for module.json, run.sh, main.py, index.js)".to_string(),
+        "No manifest or recognizable entrypoint found (looked for module.json, run.sh, Cargo.toml, main.py, index.js)".to_string(),
     ))
 }
 

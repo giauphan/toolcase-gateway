@@ -91,6 +91,12 @@ pub fn upgrade_module(
         }
     }
 
+    // Compile Rust module in staging if Cargo.toml is present
+    if let Err(e) = super::builder::build_rust_module_if_present(&staging_dir, &manifest.id) {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(e);
+    }
+
     // Validate entrypoint and protocol in staging prior to atomic swap without corrupting manifest entrypoint
     let mut staged_manifest = manifest.clone();
     if let Err(e) = finalize_module_entrypoint(&mut staged_manifest, &staging_dir) {
