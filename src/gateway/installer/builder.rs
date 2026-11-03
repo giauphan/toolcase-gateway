@@ -17,80 +17,68 @@ pub fn is_cargo_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Discovers the expected binary name from Cargo.toml or falls back to `default_id`.
-pub fn detect_crate_binary_name(cargo_toml_path: &Path, default_id: &str) -> String {
-    if let Ok(content) = fs::read_to_string(cargo_toml_path) {
-        // Look for [[bin]] name = "..."
-        if let Some(pos) = content.find("[[bin]]") {
-            let rest = &content[pos..];
-            for line in rest.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("name") {
-                    if let Some((_, val)) = trimmed.split_once('=') {
-                        let name = val.trim().trim_matches('"').trim_matches('\'').trim();
-                        if !name.is_empty() {
-                            return name.to_string();
-                        }
-                    }
-                }
-                if trimmed.starts_with("[[") && !trimmed.starts_with("[[bin]]") {
-                    break;
-                }
-            }
+fn parse_toml_name_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("name") {
+        return None;
+    }
+    let (_, val) = trimmed.split_once('=')?;
+    let name = val.trim().trim_matches('"').trim_matches('\'').trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+fn extract_bin_section_name(content: &str) -> Option<String> {
+    let pos = content.find("[[bin]]")?;
+    for line in content[pos..].lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("[[") && !trimmed.starts_with("[[bin]]") {
+            break;
         }
-        // Look for [package] name = "..."
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("name") {
-                if let Some((_, val)) = trimmed.split_once('=') {
-                    let name = val.trim().trim_matches('"').trim_matches('\'').trim();
-                    if !name.is_empty() {
-                        return name.to_string();
-                    }
-                }
-            }
+        if let Some(name) = parse_toml_name_line(trimmed) {
+            return Some(name);
         }
     }
-    default_id.to_string()
+    None
+}
+
+fn extract_package_name(content: &str) -> Option<String> {
+    content.lines().find_map(parse_toml_name_line)
+}
+
+/// Discovers the expected binary name from Cargo.toml or falls back to `default_id`.
+pub fn detect_crate_binary_name(cargo_toml_path: &Path, default_id: &str) -> String {
+    let Ok(content) = fs::read_to_string(cargo_toml_path) else {
+        return default_id.to_string();
+    };
+    extract_bin_section_name(&content)
+        .or_else(|| extract_package_name(&content))
+        .unwrap_or_else(|| default_id.to_string())
+}
+
+fn is_file_newer_than(path: &Path, reference: std::time::SystemTime) -> bool {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .is_ok_and(|mtime| mtime > reference)
+}
+
+fn is_dir_newer_than(dir: &Path, reference: std::time::SystemTime) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    entries
+        .flatten()
+        .any(|entry| is_file_newer_than(&entry.path(), reference))
 }
 
 /// Checks if the precompiled binary exists and is newer than all Rust source files and Cargo.toml.
 pub fn is_binary_fresh(dir: &Path, binary_path: &Path) -> bool {
-    if !binary_path.is_file() {
-        return false;
-    }
-    let Ok(bin_meta) = fs::metadata(binary_path) else {
+    let Ok(bin_mtime) = fs::metadata(binary_path).and_then(|m| m.modified()) else {
         return false;
     };
-    let Ok(bin_mtime) = bin_meta.modified() else {
+    if is_file_newer_than(&dir.join("Cargo.toml"), bin_mtime) {
         return false;
-    };
-
-    let cargo_toml = dir.join("Cargo.toml");
-    if let Ok(meta) = fs::metadata(&cargo_toml) {
-        if let Ok(mtime) = meta.modified() {
-            if mtime > bin_mtime {
-                return false;
-            }
-        }
     }
-
-    let src_dir = dir.join("src");
-    if src_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&src_dir) {
-            for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if let Ok(mtime) = meta.modified() {
-                        if mtime > bin_mtime {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    true
+    !is_dir_newer_than(&dir.join("src"), bin_mtime)
 }
 
 /// Resolves a path to an absolute path so child processes with `current_dir` do not double-prefix relative paths.
@@ -110,10 +98,8 @@ fn ensure_executable(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
-            let mut perms = meta.permissions();
-            perms.set_mode(0o755);
-            let _ = fs::set_permissions(path, perms);
+        if path.is_file() {
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
         }
     }
 }
@@ -281,6 +267,12 @@ version = "0.1.0"
             .expect("relative staging path build should succeed")
             .expect("binary path returned");
         assert!(built.is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = fs::metadata(&built).unwrap();
+            assert_eq!(meta.permissions().mode() & 0o777, 0o700);
+        }
 
         let _ = fs::remove_dir_all(&abs_base);
     }
