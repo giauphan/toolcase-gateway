@@ -8,6 +8,8 @@ pub mod manifest;
 pub mod personal;
 pub mod registry;
 #[cfg(test)]
+mod registry_tests;
+#[cfg(test)]
 mod tests;
 pub mod ui_config;
 pub mod validation;
