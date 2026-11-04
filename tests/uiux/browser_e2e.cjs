@@ -223,6 +223,72 @@ async function dashboardResponsiveMobile(browser) {
   await context.close();
 }
 
+async function dashboardModuleUpgradeQueueWorkflow(browser) {
+  const { context, page, pageErrors } = await newPage(browser, { width: 1440, height: 900 });
+
+  let upgradeFulfill;
+  const upgradeGate = new Promise((resolve) => { upgradeFulfill = resolve; });
+
+  await page.route("**/api/v1/dashboard/modules/upgrade", async (route) => {
+    await upgradeGate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        id: "mock-queue-module",
+        version: "3.0.0",
+        message: "Module 'mock-queue-module' upgraded successfully to version 3.0.0."
+      }),
+    });
+  });
+
+  await page.goto(`${baseUrl}/dashboard#modules-section`, { waitUntil: "domcontentloaded" });
+  await page.locator("#view-modules").waitFor({ state: "visible" });
+
+  // 1. Enqueue upgrade via client queue API without blocking or waiting on the page
+  await page.evaluate(() => {
+    window.upgradeModule("mock-queue-module", "https://github.com/mock/repo.git", "main");
+  });
+
+  // 2. Verify non-blocking enqueue: topbar queue pill shows upgrading
+  await page.locator("#upgrade-queue-pill").waitFor({ state: "visible" });
+  assert.match(await page.locator("#upgrade-queue-pill").textContent(), /mock-queue-module/i);
+
+  // 3. User navigates to a DIFFERENT page (Overview) while upgrade is in progress
+  await page.locator('.side-nav [data-go="overview"]').click();
+  await page.locator("#view-overview").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#view-modules").isVisible(), false);
+
+  // 4. Verify queue pill remains active and visible on the different page
+  assert.equal(await page.locator("#upgrade-queue-pill").isVisible(), true);
+
+  // 5. Upgrade completes successfully while user is on the different page -> notify user!
+  upgradeFulfill();
+
+  // 6. Verify toast notification appears on this different page
+  await page.locator("#toast.toast-success").waitFor({ state: "visible" });
+  const toastText = await page.locator("#toast").textContent();
+  assert.match(toastText, /mock-queue-module.*upgraded successfully.*3\.0\.0/i);
+
+  // 7. Verify queue pill and dialog reflect completion
+  await page.locator("#upgrade-queue-pill").click();
+  await page.locator("#upgrade-queue-dialog").waitFor({ state: "visible" });
+  const queueListText = await page.locator("#upgrade-queue-list").textContent();
+  assert.match(queueListText, /mock-queue-module/);
+  assert.match(queueListText, /v3\.0\.0/);
+
+  // 8. Close queue dialog
+  await page.locator('#upgrade-queue-dialog button[value="close"]').click();
+
+  // 9. Navigate back to modules page and verify layout
+  await page.locator('.side-nav [data-go="modules"]').click();
+  await page.locator("#view-modules").waitFor({ state: "visible" });
+
+  assert.deepEqual(pageErrors, []);
+  await context.close();
+}
+
 (async () => {
   const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH || "/home/ubuntu/.cache/ms-playwright/chromium-1228/chrome-linux/chrome";
   const browser = await chromium.launch({
@@ -240,6 +306,8 @@ async function dashboardResponsiveMobile(browser) {
     await harFailure(browser);
     console.log("Running dashboard overview and navigation tests...");
     await dashboardOverviewAndNavigation(browser);
+    console.log("Running module upgrade queue and notification across different pages tests...");
+    await dashboardModuleUpgradeQueueWorkflow(browser);
     console.log("Running mobile responsive and drawer tests...");
     await dashboardResponsiveMobile(browser);
     console.log("ALL browser workflow and UI/UX checks passed successfully!");

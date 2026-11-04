@@ -89,6 +89,11 @@ pub fn dispatch_dashboard_route(
         "/api/v1/dashboard/overview" => handle_get(client, request, "dashboard overview", |c| {
             crate::features::dashboard::handle_dashboard_overview(c, store)
         }),
+        "/api/v1/dashboard/modules/upgrade/queue" | "/api/v1/dashboard/modules/upgrade/status" => {
+            handle_get(client, request, "dashboard modules/upgrade/queue", |c| {
+                crate::features::dashboard::handle_get_upgrade_queue_status(c)
+            })
+        }
         "/api/v1/dashboard/accounts" => {
             handle_post(client, request, "dashboard accounts", |c, b| {
                 crate::features::dashboard::handle_save_provider_settings(c, b, store)

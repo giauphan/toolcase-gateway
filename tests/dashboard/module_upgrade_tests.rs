@@ -376,3 +376,46 @@ fn test_write_error_multiline_json_integrity() {
     let json_val = parsed.unwrap();
     assert_eq!(json_val["message"].as_str().unwrap(), msg_with_newlines);
 }
+
+#[test]
+fn test_dashboard_upgrade_queue_status_and_in_flight_guard() {
+    let tmp_env =
+        std::env::temp_dir().join(format!("test_queue_status_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    // 1. Initial queue status should report valid JSON
+    let (head, body) = request_gateway(
+        "GET",
+        "/api/v1/dashboard/modules/upgrade/queue",
+        &[],
+        &store,
+    );
+    assert_eq!(head.status, 200);
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed["ok"], true);
+    assert!(parsed["count"].is_number());
+
+    // 2. Lock a module in the registry and verify queue status reports it
+    {
+        let guard = toolcase_gateway::features::dashboard::try_acquire_upgrade("simulated-mod")
+            .expect("acquire succeeds");
+        let (head_busy, body_busy) = request_gateway(
+            "GET",
+            "/api/v1/dashboard/modules/upgrade/status",
+            &[],
+            &store,
+        );
+        assert_eq!(head_busy.status, 200);
+        let parsed_busy: serde_json::Value = serde_json::from_slice(&body_busy).unwrap();
+        assert!(parsed_busy["in_flight"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "simulated-mod"));
+
+        drop(guard);
+    }
+
+    let _ = fs::remove_file(&tmp_env);
+    let _ = fs::remove_file(&store.config_file);
+}

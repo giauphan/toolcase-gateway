@@ -12,8 +12,9 @@ pub use module_ui::{
     handle_set_module_position, handle_update_module_config,
 };
 pub use modules::{
-    handle_install_personal_module, handle_remove_personal_module, handle_set_module_state,
-    handle_test_personal_module, handle_upgrade_personal_module,
+    handle_get_upgrade_queue_status, handle_install_personal_module, handle_remove_personal_module,
+    handle_set_module_state, handle_test_personal_module, handle_upgrade_personal_module,
+    try_acquire_upgrade,
 };
 pub use muse::{handle_muse_manual_cleanup, handle_update_muse_config};
 pub use service::{

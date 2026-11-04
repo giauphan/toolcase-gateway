@@ -1,9 +1,11 @@
 //! Dashboard personal module management handlers and route dispatchers.
 
+mod queue;
 mod source;
 mod synthesis;
 mod testing;
 
+pub use queue::{get_in_flight_upgrades, try_acquire_upgrade};
 use source::resolve_upgrade_source_candidate;
 pub use synthesis::{generate_module_adapter_script, parse_or_synthesize_manifest, InstallPayload};
 pub use testing::handle_test_personal_module;
@@ -313,6 +315,11 @@ pub fn handle_upgrade_personal_module(
     let registered_mods = read_guard.modules().clone();
     drop(read_guard);
 
+    let _upgrade_guard = match try_acquire_upgrade(&resolved_id) {
+        Ok(g) => g,
+        Err(msg) => return write_error(client, 409, "Conflict", &msg),
+    };
+
     let install_source = crate::gateway::installer::resolve_source(&raw_source);
     let opts = InstallOptions {
         id: Some(resolved_id.clone()),
@@ -375,6 +382,23 @@ pub fn handle_upgrade_personal_module(
             updated_desc.version.as_deref().unwrap_or("latest")
         ),
         "module": updated_desc
+    });
+    let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
+    write!(
+        client,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        resp_bytes.len()
+    )?;
+    client.write_all(&resp_bytes)?;
+    client.flush()
+}
+
+pub fn handle_get_upgrade_queue_status(client: &mut TcpStream) -> io::Result<()> {
+    let in_flight = get_in_flight_upgrades();
+    let resp = serde_json::json!({
+        "ok": true,
+        "in_flight": in_flight,
+        "count": in_flight.len()
     });
     let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
     write!(

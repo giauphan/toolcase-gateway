@@ -24,6 +24,10 @@
       <input id="topsearch" aria-label="Search modules and settings" placeholder="Search modules, providers, settings…" autocomplete="off">
       <span class="kbd-shortcut" aria-hidden="true">⌘ K</span>
     </div>
+    <button id="upgrade-queue-pill" class="upgrade-queue-pill u-hidden" type="button" title="View module upgrade queue" aria-label="Module upgrade queue">
+      <span class="queue-icon-spin" aria-hidden="true">⟳</span>
+      <span id="upgrade-queue-pill-text">Upgrading 1 module...</span>
+    </button>
     <div class="top-status nav-status">
       <span class="dot pulse-dot" aria-hidden="true"></span>
       <span id="connection-status-label">Local management console</span>
@@ -231,6 +235,14 @@
           </fieldset>
         </div>
         <p id="modules-feedback" class="ui-feedback" aria-live="polite"></p>
+
+        <div id="modules-queue-status" class="modules-queue-status u-hidden" aria-live="polite">
+          <div class="modules-queue-status-text">
+            <span class="queue-icon-spin" aria-hidden="true">⟳</span>
+            <span id="modules-queue-status-msg">Module upgrade in progress...</span>
+          </div>
+          <button type="button" class="btn small" id="modules-queue-view-btn">View Queue</button>
+        </div>
 
         <div class="tablewrap table-wrap ui-section-table" id="modules-table-wrap">
           <table id="modules-table">
@@ -809,6 +821,21 @@ Accept: text/event-stream</pre>
     </footer>
   </main>
 </div>
+
+<dialog id="upgrade-queue-dialog" class="ui-dialog" aria-labelledby="upgrade-queue-title">
+  <form method="dialog">
+    <h2 id="upgrade-queue-title">Module Upgrade Queue</h2>
+    <p class="sub">Track active and queued module upgrades across all pages.</p>
+    <div id="upgrade-queue-content" class="mt-12">
+      <div id="upgrade-queue-empty" class="empty-hint">No module upgrades currently in queue.</div>
+      <div id="upgrade-queue-list" class="queue-list u-hidden"></div>
+    </div>
+    <div class="ui-dialog-actions">
+      <button type="button" id="upgrade-queue-clear" class="btn btn-secondary">Clear Completed</button>
+      <button type="submit" value="close" class="btn primary btn-primary">Close</button>
+    </div>
+  </form>
+</dialog>
 
 <output id="toast" aria-live="polite" class="is-hidden"></output>
 

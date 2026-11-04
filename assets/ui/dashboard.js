@@ -44,16 +44,33 @@
   }
 
   let toastTimer = 0;
-  function showToast(message, isError) {
+  function showToast(message, isError, durationMs) {
     const el = byId("toast");
     if (!el) return;
     el.textContent = message;
     el.classList.toggle("toast-err", Boolean(isError));
+    el.classList.toggle("toast-success", !isError && isError !== undefined);
     setMessageVisible(el, true);
     clearTimeout(toastTimer);
+    const duration = durationMs || (isError ? 4500 : 3800);
     toastTimer = setTimeout(function() {
       setMessageVisible(el, false);
-    }, 3400);
+      el.classList.remove("toast-err", "toast-success");
+    }, duration);
+  }
+
+  function sendBrowserNotification(title, body) {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "granted") {
+        try {
+          new Notification(title, { body: body, icon: "/favicon.ico" });
+        } catch (e) {
+          // Ignore notification display failures
+        }
+      } else if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    }
   }
 
   // DOM Elements
@@ -142,8 +159,19 @@
   const listModeBtn = byId("listMode");
   const cardModeBtn = byId("cardMode");
 
+  const upgradeQueuePill = byId("upgrade-queue-pill");
+  const upgradeQueuePillText = byId("upgrade-queue-pill-text");
+  const upgradeQueueDialog = byId("upgrade-queue-dialog");
+  const upgradeQueueList = byId("upgrade-queue-list");
+  const upgradeQueueEmpty = byId("upgrade-queue-empty");
+  const upgradeQueueClearBtn = byId("upgrade-queue-clear");
+  const modulesQueueStatus = byId("modules-queue-status");
+  const modulesQueueStatusMsg = byId("modules-queue-status-msg");
+  const modulesQueueViewBtn = byId("modules-queue-view-btn");
+
   let allModules = [];
   let renderedModules = [];
+  let allCatalogItems = [];
   let pendingModuleAction = null;
   const moduleRequestsInFlight = new Set();
 
@@ -488,6 +516,260 @@
     }
   });
 
+  const upgradeQueue = {
+    items: [],
+    activeItem: null,
+
+    isBusy: function(id) {
+      return this.items.some(function(item) {
+        return item.id === id && (item.status === "queued" || item.status === "upgrading");
+      });
+    },
+
+    getItem: function(id) {
+      for (let i = this.items.length - 1; i >= 0; i--) {
+        if (this.items[i].id === id) return this.items[i];
+      }
+      return null;
+    },
+
+    enqueue: function(id, source, branch, opts) {
+      const cleanId = (id || "").trim();
+      if (!cleanId) return;
+
+      if (this.isBusy(cleanId)) {
+        showToast("Module '" + cleanId + "' is already in the upgrade queue.", false);
+        return;
+      }
+
+      sendBrowserNotification("Upgrade Queued", "Module '" + cleanId + "' added to upgrade queue.");
+
+      const item = {
+        id: cleanId,
+        source: (source || "").trim(),
+        branch: (branch || "").trim(),
+        status: "queued",
+        queuedAt: Date.now(),
+        startedAt: null,
+        completedAt: null,
+        version: null,
+        error: null,
+        catalogButton: opts?.catalogButton || null,
+      };
+
+      this.items.push(item);
+      moduleRequestsInFlight.add(cleanId);
+
+      showToast("Module '" + cleanId + "' added to upgrade queue.", false);
+      if (views.modules?.classList.contains("visible")) {
+        showModulesFeedback("Module '" + cleanId + "' queued for upgrade. You can navigate away freely.", false);
+      }
+
+      this.renderQueueUI();
+      renderModules(renderedModules, true);
+      renderCatalog(allCatalogItems);
+
+      this.processNext();
+    },
+
+    processNext: function() {
+      if (this.activeItem) return;
+
+      const nextItem = this.items.find(function(i) { return i.status === "queued"; });
+      if (!nextItem) {
+        this.renderQueueUI();
+        return;
+      }
+
+      this.activeItem = nextItem;
+      nextItem.status = "upgrading";
+      nextItem.startedAt = Date.now();
+
+      this.renderQueueUI();
+      renderModules(renderedModules, true);
+      renderCatalog(allCatalogItems);
+
+      const payload = { id: nextItem.id };
+      if (nextItem.source) payload.source = nextItem.source;
+      if (nextItem.branch) payload.branch = nextItem.branch;
+
+      const self = this;
+      postJson("/api/v1/dashboard/modules/upgrade", payload)
+        .then(function(result) {
+          moduleRequestsInFlight.delete(nextItem.id);
+          nextItem.completedAt = Date.now();
+          if (result.ok) {
+            nextItem.status = "completed";
+            nextItem.version = result.json.version || result.json.module?.version || "latest";
+            self.handleSuccess(nextItem);
+          } else {
+            nextItem.status = "failed";
+            nextItem.error = result.json.message || ("HTTP " + result.status);
+            self.handleFailure(nextItem);
+          }
+        })
+        .catch(function(err) {
+          moduleRequestsInFlight.delete(nextItem.id);
+          nextItem.completedAt = Date.now();
+          nextItem.status = "failed";
+          nextItem.error = err.message || "Network error";
+          self.handleFailure(nextItem);
+        })
+        .finally(function() {
+          self.activeItem = null;
+          self.renderQueueUI();
+          renderModules(renderedModules, true);
+          renderCatalog(allCatalogItems);
+          self.processNext();
+        });
+    },
+
+    handleSuccess: function(item) {
+      const msg = "Module '" + item.id + "' upgraded successfully to version " + item.version + ".";
+      showToast(msg, false, 5000);
+      sendBrowserNotification("Module Upgraded Successfully", msg);
+
+      if (views.modules?.classList.contains("visible")) {
+        showModulesFeedback(msg, false);
+      }
+
+      if (item.catalogButton) {
+        item.catalogButton.disabled = false;
+        item.catalogButton.textContent = "Upgrade";
+      }
+
+      loadOverview();
+    },
+
+    handleFailure: function(item) {
+      const msg = "Failed to upgrade module '" + item.id + "': " + item.error;
+      showToast(msg, true, 6000);
+      sendBrowserNotification("Module Upgrade Failed", msg);
+
+      if (views.modules?.classList.contains("visible")) {
+        showModulesFeedback(msg, true);
+      }
+
+      if (item.catalogButton) {
+        item.catalogButton.disabled = false;
+        item.catalogButton.textContent = "Upgrade";
+      }
+    },
+
+    clearCompleted: function() {
+      this.items = this.items.filter(function(i) {
+        return i.status === "queued" || i.status === "upgrading";
+      });
+      this.renderQueueUI();
+    },
+
+    renderQueueUI: function() {
+      const active = this.items.filter(function(i) { return i.status === "upgrading"; });
+      const queued = this.items.filter(function(i) { return i.status === "queued"; });
+      const completed = this.items.filter(function(i) { return i.status === "completed"; });
+      const failed = this.items.filter(function(i) { return i.status === "failed"; });
+
+      const totalActive = active.length + queued.length;
+
+      // Topbar Pill
+      if (upgradeQueuePill && upgradeQueuePillText) {
+        if (totalActive > 0) {
+          upgradeQueuePill.classList.remove("u-hidden", "has-completed", "has-failed");
+          upgradeQueuePill.classList.add("has-active");
+          const activeId = active[0]?.id || queued[0]?.id;
+          const queuedText = queued.length > 0 ? (" (+" + queued.length + " queued)") : "";
+          upgradeQueuePillText.textContent = "Upgrading " + activeId + queuedText;
+        } else if (completed.length > 0 || failed.length > 0) {
+          upgradeQueuePill.classList.remove("u-hidden", "has-active");
+          if (failed.length > 0) {
+            upgradeQueuePill.classList.add("has-failed");
+            upgradeQueuePill.classList.remove("has-completed");
+            upgradeQueuePillText.textContent = failed.length + " upgrade" + (failed.length > 1 ? "s" : "") + " failed";
+          } else {
+            upgradeQueuePill.classList.add("has-completed");
+            upgradeQueuePill.classList.remove("has-failed");
+            upgradeQueuePillText.textContent = completed.length + " upgrade" + (completed.length > 1 ? "s" : "") + " done";
+          }
+        } else {
+          upgradeQueuePill.classList.add("u-hidden");
+          upgradeQueuePill.classList.remove("has-active", "has-completed", "has-failed");
+        }
+      }
+
+      // Modules section queue status banner
+      if (modulesQueueStatus && modulesQueueStatusMsg) {
+        if (totalActive > 0) {
+          modulesQueueStatus.classList.remove("u-hidden");
+          const activeName = active[0] ? ("Upgrading '" + active[0].id + "'...") : "Module upgrades queued";
+          const countInfo = queued.length > 0 ? (" — " + queued.length + " more in queue") : "";
+          modulesQueueStatusMsg.textContent = activeName + countInfo;
+        } else {
+          modulesQueueStatus.classList.add("u-hidden");
+        }
+      }
+
+      // Dialog list
+      if (upgradeQueueList && upgradeQueueEmpty) {
+        if (this.items.length === 0) {
+          upgradeQueueEmpty.classList.remove("u-hidden");
+          upgradeQueueList.classList.add("u-hidden");
+          upgradeQueueList.innerHTML = "";
+        } else {
+          upgradeQueueEmpty.classList.add("u-hidden");
+          upgradeQueueList.classList.remove("u-hidden");
+
+          upgradeQueueList.innerHTML = this.items.slice().reverse().map(function(item) {
+            let statusPill = "";
+            let meta = "";
+            if (item.status === "upgrading") {
+              statusPill = "<span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>";
+              meta = "Started " + new Date(item.startedAt || item.queuedAt).toLocaleTimeString();
+            } else if (item.status === "queued") {
+              statusPill = "<span class=\"pill warning\">Queued</span>";
+              meta = "Queued " + new Date(item.queuedAt).toLocaleTimeString();
+            } else if (item.status === "completed") {
+              statusPill = "<span class=\"pill good\">✓ v" + escapeHtml(item.version || "latest") + "</span>";
+              meta = "Completed " + new Date(item.completedAt).toLocaleTimeString();
+            } else if (item.status === "failed") {
+              statusPill = "<span class=\"pill danger\" title=\"" + escapeHtml(item.error || "Error") + "\">✕ Failed</span>";
+              meta = escapeHtml(item.error || "Unknown error");
+            }
+
+            return "<div class=\"queue-item\">" +
+              "<div class=\"queue-item-left\">" +
+                "<span class=\"queue-item-id\">" + escapeHtml(item.id) + "</span>" +
+                "<span class=\"queue-item-meta\">" + meta + "</span>" +
+              "</div>" +
+              "<div class=\"queue-item-badge\">" + statusPill + "</div>" +
+            "</div>";
+          }).join("");
+        }
+      }
+    }
+  };
+
+  window.upgradeQueue = upgradeQueue;
+
+  function initUpgradeQueueDialog() {
+    if (upgradeQueuePill && upgradeQueueDialog) {
+      upgradeQueuePill.addEventListener("click", function() {
+        upgradeQueue.renderQueueUI();
+        upgradeQueueDialog.showModal();
+      });
+    }
+    if (modulesQueueViewBtn && upgradeQueueDialog) {
+      modulesQueueViewBtn.addEventListener("click", function() {
+        upgradeQueue.renderQueueUI();
+        upgradeQueueDialog.showModal();
+      });
+    }
+    if (upgradeQueueClearBtn) {
+      upgradeQueueClearBtn.addEventListener("click", function() {
+        upgradeQueue.clearCompleted();
+      });
+    }
+  }
+
   function initModuleActionDialog() {
     if (!moduleActionDialog) return;
     ["module-action-source", "module-action-branch"].forEach(function(fieldId) {
@@ -651,7 +933,17 @@
     const testBtn = " <button class=\"btn module-test\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Test module execution and health\">Test</button>";
     let personalBtns = "";
     if (!isBuiltin) {
-      personalBtns = " <button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Upgrade module to latest version\">Upgrade</button>" +
+      const qItem = upgradeQueue.getItem(m.id);
+      let upgLabel = "Upgrade";
+      let upgBusy = busyAttr;
+      let upgTitle = "Upgrade module to latest version";
+      if (qItem && (qItem.status === "upgrading" || qItem.status === "queued")) {
+        upgLabel = qItem.status === "upgrading" ? "Upgrading..." : "Queued";
+        upgBusy = " disabled";
+        if (qItem.status === "upgrading") upgBusy += " aria-busy=\"true\"";
+        upgTitle = qItem.status === "upgrading" ? "Module upgrade in progress" : "Module queued for upgrade";
+      }
+      personalBtns = " <button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(m.id) + "\"" + upgBusy + " title=\"" + escapeHtml(upgTitle) + "\">" + escapeHtml(upgLabel) + "</button>" +
         " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
     }
     return toggleBtn + testBtn + configBtns + posSelect + orderBtns + personalBtns;
@@ -687,10 +979,17 @@
 
         const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
         const versionStr = m.version ? ("v" + escapeHtml(m.version)) : "—";
+        const qItem = upgradeQueue.getItem(m.id);
+        let queuePill = "";
+        if (qItem && qItem.status === "upgrading") {
+          queuePill = " <span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>";
+        } else if (qItem && qItem.status === "queued") {
+          queuePill = " <span class=\"pill warning\">Queued</span>";
+        }
 
         return "<tr>" +
           "<td><button class=\"name-link module-detail\" data-module-id=\"" + escapeHtml(m.id) + "\">" + escapeHtml(m.id) + "</button></td>" +
-          "<td>" + escapeHtml(m.name) + "</td>" +
+          "<td>" + escapeHtml(m.name) + queuePill + "</td>" +
           "<td><span class=\"pill gray\">" + versionStr + "</span></td>" +
           "<td><span class=\"pill " + (isBuiltin ? "gray" : "personal") + "\">" + escapeHtml(m.kind) + "</span></td>" +
           "<td><code>" + escapeHtml(m.namespace) + "</code></td>" +
@@ -713,12 +1012,20 @@
 
         const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
         const versionBadge = m.version ? (" <span class=\"pill gray\">v" + escapeHtml(m.version) + "</span>") : "";
+        const qItem = upgradeQueue.getItem(m.id);
+        let queuePill = "";
+        if (qItem && qItem.status === "upgrading") {
+          queuePill = " <span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>";
+        } else if (qItem && qItem.status === "queued") {
+          queuePill = " <span class=\"pill warning\">Queued</span>";
+        }
 
         return "<div class=\"card catalogitem\">" +
           "<div class=\"catalogtitle\">" +
             "<button class=\"name-link module-detail\" data-module-id=\"" + escapeHtml(m.id) + "\">" + escapeHtml(m.name) + "</button> " +
             "<span class=\"pill " + (isBuiltin ? "gray" : "personal") + "\">" + escapeHtml(m.kind) + "</span>" +
             versionBadge +
+            queuePill +
           "</div>" +
           "<div class=\"catalogdesc\"><code>" + escapeHtml(m.namespace) + "</code><br>" + (caps || "None") + "</div>" +
           "<div class=\"minirow\">" +
@@ -752,6 +1059,15 @@
         : "";
       const versionBadge = item.version ? (" <span class=\"pill gray\">v" + escapeHtml(item.version) + "</span>") : "";
 
+      const qItem = upgradeQueue.getItem(item.id);
+      let upgBtnLabel = "Upgrade";
+      let upgDisabled = "";
+      if (qItem && (qItem.status === "upgrading" || qItem.status === "queued")) {
+        upgBtnLabel = qItem.status === "upgrading" ? "Upgrading..." : "Queued";
+        upgDisabled = " disabled";
+        if (qItem.status === "upgrading") upgDisabled += " aria-busy=\"true\"";
+      }
+
       return "<div class=\"card catalogitem\">" +
         "<span class=\"pill gray\">Catalog template</span>" +
         versionBadge +
@@ -759,7 +1075,7 @@
         "<div class=\"catalogdesc\">" + escapeHtml(item.description) + "<br><code>" + escapeHtml(item.namespace) + "</code>" + sourceHtml + "<br>" + caps + "</div>" +
         "<div class=\"minirow\">" +
           (isInstalled
-            ? "<span class=\"pill good\">Installed</span> <button class=\"btn catalog-upgrade-btn\" data-catalog-id=\"" + escapeHtml(item.id) + "\" title=\"Upgrade to latest version\">Upgrade</button>"
+            ? "<span class=\"pill good\">Installed</span> <button class=\"btn catalog-upgrade-btn\" data-catalog-id=\"" + escapeHtml(item.id) + "\"" + upgDisabled + " title=\"Upgrade to latest version\">" + upgBtnLabel + "</button>"
             : "<button class=\"btn catalog-install-btn\" data-catalog-id=\"" + escapeHtml(item.id) + "\">Explore &amp; install</button>") +
         "</div>" +
       "</div>";
@@ -774,9 +1090,8 @@
       if (upgBtn) {
         const id = upgBtn.dataset.catalogId;
         if (!id) return;
-        upgBtn.disabled = true;
-        upgBtn.textContent = "Upgrading...";
-        executeModuleUpgrade({ id: id }, upgBtn);
+        const catalogItem = allCatalogItems.find(function(c) { return c.id === id; });
+        executeModuleUpgrade({ id: id, source: catalogItem?.source }, upgBtn);
         return;
       }
       const btn = ev.target.closest(".catalog-install-btn");
@@ -823,27 +1138,7 @@
   }
 
   function executeModuleUpgrade(payload, catalogButton) {
-    postJson("/api/v1/dashboard/modules/upgrade", payload)
-      .then(function(result) {
-        if (catalogButton) {
-          catalogButton.disabled = false;
-          catalogButton.textContent = "Upgrade";
-        }
-        if (!result.ok) {
-          const errorDetail = result.json.message || ("HTTP " + result.status);
-          showModulesFeedback('Failed to upgrade module: ' + errorDetail, true);
-        } else {
-          showModulesFeedback("Module '" + (result.json.id || payload.id) + "' upgraded successfully to version " + (result.json.version || "latest") + ".", false);
-          loadOverview();
-        }
-      })
-      .catch(function(err) {
-        if (catalogButton) {
-          catalogButton.disabled = false;
-          catalogButton.textContent = "Upgrade";
-        }
-        showModulesFeedback('Network error: ' + err.message, true);
-      });
+    upgradeQueue.enqueue(payload.id, payload.source, payload.branch, { catalogButton: catalogButton });
   }
 
   function executeModuleInstall(payload, catalogButton) {
@@ -1177,17 +1472,7 @@
   };
 
   window.upgradeModule = function(id, source, branch) {
-    const payload = { id: id };
-    if (source?.trim()) payload.source = source.trim();
-    if (branch?.trim()) payload.branch = branch.trim();
-    sendModuleRequest(
-      id,
-      "/api/v1/dashboard/modules/upgrade",
-      payload,
-      "Upgrading personal module '" + id + "'...",
-      "Personal module '" + id + "' was successfully upgraded to the latest version.",
-      "Failed to upgrade module"
-    );
+    upgradeQueue.enqueue(id, source, branch);
   };
 
   window.testModule = function(id) {
@@ -1440,9 +1725,10 @@
 
         // Modules & Catalog
         allModules = data.modules || [];
+        allCatalogItems = data.catalog || [];
         renderDynamicProviderMenus(allModules, data.module_configs || {});
         filterModules();
-        renderCatalog(data.catalog || []);
+        renderCatalog(allCatalogItems);
       })
       .catch(function(err) {
         if (omniDesc) omniDesc.textContent = "Error loading overview: " + err.message;
@@ -1701,6 +1987,7 @@
     start: function() {
       document.documentElement.classList.add("ui-shell-ready");
       initToolbarAndNavigation();
+      initUpgradeQueueDialog();
       initModuleActionDialog();
       initCatalogGrid();
       initCustomInstallForm();
