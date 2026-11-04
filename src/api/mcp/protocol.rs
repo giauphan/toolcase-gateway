@@ -71,8 +71,28 @@ impl JsonRpcResponse {
 pub struct McpTool {
     pub name: String,
     pub description: String,
-    #[serde(rename = "inputSchema")]
+    #[serde(rename = "inputSchema", alias = "input_schema")]
     pub input_schema: Value,
+}
+
+impl From<crate::modules::manifest::ModuleToolDefinition> for McpTool {
+    fn from(def: crate::modules::manifest::ModuleToolDefinition) -> Self {
+        Self {
+            name: def.name,
+            description: def.description,
+            input_schema: def.input_schema,
+        }
+    }
+}
+
+impl From<&crate::modules::manifest::ModuleToolDefinition> for McpTool {
+    fn from(def: &crate::modules::manifest::ModuleToolDefinition) -> Self {
+        Self {
+            name: def.name.clone(),
+            description: def.description.clone(),
+            input_schema: def.input_schema.clone(),
+        }
+    }
 }
 
 /// MCP Resource definition for `resources/list`.

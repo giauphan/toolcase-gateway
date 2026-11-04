@@ -73,3 +73,49 @@ pub(crate) fn dispatch_local_http(
     crate::http_provider::write_ureq_response(client, resp)?;
     Ok(status)
 }
+
+/// Dispatches an out-of-process personal module tool request over local HTTP.
+pub fn execute_http_payload(
+    manifest: &PersonalManifest,
+    subpath: &str,
+    method: &str,
+    body: &str,
+) -> Result<String, (u16, String)> {
+    let base_url = manifest.entrypoint.trim_end_matches('/');
+    let clean_sub = subpath.trim_start_matches('/');
+    let target_url = format!("{base_url}/{clean_sub}");
+
+    let agent_config = ureq::Agent::config_builder()
+        .timeout_global(Some(DEFAULT_MODULE_TIMEOUT))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build();
+    let agent = ureq::Agent::new_with_config(agent_config);
+
+    let is_post = method.eq_ignore_ascii_case("post");
+    let resp = if is_post {
+        agent
+            .post(&target_url)
+            .header("content-type", "application/json")
+            .send(body.as_bytes())
+    } else {
+        agent
+            .get(&target_url)
+            .header("content-type", "application/json")
+            .call()
+    };
+
+    let mut response =
+        resp.map_err(|e| (502, format!("Upstream personal module HTTP error: {e}")))?;
+    let status = response.status().as_u16();
+    let body_str = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| (502, format!("Failed to read upstream response body: {e}")))?;
+
+    if status >= 400 {
+        return Err((status, body_str));
+    }
+
+    Ok(body_str)
+}

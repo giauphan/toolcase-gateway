@@ -91,13 +91,12 @@ pub(crate) fn wait_for_module_response(
     }
 }
 
-pub(crate) fn dispatch_stdio(
-    client: &mut TcpStream,
-    request: &Request,
+/// Executes an arbitrary JSON payload against an out-of-process personal module over stdio.
+pub fn execute_stdio_payload(
     manifest: &PersonalManifest,
-    subpath: &str,
     sub_provider_id: Option<&str>,
-) -> io::Result<u16> {
+    payload: &serde_json::Value,
+) -> Result<String, (u16, String)> {
     let mut cmd = build_command(manifest, sub_provider_id);
 
     let mut child = match cmd.spawn() {
@@ -109,51 +108,36 @@ pub(crate) fn dispatch_stdio(
                 match fallback_cmd.spawn() {
                     Ok(child) => child,
                     Err(fallback_err) => {
-                        return write_personal_error(
-                            client,
+                        return Err((
                             502,
-                            &format!(
+                            format!(
                                 "Failed to spawn personal module '{}': {e} (interpreter fallback error: {fallback_err})",
                                 manifest.id
                             ),
-                        );
+                        ));
                     }
                 }
             } else {
-                return write_personal_error(
-                    client,
+                return Err((
                     502,
-                    &format!("Failed to spawn personal module '{}': {e}", manifest.id),
-                );
+                    format!("Failed to spawn personal module '{}': {e}", manifest.id),
+                ));
             }
         }
         Err(e) => {
-            return write_personal_error(
-                client,
+            return Err((
                 502,
-                &format!("Failed to spawn personal module '{}': {e}", manifest.id),
-            );
+                format!("Failed to spawn personal module '{}': {e}", manifest.id),
+            ));
         }
     };
 
     let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "Failed to open child stdin"))?;
+        .ok_or_else(|| (500, "Failed to open child stdin".to_string()))?;
 
-    let full_subpath = match request.path.split_once('?') {
-        Some((_, q)) if !q.is_empty() && !subpath.contains('?') => format!("{subpath}?{q}"),
-        _ => subpath.to_string(),
-    };
-
-    let payload = serde_json::json!({
-        "method": request.method,
-        "path": full_subpath,
-        "headers": request.headers,
-        "body": String::from_utf8_lossy(&request.body),
-    });
-
-    let mut payload_bytes = serde_json::to_vec(&payload).unwrap_or_default();
+    let mut payload_bytes = serde_json::to_vec(payload).unwrap_or_default();
     payload_bytes.push(b'\n');
 
     let writer_handle = std::thread::spawn(move || {
@@ -161,9 +145,10 @@ pub(crate) fn dispatch_stdio(
         drop(stdin);
     });
 
-    let stdout = child.stdout.take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::BrokenPipe, "Failed to capture child stdout")
-    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| (500, "Failed to capture child stdout".to_string()))?;
 
     let (tx, rx) = std::sync::mpsc::channel();
     let reader_handle = std::thread::spawn(move || {
@@ -183,7 +168,7 @@ pub(crate) fn dispatch_stdio(
         err_reader_handle,
     ) {
         Ok(line) => line,
-        Err((code, msg)) => return write_personal_error(client, code, &msg),
+        Err((code, msg)) => return Err((code, msg)),
     };
 
     if response_line.trim().is_empty() {
@@ -193,8 +178,35 @@ pub(crate) fn dispatch_stdio(
             "personal_module",
             &format!("[{}] {error_msg}", manifest.id),
         );
-        return write_personal_error(client, 502, &error_msg);
+        return Err((502, error_msg));
     }
+
+    Ok(response_line)
+}
+
+pub(crate) fn dispatch_stdio(
+    client: &mut TcpStream,
+    request: &Request,
+    manifest: &PersonalManifest,
+    subpath: &str,
+    sub_provider_id: Option<&str>,
+) -> io::Result<u16> {
+    let full_subpath = match request.path.split_once('?') {
+        Some((_, q)) if !q.is_empty() && !subpath.contains('?') => format!("{subpath}?{q}"),
+        _ => subpath.to_string(),
+    };
+
+    let payload = serde_json::json!({
+        "method": request.method,
+        "path": full_subpath,
+        "headers": request.headers,
+        "body": String::from_utf8_lossy(&request.body),
+    });
+
+    let response_line = match execute_stdio_payload(manifest, sub_provider_id, &payload) {
+        Ok(line) => line,
+        Err((code, msg)) => return write_personal_error(client, code, &msg),
+    };
 
     let resp_val: serde_json::Value = match serde_json::from_str(&response_line) {
         Ok(v) => v,

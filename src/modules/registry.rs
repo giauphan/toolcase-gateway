@@ -48,6 +48,7 @@ fn build_sub_providers(
                 } else {
                     ModuleStatus::Disabled
                 },
+                tools: p.tools.clone(),
             }
         })
         .collect();
@@ -148,6 +149,7 @@ impl ModuleRegistry {
             settings_tab: Some(id.clone()),
             config_schema: Some(schema),
             source: manifest.source.clone(),
+            tools: manifest.tools.clone(),
         };
 
         self.modules.insert(id.clone(), desc);
@@ -232,6 +234,7 @@ impl ModuleRegistry {
             settings_tab: Some(id.clone()),
             config_schema: Some(schema),
             source,
+            tools: manifest.tools.clone(),
         };
 
         self.modules.insert(id.clone(), desc.clone());

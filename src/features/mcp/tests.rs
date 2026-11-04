@@ -29,11 +29,13 @@ fn test_mcp_tools_and_resources_lifecycle() {
     let store = ConfigStore::new(crate::config::Config::default(), env_path.clone());
 
     // 1. List tools
-    let tools = list_tools();
+    let tools = list_tools(&store);
     assert!(tools.iter().any(|t| t.name == "gateway_list_modules"));
     assert!(tools
         .iter()
         .any(|t| t.name == "gateway_install_personal_module"));
+    // Verify unadapted built-in modules do not advertise synthetic tools
+    assert!(!tools.iter().any(|t| t.name.starts_with("jev__")));
 
     // 2. Call gateway_list_modules
     let res = call_tool("gateway_list_modules", &json!({}), &store).unwrap();
@@ -71,6 +73,17 @@ fn test_mcp_tools_and_resources_lifecycle() {
         .unwrap()
         .contains("/personal/claude"));
 
+    // 4b. Discover module tool and read module resource
+    let updated_tools = list_tools(&store);
+    assert!(updated_tools
+        .iter()
+        .any(|t| t.name == "my-claude-agent__chat"));
+    let res_specific = read_resource("gateway://modules/my-claude-agent", &store).unwrap();
+    assert!(res_specific["contents"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("my-claude-agent"));
+
     // 5. Disable module
     let state_res = call_tool(
         "gateway_set_module_state",
@@ -82,6 +95,11 @@ fn test_mcp_tools_and_resources_lifecycle() {
         .as_str()
         .unwrap()
         .contains("Disabled"));
+
+    // 5b. Verify calling a tool for a disabled module returns an error
+    let disabled_err =
+        call_tool("my-claude-agent__chat", &json!({"prompt": "hello"}), &store).unwrap_err();
+    assert!(disabled_err.contains("is currently disabled"));
 
     // 6. Read resource gateway://modules
     let res_mod = read_resource("gateway://modules", &store).unwrap();

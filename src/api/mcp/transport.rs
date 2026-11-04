@@ -60,7 +60,7 @@ pub fn process_json_rpc(raw_line: &str, store: &ConfigStore) -> Option<String> {
             Some(serde_json::to_string(&resp).unwrap_or_default())
         }
         "tools/list" => {
-            let tools = crate::features::mcp::list_tools();
+            let tools = crate::features::mcp::list_tools(store);
             let resp = JsonRpcResponse::success(req.id, json!({ "tools": tools }));
             Some(serde_json::to_string(&resp).unwrap_or_default())
         }
@@ -99,7 +99,7 @@ pub fn process_json_rpc(raw_line: &str, store: &ConfigStore) -> Option<String> {
             }
         }
         "resources/list" => {
-            let resources = crate::features::mcp::list_resources();
+            let resources = crate::features::mcp::list_resources(store);
             let resp = JsonRpcResponse::success(req.id, json!({ "resources": resources }));
             Some(serde_json::to_string(&resp).unwrap_or_default())
         }

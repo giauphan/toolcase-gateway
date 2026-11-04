@@ -158,6 +158,7 @@ fn auto_synthesize_manifest(
         permissions: Vec::new(),
         group: None,
         source: None,
+        tools: None,
     })
 }
 

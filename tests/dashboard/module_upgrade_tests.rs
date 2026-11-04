@@ -228,6 +228,7 @@ fn test_dashboard_upgrade_module_resolves_catalog_and_addon_source() {
             permissions: Vec::new(),
             group: None,
             source: None, // Explicitly source-less to exercise catalog source fallback
+            tools: None,
         };
         guard.register_personal_module(manifest).unwrap();
         let installed_dir = toolcase_gateway::gateway::installer::get_state_dir()
@@ -327,6 +328,7 @@ fn test_dashboard_upgrade_module_with_nonexistent_local_dir() {
             permissions: Vec::new(),
             group: None,
             source: None,
+            tools: None,
         };
         guard.register_personal_module(manifest).unwrap();
     }

@@ -66,6 +66,7 @@ pub(super) fn sample_manifest(id: &str, name: &str, namespace: &str) -> Personal
         permissions: Vec::new(),
         group: None,
         source: None,
+        tools: None,
     }
 }
 
@@ -136,12 +137,14 @@ fn test_personal_module_group_registration_and_sub_providers() {
                 name: "Chat Sub Provider".to_string(),
                 subpath: "/chat".to_string(),
                 capabilities: vec!["chat".to_string()],
+                tools: None,
             },
             SubProviderManifest {
                 id: "vision-sub".to_string(),
                 name: "Vision Sub Provider".to_string(),
                 subpath: "/vision".to_string(),
                 capabilities: vec!["vision".to_string()],
+                tools: None,
             },
         ],
     });
@@ -194,12 +197,14 @@ fn test_module_group_validation_rejects_duplicates() {
                 name: "Provider 1".to_string(),
                 subpath: "/chat".to_string(),
                 capabilities: vec![],
+                tools: None,
             },
             SubProviderManifest {
                 id: "p1".to_string(), // Duplicate ID!
                 name: "Provider 1 dup".to_string(),
                 subpath: "/chat2".to_string(),
                 capabilities: vec![],
+                tools: None,
             },
         ],
     });
@@ -338,6 +343,7 @@ fn test_sub_provider_requires_valid_non_root_subpath() {
                 name: "Sub 1".to_string(),
                 subpath: subpath.to_string(),
                 capabilities: vec![],
+                tools: None,
             }],
         });
         assert!(

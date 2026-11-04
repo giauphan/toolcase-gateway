@@ -5,6 +5,8 @@ mod http;
 mod stdio;
 
 pub(crate) use cmd::build_command;
+pub(crate) use http::execute_http_payload;
+pub(crate) use stdio::execute_stdio_payload;
 pub(crate) use stdio::spawn_stderr_reader;
 
 use crate::gateway::modules::PersonalManifest;
@@ -113,6 +115,7 @@ mod tests {
             permissions: vec![],
             group: None,
             source: None,
+            tools: None,
         };
         let cmd_sh = build_fallback_interpreter_command(&manifest_sh, None).expect("sh fallback");
         assert_eq!(cmd_sh.get_program(), "/bin/sh");
@@ -149,6 +152,7 @@ mod tests {
             permissions: vec![],
             group: None,
             source: None,
+            tools: None,
         };
 
         let _cmd = build_command(&manifest, None);

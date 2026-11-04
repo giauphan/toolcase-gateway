@@ -112,5 +112,42 @@ Write the plan as requirements and outcomes, not as an implementation recipe:
   - The gateway host remains synchronous (`std::net`, `std::thread`).
   - Modules interact over standard Unix stdio streams or loopback sockets without leaking transport types into domain models.
 
+## Module Model Context Protocol (MCP) Support for AI Agents
+
+Toolcase Gateway acts as an extensible MCP gateway, allowing modules to contribute their domain capabilities directly to AI agents in standard MCP format:
+
+- **Native MCP Tool & Resource Exposure**:
+  - Personal out-of-process modules can expose custom tools to connected AI agents. Every enabled module (built-in or personal) exposes a `gateway://modules/{id}` resource. Built-in providers do not advertise MCP tools yet; direct calls fail closed.
+  - Agents connecting via any supported transport (stdio `--mcp`, Streamable HTTP `POST /mcp`, or SSE `GET /mcp/sse`) discover and call module tools identically.
+- **Manifest Tool Declarations (`tools` array)**:
+  - Modules declare custom tools in `module.json` using the `tools` array with standard JSON Schema `inputSchema`:
+    ```json
+    {
+      "name": "my-module",
+      "tools": [
+        {
+          "name": "query_items",
+          "description": "Search and retrieve items from the module catalog",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "query": { "type": "string", "description": "Search keyword" }
+            },
+            "required": ["query"]
+          }
+        }
+      ]
+    }
+    ```
+- **Capability-Driven Tool Synthesis**:
+  - If a personal module (and its enabled sub-providers) declares no `tools`, the gateway automatically synthesizes default MCP tools based on its declared `capabilities`: `chat_completions`/`chat` → `<id>__chat`, `models` → `<id>__list_models`, `decisions` → `<id>__evaluate`, `image` → `<id>__generate_image`.
+- **Namespacing & Isolation**:
+  - Module tools are aggregated and exposed under namespaced names: `<module_id>__<tool_name>` (e.g., `daily-news__fetch_latest_news`).
+  - Built-in administrative tools retain their canonical names (`gateway_list_modules`, `gateway_get_module_info`, etc.), preventing collisions.
+- **Execution Lifecycle & Timeouts**:
+  - Module tool executions over stdio processes have a strict 30-second bounded timeout to protect synchronous gateway worker threads.
+  - Disabled or uninstalled modules fail closed: their tools are immediately excluded from `tools/list` and `resources/list`, and any direct call is rejected with standard MCP errors.
+
+
 
 

@@ -232,6 +232,7 @@ fn test_dashboard_test_module_local_http() {
         permissions: vec![],
         group: None,
         source: None,
+        tools: None,
     };
     {
         let reg = store.module_registry();

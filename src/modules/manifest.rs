@@ -44,6 +44,28 @@ impl std::fmt::Display for ModuleError {
 
 impl std::error::Error for ModuleError {}
 
+/// Tool definition declared by a module or sub-provider for MCP integration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleToolDefinition {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(
+        default = "default_tool_input_schema",
+        rename = "inputSchema",
+        alias = "input_schema"
+    )]
+    pub input_schema: serde_json::Value,
+}
+
+pub fn default_tool_input_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+    })
+}
+
 /// Manifest for a small sub-provider within a module group.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubProviderManifest {
@@ -54,6 +76,8 @@ pub struct SubProviderManifest {
     pub subpath: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ModuleToolDefinition>>,
 }
 
 fn default_subprovider_name() -> String {
@@ -99,6 +123,29 @@ pub struct PersonalManifest {
     pub group: Option<ModuleGroupManifest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ModuleToolDefinition>>,
+}
+
+impl Default for PersonalManifest {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: default_module_name(),
+            short_name: None,
+            version: default_module_version(),
+            namespace: String::new(),
+            entrypoint: String::new(),
+            protocol: default_protocol(),
+            capabilities: Vec::new(),
+            icon: None,
+            config_schema: None,
+            permissions: Vec::new(),
+            group: None,
+            source: None,
+            tools: None,
+        }
+    }
 }
 
 fn default_module_name() -> String {
@@ -121,6 +168,8 @@ pub struct SubProviderDescriptor {
     pub subpath: String,
     pub capabilities: Vec<String>,
     pub status: ModuleStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ModuleToolDefinition>>,
 }
 
 /// Persisted Dashboard UI menu position and ordering metadata for a module.
@@ -235,6 +284,8 @@ pub struct ModuleDescriptor {
     pub config_schema: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ModuleToolDefinition>>,
 }
 
 pub fn builtin_ui_defaults(

@@ -182,12 +182,14 @@ pub fn parse_or_synthesize_manifest(
                             name: "Chat Provider".to_string(),
                             subpath: "/chat".to_string(),
                             capabilities: vec!["chat_completions".to_string()],
+                            tools: None,
                         },
                         crate::gateway::modules::SubProviderManifest {
                             id: "vision".to_string(),
                             name: "Vision Provider".to_string(),
                             subpath: "/vision".to_string(),
                             capabilities: vec!["vision".to_string()],
+                            tools: None,
                         },
                     ],
                 })
@@ -209,6 +211,7 @@ pub fn parse_or_synthesize_manifest(
                     permissions: Vec::new(),
                     group,
                     source: cat.source,
+                    tools: None,
                 },
                 false,
             ));
@@ -255,6 +258,7 @@ pub fn parse_or_synthesize_manifest(
             permissions: Vec::new(),
             group: None,
             source: payload.source.clone(),
+            tools: None,
         },
         false,
     ))

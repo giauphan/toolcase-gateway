@@ -14,6 +14,7 @@ pub fn sub_provider(id: &str, name: &str, subpath: &str, caps: &[&str]) -> SubPr
         subpath: subpath.to_string(),
         capabilities: caps.iter().map(ToString::to_string).collect(),
         status: ModuleStatus::Enabled,
+        tools: None,
     }
 }
 
@@ -119,5 +120,6 @@ fn register_builtin(
         settings_tab: Some(tab),
         config_schema: schema,
         source: None,
+        tools: None,
     });
 }

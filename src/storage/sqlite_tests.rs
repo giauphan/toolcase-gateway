@@ -45,6 +45,7 @@ fn test_sqlite_storage_lifecycle_and_migration() {
         permissions: vec![],
         group: None,
         source: None,
+        tools: None,
     };
     storage.save_module(&manifest).unwrap();
     let modules = storage.get_modules().unwrap();
@@ -138,6 +139,7 @@ fn test_sqlite_module_enabled_status_lifecycle() {
         permissions: vec![],
         group: None,
         source: None,
+        tools: None,
     };
 
     // 1. Save module with status false (disabled)

@@ -100,6 +100,7 @@ A module declares its identity and capabilities in `module.json` (also accepted:
 | `capabilities` | `string[]` | Advertised capabilities (e.g. `["chat_completions", "models"]`). |
 | `config_schema`| `object` | Optional JSON schema for module configuration options. |
 | `group` | `object` | Optional Module Group configuration bundling multiple sub-providers. |
+| `tools` | `array` | Optional MCP tools list (`name`, `description`, `inputSchema`) exposed to AI agents via Toolcase Gateway's MCP server. |
 
 ### 3.1 Module Groups (Bundling Multiple Providers)
 
@@ -328,6 +329,21 @@ AI agents and editor extensions can orchestrate the platform module lifecycle au
 | `gateway_install_personal_module` | `{"source": "string", "source_type": "dir\|zip\|github"}` | Installs and registers an out-of-tree module from disk, ZIP, or remote GitHub repository |
 | `gateway_remove_personal_module` | `{"module_id": "string"}` | Uninstalls and purges an installed module directory from disk |
 | `gateway_get_system_metrics` | *(none)* | Returns live platform telemetry, memory usage, active connections, and module counters |
+
+### 8.1 Module Gateway Extensible Tool & Resource Aggregation
+
+Beyond core gateway control plane tools, Toolcase Gateway acts as an **extensible MCP Gateway** for platform modules. When an AI agent connects via any supported transport (stdio `--mcp`, Streamable HTTP `POST /mcp`, or SSE `GET /mcp/sse`), module features are seamlessly aggregated into the standard MCP interface:
+
+1. **Tool Discovery (`tools/list`)**:
+   - Aggregates core gateway tools with tools declared by all currently enabled modules.
+   - Module tools are partitioned by module identifier (`<module_id>__<tool_name>`) with human-readable descriptions and standard JSON Schema `inputSchema` definitions.
+   - Modules without explicit `tools` definitions automatically synthesize tools matching their declared capabilities (such as `<module_id>__chat` or `<module_id>__list_models`).
+2. **Tool Invocation (`tools/call`)**:
+   - AI agents invoke module tools using standard MCP JSON-RPC format with arguments.
+   - The Gateway executes the tool against the owning module (via stdio or HTTP child process dispatching) and normalizes results into standard MCP `content` blocks.
+   - Tool calls to disabled modules fail closed with informative error status.
+3. **Resource Exposure (`resources/list` & `resources/read`)**:
+   - Each active module automatically exposes a `gateway://modules/{module_id}` resource providing live manifest and configuration state.
 
 ---
 

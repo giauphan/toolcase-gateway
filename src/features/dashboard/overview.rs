@@ -199,8 +199,8 @@ pub fn handle_dashboard_overview(client: &mut TcpStream, store: &ConfigStore) ->
                 "jsonrpc": "/mcp",
                 "sse": "/mcp/sse"
             },
-            "tools": crate::features::mcp::list_tools(),
-            "resources": crate::features::mcp::list_resources(),
+            "tools": crate::features::mcp::list_tools(store),
+            "resources": crate::features::mcp::list_resources(store),
         }
     });
 

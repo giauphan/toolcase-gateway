@@ -63,16 +63,19 @@ for line in sys.stdin:
                     name: "Chat Sub Provider".to_string(),
                     subpath: "/chat".to_string(),
                     capabilities: vec!["chat".to_string()],
+                    tools: None,
                 },
                 SubProviderManifest {
                     id: "p2-vision".to_string(),
                     name: "Vision Sub Provider".to_string(),
                     subpath: "/vision".to_string(),
                     capabilities: vec!["vision".to_string()],
+                    tools: None,
                 },
             ],
         }),
         source: None,
+        tools: None,
     };
 
     let temp_env = std::env::temp_dir().join(format!("suite_env_{}.env", uuid::Uuid::new_v4()));

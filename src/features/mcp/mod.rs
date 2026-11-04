@@ -1,5 +1,7 @@
 //! Feature module for the MCP control plane.
 
+pub mod core_tools;
+pub mod module_tools;
 pub mod tools;
 
 #[cfg(test)]
