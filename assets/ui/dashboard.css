@@ -1018,7 +1018,7 @@ body .mt-12,
   font-weight: 600;
   gap: 7px;
   padding: 5px 12px;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .upgrade-queue-pill:hover {
@@ -1044,7 +1044,12 @@ body .mt-12,
 
 .queue-icon-spin {
   display: inline-block;
-  animation: spin-queue 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .queue-icon-spin {
+    animation: spin-queue 1s linear infinite;
+  }
 }
 
 .modules-queue-status {
@@ -1328,5 +1333,8 @@ body .mt-12,
     animation-iteration-count: 1;
     transition-duration: 0.01ms;
     scroll-behavior: auto;
+  }
+  .queue-icon-spin {
+    animation: none;
   }
 }

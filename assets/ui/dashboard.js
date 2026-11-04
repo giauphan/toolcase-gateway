@@ -68,7 +68,9 @@
           // Ignore notification display failures
         }
       } else if (Notification.permission === "default") {
-        Notification.requestPermission();
+        void Notification.requestPermission().catch(function() {
+          // Ignore notification permission request rejection
+        });
       }
     }
   }
@@ -593,34 +595,33 @@
       if (nextItem.source) payload.source = nextItem.source;
       if (nextItem.branch) payload.branch = nextItem.branch;
 
-      const self = this;
       postJson("/api/v1/dashboard/modules/upgrade", payload)
-        .then(function(result) {
+        .then((result) => {
           moduleRequestsInFlight.delete(nextItem.id);
           nextItem.completedAt = Date.now();
           if (result.ok) {
             nextItem.status = "completed";
             nextItem.version = result.json.version || result.json.module?.version || "latest";
-            self.handleSuccess(nextItem);
+            this.handleSuccess(nextItem);
           } else {
             nextItem.status = "failed";
             nextItem.error = result.json.message || ("HTTP " + result.status);
-            self.handleFailure(nextItem);
+            this.handleFailure(nextItem);
           }
         })
-        .catch(function(err) {
+        .catch((err) => {
           moduleRequestsInFlight.delete(nextItem.id);
           nextItem.completedAt = Date.now();
           nextItem.status = "failed";
           nextItem.error = err.message || "Network error";
-          self.handleFailure(nextItem);
+          this.handleFailure(nextItem);
         })
-        .finally(function() {
-          self.activeItem = null;
-          self.renderQueueUI();
+        .finally(() => {
+          this.activeItem = null;
+          this.renderQueueUI();
           renderModules(renderedModules, true);
           renderCatalog(allCatalogItems);
-          self.processNext();
+          this.processNext();
         });
     },
 
@@ -669,84 +670,101 @@
       const completed = this.items.filter(function(i) { return i.status === "completed"; });
       const failed = this.items.filter(function(i) { return i.status === "failed"; });
 
-      const totalActive = active.length + queued.length;
-
-      // Topbar Pill
-      if (upgradeQueuePill && upgradeQueuePillText) {
-        if (totalActive > 0) {
-          upgradeQueuePill.classList.remove("u-hidden", "has-completed", "has-failed");
-          upgradeQueuePill.classList.add("has-active");
-          const activeId = active[0]?.id || queued[0]?.id;
-          const queuedText = queued.length > 0 ? (" (+" + queued.length + " queued)") : "";
-          upgradeQueuePillText.textContent = "Upgrading " + activeId + queuedText;
-        } else if (completed.length > 0 || failed.length > 0) {
-          upgradeQueuePill.classList.remove("u-hidden", "has-active");
-          if (failed.length > 0) {
-            upgradeQueuePill.classList.add("has-failed");
-            upgradeQueuePill.classList.remove("has-completed");
-            upgradeQueuePillText.textContent = failed.length + " upgrade" + (failed.length > 1 ? "s" : "") + " failed";
-          } else {
-            upgradeQueuePill.classList.add("has-completed");
-            upgradeQueuePill.classList.remove("has-failed");
-            upgradeQueuePillText.textContent = completed.length + " upgrade" + (completed.length > 1 ? "s" : "") + " done";
-          }
-        } else {
-          upgradeQueuePill.classList.add("u-hidden");
-          upgradeQueuePill.classList.remove("has-active", "has-completed", "has-failed");
-        }
-      }
-
-      // Modules section queue status banner
-      if (modulesQueueStatus && modulesQueueStatusMsg) {
-        if (totalActive > 0) {
-          modulesQueueStatus.classList.remove("u-hidden");
-          const activeName = active[0] ? ("Upgrading '" + active[0].id + "'...") : "Module upgrades queued";
-          const countInfo = queued.length > 0 ? (" — " + queued.length + " more in queue") : "";
-          modulesQueueStatusMsg.textContent = activeName + countInfo;
-        } else {
-          modulesQueueStatus.classList.add("u-hidden");
-        }
-      }
-
-      // Dialog list
-      if (upgradeQueueList && upgradeQueueEmpty) {
-        if (this.items.length === 0) {
-          upgradeQueueEmpty.classList.remove("u-hidden");
-          upgradeQueueList.classList.add("u-hidden");
-          upgradeQueueList.innerHTML = "";
-        } else {
-          upgradeQueueEmpty.classList.add("u-hidden");
-          upgradeQueueList.classList.remove("u-hidden");
-
-          upgradeQueueList.innerHTML = this.items.slice().reverse().map(function(item) {
-            let statusPill = "";
-            let meta = "";
-            if (item.status === "upgrading") {
-              statusPill = "<span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>";
-              meta = "Started " + new Date(item.startedAt || item.queuedAt).toLocaleTimeString();
-            } else if (item.status === "queued") {
-              statusPill = "<span class=\"pill warning\">Queued</span>";
-              meta = "Queued " + new Date(item.queuedAt).toLocaleTimeString();
-            } else if (item.status === "completed") {
-              statusPill = "<span class=\"pill good\">✓ v" + escapeHtml(item.version || "latest") + "</span>";
-              meta = "Completed " + new Date(item.completedAt).toLocaleTimeString();
-            } else if (item.status === "failed") {
-              statusPill = "<span class=\"pill danger\" title=\"" + escapeHtml(item.error || "Error") + "\">✕ Failed</span>";
-              meta = escapeHtml(item.error || "Unknown error");
-            }
-
-            return "<div class=\"queue-item\">" +
-              "<div class=\"queue-item-left\">" +
-                "<span class=\"queue-item-id\">" + escapeHtml(item.id) + "</span>" +
-                "<span class=\"queue-item-meta\">" + meta + "</span>" +
-              "</div>" +
-              "<div class=\"queue-item-badge\">" + statusPill + "</div>" +
-            "</div>";
-          }).join("");
-        }
-      }
+      renderQueuePill(active, queued, completed, failed);
+      renderQueueBanner(active, queued);
+      renderQueueList(this.items);
     }
   };
+
+  function renderQueuePill(active, queued, completed, failed) {
+    if (!upgradeQueuePill || !upgradeQueuePillText) return;
+    const totalActive = active.length + queued.length;
+    if (totalActive > 0) {
+      upgradeQueuePill.classList.remove("u-hidden", "has-completed", "has-failed");
+      upgradeQueuePill.classList.add("has-active");
+      const activeId = active[0]?.id || queued[0]?.id;
+      const queuedText = queued.length > 0 ? (" (+" + queued.length + " queued)") : "";
+      upgradeQueuePillText.textContent = "Upgrading " + activeId + queuedText;
+      return;
+    }
+    if (failed.length > 0) {
+      upgradeQueuePill.classList.remove("u-hidden", "has-active", "has-completed");
+      upgradeQueuePill.classList.add("has-failed");
+      upgradeQueuePillText.textContent = failed.length + " upgrade" + (failed.length > 1 ? "s" : "") + " failed";
+      return;
+    }
+    if (completed.length > 0) {
+      upgradeQueuePill.classList.remove("u-hidden", "has-active", "has-failed");
+      upgradeQueuePill.classList.add("has-completed");
+      upgradeQueuePillText.textContent = completed.length + " upgrade" + (completed.length > 1 ? "s" : "") + " done";
+      return;
+    }
+    upgradeQueuePill.classList.add("u-hidden");
+    upgradeQueuePill.classList.remove("has-active", "has-completed", "has-failed");
+  }
+
+  function renderQueueBanner(active, queued) {
+    if (!modulesQueueStatus || !modulesQueueStatusMsg) return;
+    if (active.length + queued.length > 0) {
+      modulesQueueStatus.classList.remove("u-hidden");
+      const activeName = active[0] ? ("Upgrading '" + active[0].id + "'...") : "Module upgrades queued";
+      const countInfo = queued.length > 0 ? (" — " + queued.length + " more in queue") : "";
+      modulesQueueStatusMsg.textContent = activeName + countInfo;
+    } else {
+      modulesQueueStatus.classList.add("u-hidden");
+    }
+  }
+
+  function getQueueItemStatusMeta(item) {
+    switch (item.status) {
+      case "upgrading":
+        return {
+          pill: "<span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>",
+          meta: "Started " + new Date(item.startedAt || item.queuedAt).toLocaleTimeString()
+        };
+      case "queued":
+        return {
+          pill: "<span class=\"pill warning\">Queued</span>",
+          meta: "Queued " + new Date(item.queuedAt).toLocaleTimeString()
+        };
+      case "completed":
+        return {
+          pill: "<span class=\"pill good\">✓ v" + escapeHtml(item.version || "latest") + "</span>",
+          meta: "Completed " + new Date(item.completedAt).toLocaleTimeString()
+        };
+      case "failed":
+        return {
+          pill: "<span class=\"pill danger\" title=\"" + escapeHtml(item.error || "Error") + "\">✕ Failed</span>",
+          meta: escapeHtml(item.error || "Unknown error")
+        };
+      default:
+        return { pill: "", meta: "" };
+    }
+  }
+
+  function renderQueueItemHtml(item) {
+    const details = getQueueItemStatusMeta(item);
+    return "<div class=\"queue-item\">" +
+      "<div class=\"queue-item-left\">" +
+        "<span class=\"queue-item-id\">" + escapeHtml(item.id) + "</span>" +
+        "<span class=\"queue-item-meta\">" + details.meta + "</span>" +
+      "</div>" +
+      "<div class=\"queue-item-badge\">" + details.pill + "</div>" +
+    "</div>";
+  }
+
+  function renderQueueList(items) {
+    if (!upgradeQueueList || !upgradeQueueEmpty) return;
+    if (items.length === 0) {
+      upgradeQueueEmpty.classList.remove("u-hidden");
+      upgradeQueueList.classList.add("u-hidden");
+      upgradeQueueList.innerHTML = "";
+      return;
+    }
+    upgradeQueueEmpty.classList.add("u-hidden");
+    upgradeQueueList.classList.remove("u-hidden");
+    upgradeQueueList.innerHTML = items.slice().reverse().map(renderQueueItemHtml).join("");
+  }
 
   window.upgradeQueue = upgradeQueue;
 
@@ -912,6 +930,57 @@
     moduleDetailDialog.showModal();
   }
 
+  function renderMenuPositionOptions(currentPos) {
+    const positions = [
+      { id: "providers", label: "Menu: Providers" },
+      { id: "sidebar", label: "Menu: Sidebar" },
+      { id: "studios", label: "Menu: Studios" },
+      { id: "hidden", label: "Menu: Hidden" }
+    ];
+    return positions.map(function(p) {
+      return "<option value=\"" + p.id + "\"" + (currentPos === p.id ? " selected" : "") + ">" + p.label + "</option>";
+    }).join("");
+  }
+
+  function getUpgradeButtonState(qItem, busyAttr) {
+    if (qItem?.status === "upgrading") {
+      return {
+        label: "Upgrading...",
+        busy: " disabled aria-busy=\"true\"",
+        title: "Module upgrade in progress"
+      };
+    }
+    if (qItem?.status === "queued") {
+      return {
+        label: "Queued",
+        busy: " disabled",
+        title: "Module queued for upgrade"
+      };
+    }
+    return {
+      label: "Upgrade",
+      busy: busyAttr,
+      title: "Upgrade module to latest version"
+    };
+  }
+
+  function renderPersonalModuleActions(moduleId, busyAttr) {
+    const qItem = upgradeQueue.getItem(moduleId);
+    const upg = getUpgradeButtonState(qItem, busyAttr);
+    return " <button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(moduleId) + "\"" + upg.busy + " title=\"" + escapeHtml(upg.title) + "\">" + escapeHtml(upg.label) + "</button>" +
+      " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(moduleId) + "\"" + busyAttr + ">Remove</button>";
+  }
+
+  function formatQueueStatusPill(qItem) {
+    if (qItem?.status === "upgrading") {
+      return " <span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>";
+    }
+    if (qItem?.status === "queued") {
+      return " <span class=\"pill warning\">Queued</span>";
+    }
+    return "";
+  }
+
   function renderModuleActions(m, isBuiltin, isEnabled, isBusy) {
     const busyAttr = isBusy ? " disabled" : "";
     const toggleAction = isEnabled ? "false" : "true";
@@ -920,32 +989,16 @@
     const tabTarget = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
     const cfgUrl = m.config_url || ("/modules/" + m.id + "/config");
     const curPos = m.menu_position || "providers";
+    const posOptions = renderMenuPositionOptions(curPos);
     const posSelect = " <select class=\"field module-pos-select\" data-module-id=\"" + escapeHtml(m.id) + "\" aria-label=\"Menu position for " + escapeHtml(m.name) + "\"" + busyAttr + ">" +
-      "<option value=\"providers\"" + (curPos === "providers" ? " selected" : "") + ">Menu: Providers</option>" +
-      "<option value=\"sidebar\"" + (curPos === "sidebar" ? " selected" : "") + ">Menu: Sidebar</option>" +
-      "<option value=\"studios\"" + (curPos === "studios" ? " selected" : "") + ">Menu: Studios</option>" +
-      "<option value=\"hidden\"" + (curPos === "hidden" ? " selected" : "") + ">Menu: Hidden</option>" +
+      posOptions +
     "</select>";
     const orderBtns = " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"up\" title=\"Move up in menu\"" + busyAttr + ">↑</button>" +
       " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
     const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
       " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
     const testBtn = " <button class=\"btn module-test\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Test module execution and health\">Test</button>";
-    let personalBtns = "";
-    if (!isBuiltin) {
-      const qItem = upgradeQueue.getItem(m.id);
-      let upgLabel = "Upgrade";
-      let upgBusy = busyAttr;
-      let upgTitle = "Upgrade module to latest version";
-      if (qItem && (qItem.status === "upgrading" || qItem.status === "queued")) {
-        upgLabel = qItem.status === "upgrading" ? "Upgrading..." : "Queued";
-        upgBusy = " disabled";
-        if (qItem.status === "upgrading") upgBusy += " aria-busy=\"true\"";
-        upgTitle = qItem.status === "upgrading" ? "Module upgrade in progress" : "Module queued for upgrade";
-      }
-      personalBtns = " <button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(m.id) + "\"" + upgBusy + " title=\"" + escapeHtml(upgTitle) + "\">" + escapeHtml(upgLabel) + "</button>" +
-        " <button class=\"btn module-remove\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + ">Remove</button>";
-    }
+    const personalBtns = !isBuiltin ? renderPersonalModuleActions(m.id, busyAttr) : "";
     return toggleBtn + testBtn + configBtns + posSelect + orderBtns + personalBtns;
   }
 
@@ -980,12 +1033,7 @@
         const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
         const versionStr = m.version ? ("v" + escapeHtml(m.version)) : "—";
         const qItem = upgradeQueue.getItem(m.id);
-        let queuePill = "";
-        if (qItem && qItem.status === "upgrading") {
-          queuePill = " <span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>";
-        } else if (qItem && qItem.status === "queued") {
-          queuePill = " <span class=\"pill warning\">Queued</span>";
-        }
+        const queuePill = formatQueueStatusPill(qItem);
 
         return "<tr>" +
           "<td><button class=\"name-link module-detail\" data-module-id=\"" + escapeHtml(m.id) + "\">" + escapeHtml(m.id) + "</button></td>" +
@@ -1013,12 +1061,7 @@
         const actionBtns = renderModuleActions(m, isBuiltin, isEnabled, isBusy);
         const versionBadge = m.version ? (" <span class=\"pill gray\">v" + escapeHtml(m.version) + "</span>") : "";
         const qItem = upgradeQueue.getItem(m.id);
-        let queuePill = "";
-        if (qItem && qItem.status === "upgrading") {
-          queuePill = " <span class=\"pill accent\"><span class=\"queue-icon-spin\">⟳</span> Upgrading...</span>";
-        } else if (qItem && qItem.status === "queued") {
-          queuePill = " <span class=\"pill warning\">Queued</span>";
-        }
+        const queuePill = formatQueueStatusPill(qItem);
 
         return "<div class=\"card catalogitem\">" +
           "<div class=\"catalogtitle\">" +
