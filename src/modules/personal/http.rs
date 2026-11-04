@@ -22,12 +22,15 @@ pub(crate) fn dispatch_local_http(
         _ => format!("{base_url}/{clean_sub}"),
     };
 
-    let agent_config = ureq::Agent::config_builder()
+    let is_loopback = base_url.contains("127.0.0.1") || base_url.contains("localhost");
+    let mut builder = ureq::Agent::config_builder()
         .timeout_global(Some(DEFAULT_MODULE_TIMEOUT))
         .max_redirects(0)
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(agent_config);
+        .http_status_as_error(false);
+    if is_loopback {
+        builder = builder.proxy(None);
+    }
+    let agent = ureq::Agent::new_with_config(builder.build());
 
     let is_post = request.method.eq_ignore_ascii_case("post");
     let is_get = request.method.eq_ignore_ascii_case("get");
@@ -85,12 +88,15 @@ pub fn execute_http_payload(
     let clean_sub = subpath.trim_start_matches('/');
     let target_url = format!("{base_url}/{clean_sub}");
 
-    let agent_config = ureq::Agent::config_builder()
+    let is_loopback = base_url.contains("127.0.0.1") || base_url.contains("localhost");
+    let mut builder = ureq::Agent::config_builder()
         .timeout_global(Some(DEFAULT_MODULE_TIMEOUT))
         .max_redirects(0)
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(agent_config);
+        .http_status_as_error(false);
+    if is_loopback {
+        builder = builder.proxy(None);
+    }
+    let agent = ureq::Agent::new_with_config(builder.build());
 
     let is_post = method.eq_ignore_ascii_case("post");
     let resp = if is_post {
