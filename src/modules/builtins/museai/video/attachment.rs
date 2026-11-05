@@ -41,60 +41,50 @@ pub fn parse_and_validate_attachment(
     Ok(list.into_iter().next())
 }
 
-pub fn parse_and_validate_attachments(val: &serde_json::Value) -> io::Result<Vec<VideoAttachment>> {
-    let mut raw_strings = Vec::new();
-
-    if let Some(arr) = val.get("images").and_then(|v| v.as_array()) {
-        for item in arr {
-            if let Some(s) = item.as_str() {
-                let trimmed = s.trim();
-                if !trimmed.is_empty() {
-                    raw_strings.push(trimmed.to_string());
-                }
-            } else if let Some(u) = item.get("url").and_then(|v| v.as_str()) {
-                let trimmed = u.trim();
-                if !trimmed.is_empty() {
-                    raw_strings.push(trimmed.to_string());
-                }
-            }
-        }
-    } else if let Some(arr) = val.get("reference_images").and_then(|v| v.as_array()) {
-        for item in arr {
-            if let Some(u) = item.get("url").and_then(|v| v.as_str()) {
-                let trimmed = u.trim();
-                if !trimmed.is_empty() {
-                    raw_strings.push(trimmed.to_string());
-                }
-            } else if let Some(s) = item.as_str() {
-                let trimmed = s.trim();
-                if !trimmed.is_empty() {
-                    raw_strings.push(trimmed.to_string());
-                }
-            }
-        }
-    } else if let Some(arr) = val.get("image_urls").and_then(|v| v.as_array()) {
-        for item in arr {
-            if let Some(s) = item.as_str() {
-                let trimmed = s.trim();
-                if !trimmed.is_empty() {
-                    raw_strings.push(trimmed.to_string());
-                }
-            }
-        }
-    } else {
-        let single = val
-            .get("image_url")
-            .or_else(|| val.get("image"))
-            .or_else(|| val.get("attachment"))
-            .or_else(|| val.get("reference_image"))
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-
-        if let Some(s) = single {
-            raw_strings.push(s.to_string());
+fn extract_image_item(item: &serde_json::Value) -> Option<String> {
+    if let Some(s) = item.as_str() {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
+    if let Some(u) = item.get("url").and_then(|v| v.as_str()) {
+        let trimmed = u.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+fn extract_attachment_strings(val: &serde_json::Value) -> Vec<String> {
+    const ARRAY_KEYS: [&str; 3] = ["images", "reference_images", "image_urls"];
+    for key in ARRAY_KEYS {
+        if let Some(arr) = val.get(key).and_then(|v| v.as_array()) {
+            let extracted: Vec<String> = arr.iter().filter_map(extract_image_item).collect();
+            if !extracted.is_empty() {
+                return extracted;
+            }
+        }
+    }
+
+    const SINGLE_KEYS: [&str; 4] = ["image_url", "image", "attachment", "reference_image"];
+    for key in SINGLE_KEYS {
+        if let Some(s) = val
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return vec![s.to_string()];
+        }
+    }
+
+    Vec::new()
+}
+
+pub fn parse_and_validate_attachments(val: &serde_json::Value) -> io::Result<Vec<VideoAttachment>> {
+    let raw_strings = extract_attachment_strings(val);
 
     if raw_strings.len() > MAX_ATTACHMENTS_PER_REQUEST {
         return Err(io::Error::new(
@@ -127,11 +117,11 @@ pub fn validate_attachment_string(raw: &str) -> io::Result<VideoAttachment> {
         return validate_external_image_url(raw);
     }
 
+    let display_sample = raw.char_indices().nth(60).map_or(raw, |(i, _)| &raw[..i]);
     Err(io::Error::new(
         io::ErrorKind::InvalidInput,
         format!(
-            "invalid image attachment: expected https:// URL, internal /muse-ai/v1/images/ path, or data:image/* data URI; got '{}'",
-            if raw.len() > 60 { &raw[..60] } else { raw }
+            "invalid image attachment: expected https:// URL, internal /muse-ai/v1/images/ path, or data:image/* data URI; got '{display_sample}'"
         ),
     ))
 }
@@ -238,13 +228,18 @@ fn validate_external_image_url(url_str: &str) -> io::Result<VideoAttachment> {
 
 fn secure_url_host(url_str: &str) -> Option<String> {
     let rest = url_str.strip_prefix("https://")?;
-    let authority = rest.split('/').next().unwrap_or(rest);
-    let host = authority.split('@').next_back().unwrap_or(authority);
-    let host = if host.starts_with('[') {
-        host.split(']').next()?.trim_start_matches('[')
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or(rest);
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    let host = if authority.starts_with('[') {
+        authority.split(']').next()?.trim_start_matches('[')
     } else {
-        host.split(':').next().unwrap_or(host)
+        authority.split(':').next().unwrap_or(authority)
     };
+    if host.is_empty() {
+        return None;
+    }
     Some(host.to_ascii_lowercase().trim_end_matches('.').to_string())
 }
 
@@ -267,6 +262,13 @@ fn is_secure_host(host: &str) -> bool {
                     || ipv4.is_broadcast())
             }
             IpAddr::V6(ipv6) => {
+                if let Some(mapped) = ipv6.to_ipv4_mapped() {
+                    return !(mapped.is_private()
+                        || mapped.is_loopback()
+                        || mapped.is_link_local()
+                        || mapped.is_unspecified()
+                        || mapped.is_broadcast());
+                }
                 let first = ipv6.segments()[0];
                 !(ipv6.is_loopback()
                     || ipv6.is_unspecified()

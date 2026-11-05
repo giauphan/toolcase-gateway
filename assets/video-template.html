@@ -317,7 +317,7 @@ input:focus, select:focus, textarea:focus {
       </div>
       <div id="image-gallery" style="display:none;margin-top:12px;gap:10px;flex-wrap:wrap"></div>
       <div id="image-preview-wrap" style="display:none;margin-top:10px">
-        <img id="image-preview" src="" alt="Reference image preview" style="max-height:140px;border-radius:6px;border:1px solid var(--edge)">
+        <img id="image-preview" src="" alt="Reference preview" style="max-height:140px;border-radius:6px;border:1px solid var(--edge)">
       </div>
     </div>
   </div>
@@ -513,41 +513,43 @@ input:focus, select:focus, textarea:focus {
   var btnClearImage=document.getElementById("btn-clear-image");
   var attachmentsList = [];
 
+  function createGalleryCard(item, idx){
+    var card = document.createElement("div");
+    card.style.cssText = "position:relative;display:inline-block;width:90px;height:90px;border-radius:6px;overflow:hidden;border:1px solid var(--edge);background:var(--surface-1)";
+    var img = document.createElement("img");
+    img.src = item;
+    img.alt = "Attached frame " + (idx + 1);
+    img.style.cssText = "width:100%;height:100%;object-fit:cover";
+    var btnDel = document.createElement("button");
+    btnDel.type = "button";
+    btnDel.textContent = "×";
+    btnDel.title = "Remove image";
+    btnDel.style.cssText = "position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;line-height:18px;text-align:center";
+    btnDel.addEventListener("click", function(e){
+      e.stopPropagation();
+      attachmentsList.splice(idx, 1);
+      renderGallery();
+    });
+    card.appendChild(img);
+    card.appendChild(btnDel);
+    return card;
+  }
+
   function renderGallery(){
     if(!imageGallery) return;
     imageGallery.innerHTML = "";
-    if(attachmentsList.length > 0){
-      imageGallery.style.display = "flex";
-      if(btnClearImage) btnClearImage.style.display = "inline-block";
+    var hasAttachments = attachmentsList.length > 0;
+    imageGallery.style.display = hasAttachments ? "flex" : "none";
+    if(btnClearImage) btnClearImage.style.display = hasAttachments ? "inline-block" : "none";
+    if(imagePreviewWrap) imagePreviewWrap.style.display = (hasAttachments && imagePreview) ? "block" : "none";
+
+    if(hasAttachments){
       attachmentsList.forEach(function(item, idx){
-        var card = document.createElement("div");
-        card.style.cssText = "position:relative;display:inline-block;width:90px;height:90px;border-radius:6px;overflow:hidden;border:1px solid var(--edge);background:var(--surface-1)";
-        var img = document.createElement("img");
-        img.src = item;
-        img.style.cssText = "width:100%;height:100%;object-fit:cover";
-        var btnDel = document.createElement("button");
-        btnDel.type = "button";
-        btnDel.textContent = "×";
-        btnDel.title = "Remove image";
-        btnDel.style.cssText = "position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;line-height:18px;text-align:center";
-        btnDel.addEventListener("click", function(e){
-          e.stopPropagation();
-          attachmentsList.splice(idx, 1);
-          renderGallery();
-        });
-        card.appendChild(img);
-        card.appendChild(btnDel);
-        imageGallery.appendChild(card);
+        imageGallery.appendChild(createGalleryCard(item, idx));
       });
-      if(imagePreview && attachmentsList[0]){
-        imagePreview.src = attachmentsList[0];
-        if(imagePreviewWrap) imagePreviewWrap.style.display = "block";
-      }
-    } else {
-      imageGallery.style.display = "none";
-      if(btnClearImage) btnClearImage.style.display = "none";
-      if(imagePreviewWrap) imagePreviewWrap.style.display = "none";
-      if(imagePreview) imagePreview.src = "";
+      if(imagePreview) imagePreview.src = attachmentsList[0];
+    } else if(imagePreview){
+      imagePreview.src = "";
     }
     render();
   }
@@ -559,7 +561,7 @@ input:focus, select:focus, textarea:focus {
       setError("Maximum of 5 images allowed per video request.");
       return;
     }
-    if(attachmentsList.indexOf(trimmed) === -1){
+    if(!attachmentsList.includes(trimmed)){
       attachmentsList.push(trimmed);
       renderGallery();
     }
@@ -585,6 +587,9 @@ input:focus, select:focus, textarea:focus {
     imageFileInput.addEventListener("change", function(){
       if(this.files && this.files.length > 0){
         var remaining = 5 - attachmentsList.length;
+        if(this.files.length > remaining){
+          setError("Maximum of 5 images allowed per video request.");
+        }
         var count = Math.min(this.files.length, remaining);
         for(var i = 0; i < count; i++){
           var file = this.files[i];
@@ -776,7 +781,7 @@ input:focus, select:focus, textarea:focus {
 
     var currentList = attachmentsList.slice();
     var pending = imageAttachmentInput ? imageAttachmentInput.value.trim() : "";
-    if(pending && currentList.indexOf(pending) === -1 && currentList.length < 5){
+    if(pending && !currentList.includes(pending) && currentList.length < 5){
       currentList.push(pending);
     }
     if(currentList.length > 0){

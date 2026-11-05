@@ -366,4 +366,27 @@ fn test_frontend_html_contains_multi_image_elements() {
     assert!(html.contains("id=\"image-gallery\""));
     assert!(html.contains("multiple"));
     assert!(html.contains("body.images = currentList;"));
+    assert!(html.contains("Maximum of 5 images allowed per video request."));
+}
+
+#[test]
+fn test_non_ascii_truncation_does_not_panic() {
+    let non_ascii_payload = "é".repeat(35);
+    let res = validate_attachment_string(&non_ascii_payload);
+    assert!(res.is_err());
+    let err_msg = res.unwrap_err().to_string();
+    assert!(err_msg.contains("invalid image attachment"));
+}
+
+#[test]
+fn test_secure_url_host_evasion_rejected() {
+    // 1. Userinfo / @ bypass attempts
+    assert!(validate_attachment_string("https://127.0.0.1#@images.unsplash.com/a.png").is_err());
+    assert!(validate_attachment_string("https://user:pass@images.unsplash.com/a.png").is_err());
+    assert!(validate_attachment_string("https://admin@images.unsplash.com/a.png").is_err());
+
+    // 2. IPv4-mapped IPv6 loopback and private addresses
+    assert!(validate_attachment_string("https://[::ffff:127.0.0.1]/a.png").is_err());
+    assert!(validate_attachment_string("https://[::ffff:10.0.0.1]/a.png").is_err());
+    assert!(validate_attachment_string("https://[::ffff:192.168.1.1]/a.png").is_err());
 }
