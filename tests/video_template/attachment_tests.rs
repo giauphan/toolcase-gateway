@@ -431,7 +431,15 @@ fn test_multipart_form_data_single_image_upload() {
     assert_eq!(req.duration, 10);
     assert!(req.attachment.is_some());
     assert_eq!(req.attachment_urls.len(), 1);
-    assert!(req.attachment_urls[0].starts_with("data:image/png;base64,"));
+    assert!(req.attachment_urls[0].starts_with("/muse-ai/v1/images/img-upload-"));
+
+    let job_id = req.attachment_urls[0]
+        .strip_prefix("/muse-ai/v1/images/")
+        .and_then(|s| s.strip_suffix("/content"))
+        .unwrap();
+    let (bytes, mime) = toolcase_gateway::museai::image::load_image_media(job_id).unwrap();
+    assert_eq!(bytes, png_bytes);
+    assert_eq!(mime, "image/png");
 }
 
 #[test]
@@ -466,8 +474,24 @@ fn test_multipart_form_data_multiple_images() {
 
     let req = parse_and_validate_video_request(&body).expect("multi image multipart must succeed");
     assert_eq!(req.attachment_urls.len(), 2);
-    assert!(req.attachment_urls[0].starts_with("data:image/png;base64,"));
-    assert!(req.attachment_urls[1].starts_with("data:image/jpeg;base64,"));
+    assert!(req.attachment_urls[0].starts_with("/muse-ai/v1/images/img-upload-"));
+    assert!(req.attachment_urls[1].starts_with("/muse-ai/v1/images/img-upload-"));
+
+    let job_id_1 = req.attachment_urls[0]
+        .strip_prefix("/muse-ai/v1/images/")
+        .and_then(|s| s.strip_suffix("/content"))
+        .unwrap();
+    let (bytes1, mime1) = toolcase_gateway::museai::image::load_image_media(job_id_1).unwrap();
+    assert_eq!(bytes1, png_bytes);
+    assert_eq!(mime1, "image/png");
+
+    let job_id_2 = req.attachment_urls[1]
+        .strip_prefix("/muse-ai/v1/images/")
+        .and_then(|s| s.strip_suffix("/content"))
+        .unwrap();
+    let (bytes2, mime2) = toolcase_gateway::museai::image::load_image_media(job_id_2).unwrap();
+    assert_eq!(bytes2, jpeg_bytes);
+    assert_eq!(mime2, "image/jpeg");
 }
 
 #[test]
@@ -541,7 +565,15 @@ fn test_multipart_curl_form_exact_user_payload() {
     assert_eq!(req.duration, 10);
     assert!(req.attachment.is_some());
     assert_eq!(req.attachment_urls.len(), 1);
-    assert!(req.attachment_urls[0].starts_with("data:image/png;base64,"));
+    assert!(req.attachment_urls[0].starts_with("/muse-ai/v1/images/img-upload-"));
+
+    let job_id = req.attachment_urls[0]
+        .strip_prefix("/muse-ai/v1/images/")
+        .and_then(|s| s.strip_suffix("/content"))
+        .unwrap();
+    let (bytes, mime) = toolcase_gateway::museai::image::load_image_media(job_id).unwrap();
+    assert_eq!(bytes, image_bytes);
+    assert_eq!(mime, "image/png");
 
     // Pipeline submission simulation
     let config = toolcase_gateway::config::Config::default();
@@ -559,5 +591,19 @@ fn test_multipart_curl_form_exact_user_payload() {
 
     assert!(res["id"].as_str().is_some());
     assert_eq!(res["status"].as_str(), Some("submitting"));
-    assert_eq!(res["attachment_urls"][0], req.attachment_urls[0]);
+    assert!(res["attachment_urls"][0]
+        .as_str()
+        .unwrap()
+        .starts_with("/muse-ai/v1/images/img-upload-"));
+
+    let res_job_id = res["attachment_urls"][0]
+        .as_str()
+        .unwrap()
+        .strip_prefix("/muse-ai/v1/images/")
+        .and_then(|s| s.strip_suffix("/content"))
+        .unwrap();
+    let (res_bytes, res_mime) =
+        toolcase_gateway::museai::image::load_image_media(res_job_id).unwrap();
+    assert_eq!(res_bytes, image_bytes);
+    assert_eq!(res_mime, "image/png");
 }

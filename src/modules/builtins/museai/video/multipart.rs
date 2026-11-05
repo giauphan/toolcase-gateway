@@ -1,10 +1,8 @@
 //! Multipart form-data parser for video creation requests.
 //!
 //! Enables standard multipart/form-data uploads (`curl -F`, SDKs, HTML forms)
-//! alongside application/json payloads, converting binary files to validated data URIs.
+//! alongside application/json payloads, persisting binary files to internal image media.
 
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
 use std::collections::HashMap;
 use std::io;
 
@@ -50,8 +48,32 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
                 ));
             }
             let mime = detect_image_mime(part_body, content_type.as_deref())?;
-            let data_uri = format!("data:{mime};base64,{}", BASE64.encode(part_body));
-            images.push(data_uri);
+            let ext = super::super::image::guess_extension(&mime);
+            let img_id = format!("img-upload-{}", uuid::Uuid::new_v4());
+            super::super::image::save_image_media(&img_id, part_body, ext)?;
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let record = super::super::image::ImageJobRecord {
+                job_id: img_id.clone(),
+                owner_id: "default-owner".to_string(),
+                model: "uploaded".to_string(),
+                requested_model: "uploaded".to_string(),
+                prompt: "multipart upload".to_string(),
+                aspect_ratio: "original".to_string(),
+                created_at: now,
+                last_activity_at: now,
+                status: "completed".to_string(),
+                media_validated: true,
+                output_verified: true,
+                image_url: format!("/muse-ai/v1/images/{img_id}/content"),
+                ..Default::default()
+            };
+            let _ = super::super::image::save_image_job(&record);
+
+            images.push(format!("/muse-ai/v1/images/{img_id}/content"));
         } else {
             let val = String::from_utf8(part_body.to_vec()).map_err(|e| {
                 io::Error::new(
