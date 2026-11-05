@@ -32,7 +32,20 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         serde_json::json!({})
     } else {
         serde_json::from_slice(request_body).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid JSON: {e}"))
+            let non_ws = request_body
+                .iter()
+                .copied()
+                .skip_while(|b| b.is_ascii_whitespace())
+                .take(4)
+                .collect::<Vec<_>>();
+            let hint = if non_ws.starts_with(b"--") {
+                " (payload appears to be multipart/form-data or CLI flags; expected application/json object like '{\"prompt\": \"...\"}')"
+            } else if non_ws.starts_with(b"-") {
+                " (payload starts with '-'; verify curl or CLI flags were not piped directly into the HTTP body)"
+            } else {
+                ""
+            };
+            io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid JSON: {e}{hint}"))
         })?
     };
 
