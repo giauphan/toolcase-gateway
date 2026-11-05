@@ -82,6 +82,8 @@ where
         "approval_status": serde_json::Value::Null,
         "approval_id": serde_json::Value::Null,
         "video_url": "",
+        "attachment_url": req.attachment_url,
+        "attachment_urls": req.attachment_urls,
         "revisions": []
     });
 

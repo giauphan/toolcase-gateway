@@ -31,22 +31,20 @@ fn parse_request_json(request_body: &[u8]) -> io::Result<serde_json::Value> {
     if request_body.is_empty() {
         return Ok(serde_json::json!({}));
     }
-    serde_json::from_slice(request_body).map_err(|e| {
-        let non_ws = request_body
-            .iter()
-            .copied()
-            .skip_while(u8::is_ascii_whitespace)
-            .take(4)
-            .collect::<Vec<_>>();
-        let hint = if non_ws.starts_with(b"--") {
-            " (payload appears to be multipart/form-data or CLI flags; expected application/json object like '{\"prompt\": \"...\"}')"
-        } else if non_ws.starts_with(b"-") {
-            " (payload starts with '-'; verify curl or CLI flags were not piped directly into the HTTP body)"
-        } else {
-            ""
-        };
-        io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid JSON: {e}{hint}"))
-    })
+
+    let non_ws = request_body
+        .iter()
+        .copied()
+        .skip_while(u8::is_ascii_whitespace)
+        .take(2)
+        .collect::<Vec<_>>();
+
+    if non_ws == b"--" {
+        return super::multipart::parse_multipart_form(request_body);
+    }
+
+    serde_json::from_slice(request_body)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid JSON: {e}")))
 }
 
 fn extract_prompt(body: &serde_json::Value) -> io::Result<String> {

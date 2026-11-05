@@ -6,6 +6,7 @@
 mod attachment;
 mod handlers;
 mod media;
+pub(crate) mod multipart;
 mod pipeline;
 mod request;
 mod response;

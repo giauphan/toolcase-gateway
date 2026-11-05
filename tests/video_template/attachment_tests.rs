@@ -390,3 +390,174 @@ fn test_secure_url_host_evasion_rejected() {
     assert!(validate_attachment_string("https://[::ffff:10.0.0.1]/a.png").is_err());
     assert!(validate_attachment_string("https://[::ffff:192.168.1.1]/a.png").is_err());
 }
+
+#[test]
+fn test_multipart_form_data_single_image_upload() {
+    let png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4";
+    let boundary = "------------------------boundaryTest123";
+    let mut body = Vec::new();
+
+    // field: prompt
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
+    body.extend_from_slice(b"Animate the owl spreading its wings and blinking glowing eye\r\n");
+
+    // field: aspect_ratio
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"aspect_ratio\"\r\n\r\n");
+    body.extend_from_slice(b"16:9\r\n");
+
+    // field: duration
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"duration\"\r\n\r\n");
+    body.extend_from_slice(b"10\r\n");
+
+    // field: image file
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"image\"; filename=\"Moonlit Owl with Radiant Wings.png\"\r\n");
+    body.extend_from_slice(b"Content-Type: image/png\r\n\r\n");
+    body.extend_from_slice(png_bytes);
+    body.extend_from_slice(b"\r\n");
+
+    // end
+    body.extend_from_slice(format!("{boundary}--\r\n").as_bytes());
+
+    let req = parse_and_validate_video_request(&body).expect("multipart parsing must succeed");
+    assert_eq!(
+        req.prompt,
+        "Animate the owl spreading its wings and blinking glowing eye"
+    );
+    assert_eq!(req.aspect_ratio, "16:9");
+    assert_eq!(req.duration, 10);
+    assert!(req.attachment.is_some());
+    assert_eq!(req.attachment_urls.len(), 1);
+    assert!(req.attachment_urls[0].starts_with("data:image/png;base64,"));
+}
+
+#[test]
+fn test_multipart_form_data_multiple_images() {
+    let png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4";
+    let jpeg_bytes =
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00";
+    let boundary = "------------------------multiBoundary789";
+    let mut body = Vec::new();
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
+    body.extend_from_slice(b"Two angles animation\r\n");
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"images\"; filename=\"angle1.png\"\r\n",
+    );
+    body.extend_from_slice(b"Content-Type: image/png\r\n\r\n");
+    body.extend_from_slice(png_bytes);
+    body.extend_from_slice(b"\r\n");
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"images\"; filename=\"angle2.jpg\"\r\n",
+    );
+    body.extend_from_slice(b"Content-Type: image/jpeg\r\n\r\n");
+    body.extend_from_slice(jpeg_bytes);
+    body.extend_from_slice(b"\r\n");
+
+    body.extend_from_slice(format!("{boundary}--\r\n").as_bytes());
+
+    let req = parse_and_validate_video_request(&body).expect("multi image multipart must succeed");
+    assert_eq!(req.attachment_urls.len(), 2);
+    assert!(req.attachment_urls[0].starts_with("data:image/png;base64,"));
+    assert!(req.attachment_urls[1].starts_with("data:image/jpeg;base64,"));
+}
+
+#[test]
+fn test_multipart_form_data_unsupported_mime_rejected() {
+    let pdf_bytes = b"%PDF-1.4\n%fake";
+    let boundary = "------------------------boundaryPdf";
+    let mut body = Vec::new();
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
+    body.extend_from_slice(b"Should fail on pdf\r\n");
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"image\"; filename=\"doc.pdf\"\r\n",
+    );
+    body.extend_from_slice(b"Content-Type: application/pdf\r\n\r\n");
+    body.extend_from_slice(pdf_bytes);
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(format!("{boundary}--\r\n").as_bytes());
+
+    let res = parse_and_validate_video_request(&body);
+    assert!(res.is_err());
+    let err_msg = res.unwrap_err().to_string();
+    assert!(err_msg.contains("not a supported image"));
+}
+
+#[test]
+fn test_multipart_curl_form_exact_user_payload() {
+    let owl_image_path = "/home/ubuntu/my-video-agent/plan/Moonlit Owl with Radiant Wings.png";
+    let image_bytes = std::fs::read(owl_image_path).unwrap_or_else(|_| {
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc`\x00\x00\x00\x02\x00\x01H\xaf\xa4q\x00\x00\x00\x00IEND\xaeB`\x82".to_vec()
+    });
+
+    let boundary = "------------------------userCurlBoundary999";
+    let mut body = Vec::new();
+
+    // --form 'image=@"/home/ubuntu/my-video-agent/plan/Moonlit Owl with Radiant Wings.png"'
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"image\"; filename=\"Moonlit Owl with Radiant Wings.png\"\r\n",
+    );
+    body.extend_from_slice(b"Content-Type: image/png\r\n\r\n");
+    body.extend_from_slice(&image_bytes);
+    body.extend_from_slice(b"\r\n");
+
+    // --form 'prompt="Animate the owl spreading its wings and blinking glowing eye"'
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
+    body.extend_from_slice(b"Animate the owl spreading its wings and blinking glowing eye\r\n");
+
+    // --form 'aspect_ratio="16:9"'
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"aspect_ratio\"\r\n\r\n");
+    body.extend_from_slice(b"16:9\r\n");
+
+    // --form 'duration="10"'
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"duration\"\r\n\r\n");
+    body.extend_from_slice(b"10\r\n");
+
+    body.extend_from_slice(format!("{boundary}--\r\n").as_bytes());
+
+    let req = parse_and_validate_video_request(&body)
+        .expect("exact user curl payload must parse successfully");
+    assert_eq!(
+        req.prompt,
+        "Animate the owl spreading its wings and blinking glowing eye"
+    );
+    assert_eq!(req.aspect_ratio, "16:9");
+    assert_eq!(req.duration, 10);
+    assert!(req.attachment.is_some());
+    assert_eq!(req.attachment_urls.len(), 1);
+    assert!(req.attachment_urls[0].starts_with("data:image/png;base64,"));
+
+    // Pipeline submission simulation
+    let config = toolcase_gateway::config::Config::default();
+    let res = toolcase_gateway::museai::video::submit_video_with_completion(
+        &body,
+        &config,
+        |_req_body, _cfg, _stream| {
+            Ok(
+                "{\"choices\":[{\"message\":{\"content\":\"Generating video https://muse.ai/files/owl-test.mp4\"}}]}"
+                    .to_string(),
+            )
+        },
+    )
+    .expect("pipeline execution must succeed for user multipart payload");
+
+    assert!(res["id"].as_str().is_some());
+    assert_eq!(res["status"].as_str(), Some("submitting"));
+    assert_eq!(res["attachment_urls"][0], req.attachment_urls[0]);
+}
