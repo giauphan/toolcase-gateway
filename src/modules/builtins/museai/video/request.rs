@@ -154,9 +154,20 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
     let attachment_url = attachment_urls.first().cloned();
     let attachment = attachments.first().cloned();
 
+    // For text prompts, replace data URI blobs with human-readable labels
+    // so the full base64 string isn't embedded in the text message.
+    let display_refs: Vec<String> = attachments
+        .iter()
+        .enumerate()
+        .map(|(i, a)| match a {
+            VideoAttachment::DataUri { .. } => format!("<attached image {}>", i + 1),
+            _ => a.as_reference().to_string(),
+        })
+        .collect();
+
     let full_prompt = if let Some(ref parent) = existing_job {
-        if !attachment_urls.is_empty() {
-            let refs = attachment_urls.join(", ");
+        if !display_refs.is_empty() {
+            let refs = display_refs.join(", ");
             format!(
                 "Edit this existing video (source: {}) with reference images ({refs}): \"{prompt}\". Return a public Google Drive link when ready.",
                 parent.video_url
@@ -173,7 +184,7 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
             &prompt,
             &aspect_ratio,
             duration,
-            &attachment_urls,
+            &display_refs,
         )
     };
 
@@ -185,11 +196,34 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         .map(str::to_string)
         .unwrap_or_else(|| format!("video-{}", Uuid::new_v4()));
 
+    // Build message content: use vision array when DataUri attachments are present so
+    // Muse AI receives the actual image bytes rather than a data URI embedded in plain text.
+    let has_data_uri = attachments
+        .iter()
+        .any(|a| matches!(a, VideoAttachment::DataUri { .. }));
+    let message_content: serde_json::Value = if has_data_uri {
+        let mut parts: Vec<serde_json::Value> = vec![serde_json::json!({
+            "type": "text",
+            "text": full_prompt
+        })];
+        for att in &attachments {
+            if let VideoAttachment::DataUri { reference, .. } = att {
+                parts.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": { "url": reference }
+                }));
+            }
+        }
+        serde_json::Value::Array(parts)
+    } else {
+        serde_json::Value::String(full_prompt.clone())
+    };
+
     let mut request_val = serde_json::json!({
         "model": "muse",
         "job_id": allocated_job_id,
         "messages": [
-            {"role": "user", "content": full_prompt}
+            {"role": "user", "content": message_content}
         ]
     });
     if let Some(ref parent) = existing_job {
