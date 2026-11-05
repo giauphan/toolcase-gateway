@@ -9,3 +9,6 @@ mod media_tests;
 
 #[path = "video_template/media_validation_tests.rs"]
 mod media_validation_tests;
+
+#[path = "video_template/attachment_tests.rs"]
+mod attachment_tests;

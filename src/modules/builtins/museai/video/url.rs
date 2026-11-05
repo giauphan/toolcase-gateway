@@ -20,10 +20,52 @@ pub fn is_muse_video_alias(model: &str) -> bool {
 }
 
 pub fn build_video_prompt(model: &str, prompt: &str, aspect_ratio: &str, duration: u64) -> String {
+    build_video_prompt_with_attachments(model, prompt, aspect_ratio, duration, &[])
+}
+
+pub fn build_video_prompt_with_attachment(
+    model: &str,
+    prompt: &str,
+    aspect_ratio: &str,
+    duration: u64,
+    attachment: Option<&str>,
+) -> String {
+    if let Some(att) = attachment.filter(|s| !s.trim().is_empty()) {
+        build_video_prompt_with_attachments(
+            model,
+            prompt,
+            aspect_ratio,
+            duration,
+            &[att.to_string()],
+        )
+    } else {
+        build_video_prompt_with_attachments(model, prompt, aspect_ratio, duration, &[])
+    }
+}
+
+pub fn build_video_prompt_with_attachments(
+    model: &str,
+    prompt: &str,
+    aspect_ratio: &str,
+    duration: u64,
+    attachments: &[String],
+) -> String {
     let _ = (model, aspect_ratio, duration);
-    format!(
-        "Create a video from this description if video generation is available: \"{prompt}\". Return a video artifact link when ready. Do not change sharing permissions."
-    )
+    if attachments.is_empty() {
+        format!(
+            "Create a video from this description if video generation is available: \"{prompt}\". Return a video artifact link when ready. Do not change sharing permissions."
+        )
+    } else if attachments.len() == 1 {
+        format!(
+            "Create a video animated from this reference image ({}) and description if video generation is available: \"{prompt}\". Return a video artifact link when ready. Do not change sharing permissions.",
+            attachments[0]
+        )
+    } else {
+        let refs = attachments.join(", ");
+        format!(
+            "Create a video animated from these reference images ({refs}) and description if video generation is available: \"{prompt}\". Return a video artifact link when ready. Do not change sharing permissions."
+        )
+    }
 }
 
 pub fn extract_candidate_urls(text: &str) -> Vec<String> {

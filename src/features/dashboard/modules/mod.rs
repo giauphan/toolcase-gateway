@@ -6,7 +6,7 @@ mod synthesis;
 mod testing;
 
 pub use queue::{get_in_flight_upgrades, try_acquire_upgrade};
-use source::resolve_upgrade_source_candidate;
+pub(crate) use source::resolve_upgrade_source_candidate;
 pub use synthesis::{generate_module_adapter_script, parse_or_synthesize_manifest, InstallPayload};
 pub use testing::handle_test_personal_module;
 

@@ -11,6 +11,7 @@ pub use module_ui::{
     handle_get_module_config, handle_module_config_page, handle_module_config_page_for_id,
     handle_set_module_position, handle_update_module_config,
 };
+pub(crate) use modules::resolve_upgrade_source_candidate;
 pub use modules::{
     handle_get_upgrade_queue_status, handle_install_personal_module, handle_remove_personal_module,
     handle_set_module_state, handle_test_personal_module, handle_upgrade_personal_module,

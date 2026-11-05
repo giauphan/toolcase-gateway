@@ -47,6 +47,10 @@ pub struct VideoJobRecord {
     pub submission_key: Option<String>,
     #[serde(default)]
     pub last_checked_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachment_urls: Vec<String>,
     #[serde(default)]
     pub error: Option<String>,
 }

@@ -301,6 +301,25 @@ input:focus, select:focus, textarea:focus {
         <option value="30">30s</option>
       </select>
     </div>
+
+    <div class="row">
+      <label for="image-attachment">Reference Images (Image-to-Video List, up to 5)</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="image-attachment" name="image_url" placeholder="Paste HTTPS image URL, /muse-ai/v1/images/{id}/content, or data:image/*">
+        <button type="button" class="btn-quick" id="btn-add-url" style="white-space:nowrap;padding:8px 12px">+ Add to List</button>
+      </div>
+      <div class="helper-actions" style="margin-top:8px">
+        <label class="btn-quick" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+          <span>📁 Upload Image Files (Multi)</span>
+          <input type="file" id="image-file-input" accept="image/png,image/jpeg,image/webp" multiple style="display:none">
+        </label>
+        <button type="button" class="btn-quick" id="btn-clear-image" style="display:none">Clear All Images</button>
+      </div>
+      <div id="image-gallery" style="display:none;margin-top:12px;gap:10px;flex-wrap:wrap"></div>
+      <div id="image-preview-wrap" style="display:none;margin-top:10px">
+        <img id="image-preview" src="" alt="Reference image preview" style="max-height:140px;border-radius:6px;border:1px solid var(--edge)">
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -485,8 +504,126 @@ input:focus, select:focus, textarea:focus {
     download.style.display="none";
   }
 
+  var imageAttachmentInput=document.getElementById("image-attachment");
+  var imageFileInput=document.getElementById("image-file-input");
+  var btnAddUrl=document.getElementById("btn-add-url");
+  var imageGallery=document.getElementById("image-gallery");
+  var imagePreviewWrap=document.getElementById("image-preview-wrap");
+  var imagePreview=document.getElementById("image-preview");
+  var btnClearImage=document.getElementById("btn-clear-image");
+  var attachmentsList = [];
+
+  function renderGallery(){
+    if(!imageGallery) return;
+    imageGallery.innerHTML = "";
+    if(attachmentsList.length > 0){
+      imageGallery.style.display = "flex";
+      if(btnClearImage) btnClearImage.style.display = "inline-block";
+      attachmentsList.forEach(function(item, idx){
+        var card = document.createElement("div");
+        card.style.cssText = "position:relative;display:inline-block;width:90px;height:90px;border-radius:6px;overflow:hidden;border:1px solid var(--edge);background:var(--surface-1)";
+        var img = document.createElement("img");
+        img.src = item;
+        img.style.cssText = "width:100%;height:100%;object-fit:cover";
+        var btnDel = document.createElement("button");
+        btnDel.type = "button";
+        btnDel.textContent = "×";
+        btnDel.title = "Remove image";
+        btnDel.style.cssText = "position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;line-height:18px;text-align:center";
+        btnDel.addEventListener("click", function(e){
+          e.stopPropagation();
+          attachmentsList.splice(idx, 1);
+          renderGallery();
+        });
+        card.appendChild(img);
+        card.appendChild(btnDel);
+        imageGallery.appendChild(card);
+      });
+      if(imagePreview && attachmentsList[0]){
+        imagePreview.src = attachmentsList[0];
+        if(imagePreviewWrap) imagePreviewWrap.style.display = "block";
+      }
+    } else {
+      imageGallery.style.display = "none";
+      if(btnClearImage) btnClearImage.style.display = "none";
+      if(imagePreviewWrap) imagePreviewWrap.style.display = "none";
+      if(imagePreview) imagePreview.src = "";
+    }
+    render();
+  }
+
+  function addAttachmentItem(val){
+    var trimmed = (val || "").trim();
+    if(!trimmed) return;
+    if(attachmentsList.length >= 5){
+      setError("Maximum of 5 images allowed per video request.");
+      return;
+    }
+    if(attachmentsList.indexOf(trimmed) === -1){
+      attachmentsList.push(trimmed);
+      renderGallery();
+    }
+    if(imageAttachmentInput) imageAttachmentInput.value = "";
+  }
+
+  if(btnAddUrl){
+    btnAddUrl.addEventListener("click", function(){
+      if(imageAttachmentInput) addAttachmentItem(imageAttachmentInput.value);
+    });
+  }
+
+  if(imageAttachmentInput){
+    imageAttachmentInput.addEventListener("keydown", function(e){
+      if(e.key === "Enter"){
+        e.preventDefault();
+        addAttachmentItem(imageAttachmentInput.value);
+      }
+    });
+  }
+
+  if(imageFileInput){
+    imageFileInput.addEventListener("change", function(){
+      if(this.files && this.files.length > 0){
+        var remaining = 5 - attachmentsList.length;
+        var count = Math.min(this.files.length, remaining);
+        for(var i = 0; i < count; i++){
+          var file = this.files[i];
+          var reader = new FileReader();
+          reader.onload = (function(f){
+            return function(e){
+              addAttachmentItem(e.target.result);
+            };
+          })(file);
+          reader.readAsDataURL(file);
+        }
+        this.value = "";
+      }
+    });
+  }
+
+  if(btnClearImage){
+    btnClearImage.addEventListener("click", function(){
+      attachmentsList = [];
+      if(imageAttachmentInput) imageAttachmentInput.value = "";
+      if(imageFileInput) imageFileInput.value = "";
+      renderGallery();
+    });
+  }
+
   function render(){
-    document.getElementById("settings-preview").textContent=JSON.stringify({model:state.model, aspect_ratio:state.aspect, duration:duration()}, null, 2);
+    var settings = {model:state.model, aspect_ratio:state.aspect, duration:duration()};
+    if(attachmentsList.length > 0){
+      settings.images = attachmentsList.map(function(s){
+        return s.startsWith("data:") ? "<embedded data:image base64>" : s;
+      });
+      settings.image = settings.images[0];
+    } else {
+      var singlePending = imageAttachmentInput ? imageAttachmentInput.value.trim() : "";
+      if(singlePending){
+        settings.image = singlePending.startsWith("data:") ? "<embedded data:image base64>" : singlePending;
+      }
+    }
+    document.getElementById("settings-preview").textContent=JSON.stringify(settings, null, 2);
     document.getElementById("preview").textContent=buildPrompt();
   }
 
@@ -636,6 +773,16 @@ input:focus, select:focus, textarea:focus {
       aspect_ratio: state.aspect,
       duration: duration()
     };
+
+    var currentList = attachmentsList.slice();
+    var pending = imageAttachmentInput ? imageAttachmentInput.value.trim() : "";
+    if(pending && currentList.indexOf(pending) === -1 && currentList.length < 5){
+      currentList.push(pending);
+    }
+    if(currentList.length > 0){
+      body.images = currentList;
+      body.image = currentList[0];
+    }
 
     var randomSuffix = (window.crypto && window.crypto.randomUUID)
       ? window.crypto.randomUUID()

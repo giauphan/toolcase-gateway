@@ -1,6 +1,6 @@
 [package]
 name = "toolcase-gateway"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.74"
 description = "Zero-dependency Rust HTTP reverse proxy for LLM APIs: tool-name case repair and model failover for OpenAI-compatible endpoints"

@@ -6,7 +6,7 @@ use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-pub(crate) fn video_job_response(
+pub fn video_job_response(
     existing: super::super::lifecycle::VideoJobRecord,
 ) -> io::Result<serde_json::Value> {
     if existing.status == "approval_required" {
@@ -43,6 +43,8 @@ pub(crate) fn video_job_response(
             "output_verified": existing.output_verified,
             "media_validated": existing.media_validated,
             "video_url": existing.video_url,
+            "attachment_url": existing.attachment_url,
+            "attachment_urls": existing.attachment_urls,
             "revision_id": rev_id,
             "revisions": existing.revisions
         }));
@@ -101,6 +103,8 @@ pub(crate) fn video_job_response(
         "approval_status": existing.approval_status,
         "approval_id": existing.approval_id,
         "video_url": "",
+        "attachment_url": existing.attachment_url,
+        "attachment_urls": existing.attachment_urls,
         "revisions": existing.revisions
     }))
 }
@@ -222,6 +226,8 @@ pub fn build_video_result_with_job_id(
         approval_id: None,
         submission_key,
         last_checked_at: Some(now),
+        attachment_url: None,
+        attachment_urls: Vec::new(),
         error: None,
     };
 
@@ -231,6 +237,8 @@ pub fn build_video_result_with_job_id(
         record.approval_status = existing.approval_status;
         record.approval_id = existing.approval_id;
         record.submission_key = existing.submission_key;
+        record.attachment_url = existing.attachment_url;
+        record.attachment_urls = existing.attachment_urls;
         record.prompt = prompt.to_string();
         record.status = status.to_string();
     }

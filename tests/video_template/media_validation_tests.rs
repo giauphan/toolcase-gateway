@@ -179,6 +179,8 @@ fn test_sync_video_creation_and_status_includes_full_video_url() {
         approval_id: None,
         submission_key: None,
         last_checked_at: Some(1700000005),
+        attachment_url: None,
+        attachment_urls: Vec::new(),
         error: None,
     };
     let _ = toolcase_gateway::museai::save_video_job(&job_record);

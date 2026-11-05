@@ -1,12 +1,15 @@
 //! Video generation request parsing, validation, and initialization.
 
+use super::attachment::{parse_and_validate_attachments, VideoAttachment};
 use super::url::{
-    build_video_prompt, normalize_video_model, SUPPORTED_ASPECT_RATIOS, SUPPORTED_MODELS,
+    build_video_prompt_with_attachments, normalize_video_model, SUPPORTED_ASPECT_RATIOS,
+    SUPPORTED_MODELS,
 };
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct ValidatedVideoRequest {
     pub allocated_job_id: String,
     pub prompt: String,
@@ -16,6 +19,10 @@ pub struct ValidatedVideoRequest {
     pub duration: u64,
     pub existing_job: Option<super::super::lifecycle::VideoJobRecord>,
     pub submission_key: Option<String>,
+    pub attachment: Option<VideoAttachment>,
+    pub attachment_url: Option<String>,
+    pub attachments: Vec<VideoAttachment>,
+    pub attachment_urls: Vec<String>,
     pub request_json: Vec<u8>,
     pub now: u64,
 }
@@ -112,13 +119,44 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         }
     };
 
+    let attachments = parse_and_validate_attachments(&body)?;
+    let mut attachment_urls: Vec<String> = attachments
+        .iter()
+        .map(|a| a.as_reference().to_string())
+        .collect();
+    if attachment_urls.is_empty() {
+        if let Some(ref parent) = existing_job {
+            if !parent.attachment_urls.is_empty() {
+                attachment_urls = parent.attachment_urls.clone();
+            } else if let Some(ref single) = parent.attachment_url {
+                attachment_urls = vec![single.clone()];
+            }
+        }
+    }
+    let attachment_url = attachment_urls.first().cloned();
+    let attachment = attachments.first().cloned();
+
     let full_prompt = if let Some(ref parent) = existing_job {
-        format!(
-            "Edit this existing video (source: {}): \"{prompt}\". Return a public Google Drive link when ready.",
-            parent.video_url
-        )
+        if !attachment_urls.is_empty() {
+            let refs = attachment_urls.join(", ");
+            format!(
+                "Edit this existing video (source: {}) with reference images ({refs}): \"{prompt}\". Return a public Google Drive link when ready.",
+                parent.video_url
+            )
+        } else {
+            format!(
+                "Edit this existing video (source: {}): \"{prompt}\". Return a public Google Drive link when ready.",
+                parent.video_url
+            )
+        }
     } else {
-        build_video_prompt(&upstream_model, &prompt, &aspect_ratio, duration)
+        build_video_prompt_with_attachments(
+            &upstream_model,
+            &prompt,
+            &aspect_ratio,
+            duration,
+            &attachment_urls,
+        )
     };
 
     let allocated_job_id = body
@@ -163,12 +201,16 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         duration,
         existing_job,
         submission_key,
+        attachment,
+        attachment_url,
+        attachments,
+        attachment_urls,
         request_json,
         now,
     })
 }
 
-pub(crate) fn create_init_job_record(
+pub fn create_init_job_record(
     req: &ValidatedVideoRequest,
 ) -> super::super::lifecycle::VideoJobRecord {
     super::super::lifecycle::VideoJobRecord {
@@ -192,6 +234,8 @@ pub(crate) fn create_init_job_record(
         approval_id: None,
         submission_key: req.submission_key.clone(),
         last_checked_at: Some(req.now),
+        attachment_url: req.attachment_url.clone(),
+        attachment_urls: req.attachment_urls.clone(),
         error: None,
     }
 }

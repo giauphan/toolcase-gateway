@@ -34,6 +34,9 @@ fn test_mcp_tools_and_resources_lifecycle() {
     assert!(tools
         .iter()
         .any(|t| t.name == "gateway_install_personal_module"));
+    assert!(tools
+        .iter()
+        .any(|t| t.name == "gateway_upgrade_personal_module"));
     // Verify unadapted built-in modules do not advertise synthetic tools
     assert!(!tools.iter().any(|t| t.name.starts_with("jev__")));
 
@@ -125,6 +128,154 @@ fn test_mcp_tools_and_resources_lifecycle() {
     assert!(metrics_text.contains("active_connections"));
     assert!(metrics_text.contains("total_modules"));
 
+    let _ = std::fs::remove_file(&store.config_file);
+    let _ = std::fs::remove_file(&env_path);
+}
+
+#[test]
+fn test_mcp_upgrade_personal_module_tool() {
+    let env_path =
+        std::env::temp_dir().join(format!("mcp_upgrade_test_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(crate::config::Config::default(), env_path.clone());
+
+    // 1. Missing parameter 'id'
+    let missing_id_err =
+        call_tool("gateway_upgrade_personal_module", &json!({}), &store).unwrap_err();
+    assert!(missing_id_err.contains("Missing parameter 'id'"));
+
+    // 2. Nonexistent module
+    let not_found_err = call_tool(
+        "gateway_upgrade_personal_module",
+        &json!({"id": "nonexistent-module"}),
+        &store,
+    )
+    .unwrap_err();
+    assert!(not_found_err.contains("is not installed; cannot upgrade"));
+
+    // 3. Built-in module upgrade rejected
+    let builtin_err = call_tool(
+        "gateway_upgrade_personal_module",
+        &json!({"id": "omniroute"}),
+        &store,
+    )
+    .unwrap_err();
+    assert!(builtin_err.contains("Built-in module 'omniroute' cannot be upgraded"));
+
+    // 4. End-to-end upgrade flow
+    let v1_dir = std::env::temp_dir().join(format!("v1_mcp_{}", uuid::Uuid::new_v4()));
+    let v2_dir = std::env::temp_dir().join(format!("v2_mcp_{}", uuid::Uuid::new_v4()));
+    let _ = std::fs::create_dir_all(&v1_dir);
+    let _ = std::fs::create_dir_all(&v2_dir);
+
+    std::fs::write(
+        v1_dir.join("module.json"),
+        json!({
+            "id": "my-upgradable-mod",
+            "name": "My Upgradable Mod v1",
+            "version": "1.0.0",
+            "namespace": "/personal/upgradable",
+            "entrypoint": "run.sh",
+            "protocol": "stdio-stream",
+            "capabilities": ["chat"]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(v1_dir.join("run.sh"), "#!/bin/sh\necho v1").unwrap();
+
+    std::fs::write(
+        v2_dir.join("module.json"),
+        json!({
+            "id": "my-upgradable-mod",
+            "name": "My Upgradable Mod v2",
+            "version": "2.1.0",
+            "namespace": "/personal/upgradable",
+            "entrypoint": "run.sh",
+            "protocol": "stdio-stream",
+            "capabilities": ["chat", "decisions"]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(v2_dir.join("run.sh"), "#!/bin/sh\necho v2").unwrap();
+
+    // Install v1
+    let install_res = call_tool(
+        "gateway_install_personal_module",
+        &json!({
+            "id": "my-upgradable-mod",
+            "source": v1_dir.to_string_lossy().to_string()
+        }),
+        &store,
+    )
+    .unwrap();
+    assert!(install_res["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("installed"));
+
+    // Check module info before upgrade
+    let info_v1 = call_tool(
+        "gateway_get_module_info",
+        &json!({"id": "my-upgradable-mod"}),
+        &store,
+    )
+    .unwrap();
+    let text_v1 = info_v1["content"][0]["text"].as_str().unwrap();
+    assert!(text_v1.contains("1.0.0"));
+
+    // Upgrade to v2
+    let upgrade_res = call_tool(
+        "gateway_upgrade_personal_module",
+        &json!({
+            "id": "my-upgradable-mod",
+            "source": v2_dir.to_string_lossy().to_string()
+        }),
+        &store,
+    )
+    .unwrap();
+    let upg_text = upgrade_res["content"][0]["text"].as_str().unwrap();
+    assert!(upg_text.contains("upgraded successfully to version 2.1.0"));
+
+    // Verify module info after upgrade reflects 2.1.0
+    let info_v2 = call_tool(
+        "gateway_get_module_info",
+        &json!({"id": "my-upgradable-mod"}),
+        &store,
+    )
+    .unwrap();
+    let text_v2 = info_v2["content"][0]["text"].as_str().unwrap();
+    assert!(text_v2.contains("2.1.0"));
+    assert!(text_v2.contains("decisions"));
+
+    // Verify upgrade with invalid source fails closed and preserves v2
+    let invalid_res = call_tool(
+        "gateway_upgrade_personal_module",
+        &json!({
+            "id": "my-upgradable-mod",
+            "source": "/nonexistent/path/for/upgrade"
+        }),
+        &store,
+    );
+    assert!(invalid_res.is_err());
+
+    let info_post_fail = call_tool(
+        "gateway_get_module_info",
+        &json!({"id": "my-upgradable-mod"}),
+        &store,
+    )
+    .unwrap();
+    let text_post_fail = info_post_fail["content"][0]["text"].as_str().unwrap();
+    assert!(text_post_fail.contains("2.1.0"));
+
+    // Clean up
+    let _ = call_tool(
+        "gateway_remove_personal_module",
+        &json!({"id": "my-upgradable-mod"}),
+        &store,
+    );
+    let _ = std::fs::remove_dir_all(&v1_dir);
+    let _ = std::fs::remove_dir_all(&v2_dir);
     let _ = std::fs::remove_file(&store.config_file);
     let _ = std::fs::remove_file(&env_path);
 }
