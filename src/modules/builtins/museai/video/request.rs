@@ -196,34 +196,11 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         .map(str::to_string)
         .unwrap_or_else(|| format!("video-{}", Uuid::new_v4()));
 
-    // Build message content: use vision array when DataUri attachments are present so
-    // Muse AI receives the actual image bytes rather than a data URI embedded in plain text.
-    let has_data_uri = attachments
-        .iter()
-        .any(|a| matches!(a, VideoAttachment::DataUri { .. }));
-    let message_content: serde_json::Value = if has_data_uri {
-        let mut parts: Vec<serde_json::Value> = vec![serde_json::json!({
-            "type": "text",
-            "text": full_prompt
-        })];
-        for att in &attachments {
-            if let VideoAttachment::DataUri { reference, .. } = att {
-                parts.push(serde_json::json!({
-                    "type": "image_url",
-                    "image_url": { "url": reference }
-                }));
-            }
-        }
-        serde_json::Value::Array(parts)
-    } else {
-        serde_json::Value::String(full_prompt.clone())
-    };
-
     let mut request_val = serde_json::json!({
         "model": "muse",
         "job_id": allocated_job_id,
         "messages": [
-            {"role": "user", "content": message_content}
+            {"role": "user", "content": full_prompt}
         ]
     });
     if let Some(ref parent) = existing_job {

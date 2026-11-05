@@ -20,7 +20,7 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
 
     let parts = split_multipart_parts(body, &boundary_line)?;
     let mut fields: HashMap<String, String> = HashMap::new();
-    let mut images: Vec<String> = Vec::new();
+    let mut raw_images: Vec<(&[u8], &'static str)> = Vec::new();
 
     for (headers, part_body) in parts {
         let (name, filename, content_type) = parse_part_headers(&headers);
@@ -41,7 +41,7 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
                     ),
                 ));
             }
-            if images.len() >= MAX_IMAGE_PARTS {
+            if raw_images.len() >= MAX_IMAGE_PARTS {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("too many image attachments: maximum is {MAX_IMAGE_PARTS}"),
@@ -49,31 +49,7 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
             }
             let mime = detect_image_mime(part_body, content_type.as_deref())?;
             let ext = super::super::image::guess_extension(&mime);
-            let img_id = format!("img-upload-{}", uuid::Uuid::new_v4());
-            super::super::image::save_image_media(&img_id, part_body, ext)?;
-
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let record = super::super::image::ImageJobRecord {
-                job_id: img_id.clone(),
-                owner_id: "default-owner".to_string(),
-                model: "uploaded".to_string(),
-                requested_model: "uploaded".to_string(),
-                prompt: "multipart upload".to_string(),
-                aspect_ratio: "original".to_string(),
-                created_at: now,
-                last_activity_at: now,
-                status: "completed".to_string(),
-                media_validated: true,
-                output_verified: true,
-                image_url: format!("/muse-ai/v1/images/{img_id}/content"),
-                ..Default::default()
-            };
-            let _ = super::super::image::save_image_job(&record);
-
-            images.push(format!("/muse-ai/v1/images/{img_id}/content"));
+            raw_images.push((part_body, ext));
         } else {
             let val = String::from_utf8(part_body.to_vec()).map_err(|e| {
                 io::Error::new(
@@ -83,6 +59,48 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
             })?;
             fields.insert(field_name, val.trim().to_string());
         }
+    }
+
+    // Validate that a non-empty prompt is provided before persisting files to disk
+    let prompt_valid = fields
+        .get("prompt")
+        .map(|p| !p.trim().is_empty())
+        .unwrap_or(false);
+    if !prompt_valid {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "missing 'prompt' field",
+        ));
+    }
+
+    // Persist validated images to gateway internal media store
+    let mut images: Vec<String> = Vec::with_capacity(raw_images.len());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    for (image_bytes, ext) in raw_images {
+        let img_id = format!("img-upload-{}", uuid::Uuid::new_v4());
+        super::super::image::save_image_media(&img_id, image_bytes, ext)?;
+
+        let record = super::super::image::ImageJobRecord {
+            job_id: img_id.clone(),
+            owner_id: "default-owner".to_string(),
+            model: "uploaded".to_string(),
+            requested_model: "uploaded".to_string(),
+            prompt: "multipart upload".to_string(),
+            aspect_ratio: "original".to_string(),
+            created_at: now,
+            last_activity_at: now,
+            status: "completed".to_string(),
+            media_validated: true,
+            output_verified: true,
+            image_url: format!("/muse-ai/v1/images/{img_id}/content"),
+            ..Default::default()
+        };
+        super::super::image::save_image_job(&record)?;
+        images.push(format!("/muse-ai/v1/images/{img_id}/content"));
     }
 
     build_json_from_fields(fields, images)
@@ -201,7 +219,10 @@ fn parse_part_headers(headers: &[u8]) -> (Option<String>, Option<String>, Option
 }
 
 fn extract_header_param(header_val: &str, param: &str) -> Option<String> {
-    let idx = header_val.find(param)?;
+    let idx = header_val
+        .match_indices(param)
+        .find(|(i, _)| *i == 0 || matches!(header_val.as_bytes()[*i - 1], b' ' | b';' | b'\t'))?
+        .0;
     let rest = &header_val[idx + param.len()..];
     let trimmed = rest.trim();
     if let Some(stripped) = trimmed.strip_prefix('"') {
