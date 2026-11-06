@@ -702,7 +702,7 @@
       fetch("/api/v1/dashboard/modules/upgrade/status")
         .then(function(r) { return r.json(); })
         .then((data) => {
-          if (!data || !data.ok) return;
+          if (!data?.ok) return;
           const serverInFlight = Array.isArray(data.in_flight) ? data.in_flight : [];
           let changed = false;
 
@@ -734,7 +734,7 @@
           this.items.forEach((item) => {
             if (item.status === "upgrading" && !serverInFlight.includes(item.id) && this.activeItem?.id !== item.id) {
               const currentMod = allModules.find(function(m) { return m.id === item.id; });
-              if (currentMod && currentMod.version) {
+              if (currentMod?.version) {
                 item.version = currentMod.version;
               }
               item.status = "completed";

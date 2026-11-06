@@ -674,3 +674,59 @@ fn test_multipart_image_url_string() {
     assert_eq!(req.attachment_urls.len(), 1);
     assert_eq!(req.attachment_urls[0], "https://images.example.com/owl.png");
 }
+
+#[test]
+fn test_video_request_validation_models_aspect_ratios_and_durations() {
+    // 1. Missing / empty prompt rejected
+    let empty_prompt = serde_json::json!({
+        "prompt": "   "
+    });
+    let err =
+        parse_and_validate_video_request(&serde_json::to_vec(&empty_prompt).unwrap()).unwrap_err();
+    assert!(err.to_string().contains("prompt must not be empty"));
+
+    // 2. Unsupported model rejected
+    let bad_model = serde_json::json!({
+        "prompt": "Test video",
+        "model": "unknown-model-v99"
+    });
+    let err =
+        parse_and_validate_video_request(&serde_json::to_vec(&bad_model).unwrap()).unwrap_err();
+    assert!(err.to_string().contains("unsupported model"));
+
+    // 3. Unsupported aspect ratio rejected
+    let bad_aspect = serde_json::json!({
+        "prompt": "Test video",
+        "aspect_ratio": "21:9"
+    });
+    let err =
+        parse_and_validate_video_request(&serde_json::to_vec(&bad_aspect).unwrap()).unwrap_err();
+    assert!(err.to_string().contains("unsupported aspect_ratio"));
+
+    // 4. Invalid duration rejected
+    let bad_duration = serde_json::json!({
+        "prompt": "Test video",
+        "duration": 0
+    });
+    let err =
+        parse_and_validate_video_request(&serde_json::to_vec(&bad_duration).unwrap()).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("duration must be a positive integer"));
+
+    // 5. Valid duration with 's' suffix and submission key
+    let valid_duration_suffix = serde_json::json!({
+        "prompt": "Valid video",
+        "duration": "10s",
+        "aspect_ratio": "16:9",
+        "model": "muse-video",
+        "idempotency_key": "test-key-123"
+    });
+    let req =
+        parse_and_validate_video_request(&serde_json::to_vec(&valid_duration_suffix).unwrap())
+            .unwrap();
+    assert_eq!(req.duration, 10);
+    assert_eq!(req.aspect_ratio, "16:9");
+    assert_eq!(req.requested_model, "muse-video");
+    assert_eq!(req.submission_key.as_deref(), Some("test-key-123"));
+}

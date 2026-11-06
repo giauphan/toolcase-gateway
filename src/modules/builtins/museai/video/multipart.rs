@@ -9,118 +9,104 @@ use std::io;
 const MAX_IMAGE_PARTS: usize = 5;
 const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB per file
 
-/// Parses a multipart/form-data body into a JSON Value compatible with `parse_and_validate_video_request`.
-pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
-    let boundary_line = extract_boundary_line(body).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "malformed multipart/form-data: missing boundary delimiter",
-        )
-    })?;
+enum ProcessedImage {
+    Raw(Vec<u8>, &'static str),
+    Reference(String),
+}
 
-    let parts = split_multipart_parts(body, &boundary_line)?;
-    let mut fields: HashMap<String, String> = HashMap::new();
-    let mut raw_images: Vec<(Vec<u8>, &'static str)> = Vec::new();
-    let mut string_image_refs: Vec<String> = Vec::new();
+fn is_known_image_reference(text: &str) -> bool {
+    text.starts_with("https://")
+        || text.starts_with("data:image/")
+        || text.starts_with("/muse-ai/v1/images/")
+}
 
-    for (headers, part_body) in parts {
-        let (name, filename, content_type) = parse_part_headers(&headers);
-        let Some(field_name) = name else {
-            continue;
-        };
+fn is_file_path_reference(text: &str) -> bool {
+    text.starts_with('/')
+        || text.starts_with("./")
+        || text.ends_with(".png")
+        || text.ends_with(".jpg")
+        || text.ends_with(".jpeg")
+        || text.ends_with(".webp")
+}
 
-        if is_file_field(&field_name, filename.is_some()) {
-            if part_body.is_empty() {
-                continue;
-            }
-            if part_body.len() > MAX_FILE_SIZE {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "image part exceeds size limit of 10 MB ({})",
-                        part_body.len()
-                    ),
-                ));
-            }
-            if raw_images.len() + string_image_refs.len() >= MAX_IMAGE_PARTS {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("too many image attachments: maximum is {MAX_IMAGE_PARTS}"),
-                ));
-            }
-            match detect_image_mime(part_body, content_type.as_deref()) {
-                Ok(mime) => {
-                    let ext = super::super::image::guess_extension(&mime);
-                    raw_images.push((part_body.to_vec(), ext));
-                }
-                Err(orig_err) => {
-                    if filename.is_none() {
-                        if let Ok(text) = std::str::from_utf8(part_body) {
-                            let text = text.trim();
-                            if text.starts_with("https://")
-                                || text.starts_with("data:image/")
-                                || text.starts_with("/muse-ai/v1/images/")
-                            {
-                                string_image_refs.push(text.to_string());
-                                continue;
-                            }
-                            if text.starts_with('/')
-                                || text.starts_with("./")
-                                || text.ends_with(".png")
-                                || text.ends_with(".jpg")
-                                || text.ends_with(".jpeg")
-                                || text.ends_with(".webp")
-                            {
-                                if let Ok(disk_bytes) = std::fs::read(text) {
-                                    if let Ok(disk_mime) = detect_image_mime(&disk_bytes, None) {
-                                        let ext = super::super::image::guess_extension(&disk_mime);
-                                        raw_images.push((disk_bytes, ext));
-                                        continue;
-                                    }
-                                }
-                                return Err(io::Error::new(
-                                    io::ErrorKind::InvalidInput,
-                                    format!(
-                                        "field '{field_name}' contains a file path string ('{text}') instead of file content. In curl, prefix the path with '@' (-F \"{field_name}=@{text}\") to upload the file directly"
-                                    ),
-                                ));
-                            }
-                        }
-                    }
-                    return Err(orig_err);
-                }
-            }
-        } else {
-            let val = String::from_utf8(part_body.to_vec()).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("invalid UTF-8 in field '{field_name}': {e}"),
-                )
-            })?;
-            fields.insert(field_name, val.trim().to_string());
-        }
+fn resolve_fallback_image_ref(
+    field_name: &str,
+    part_body: &[u8],
+    orig_err: io::Error,
+) -> io::Result<ProcessedImage> {
+    let Ok(text) = std::str::from_utf8(part_body) else {
+        return Err(orig_err);
+    };
+    let text = text.trim();
+    if is_known_image_reference(text) {
+        return Ok(ProcessedImage::Reference(text.to_string()));
     }
-
-    // Validate that a non-empty prompt is provided before persisting files to disk
-    let prompt_valid = fields
-        .get("prompt")
-        .map(|p| !p.trim().is_empty())
-        .unwrap_or(false);
-    if !prompt_valid {
+    if is_file_path_reference(text) {
+        if let Ok(disk_bytes) = std::fs::read(text) {
+            if let Ok(disk_mime) = detect_image_mime(&disk_bytes, None) {
+                let ext = super::super::image::guess_extension(&disk_mime);
+                return Ok(ProcessedImage::Raw(disk_bytes, ext));
+            }
+        }
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "missing 'prompt' field",
+            format!(
+                "field '{field_name}' contains a file path string ('{text}') instead of file content. In curl, prefix the path with '@' (-F \"{field_name}=@{text}\") to upload the file directly"
+            ),
         ));
     }
+    Err(orig_err)
+}
 
-    // Persist validated images to gateway internal media store
-    let mut images: Vec<String> = Vec::with_capacity(raw_images.len() + string_image_refs.len());
+fn process_image_part(
+    field_name: &str,
+    filename: Option<&str>,
+    content_type: Option<&str>,
+    part_body: &[u8],
+    current_count: usize,
+) -> io::Result<Option<ProcessedImage>> {
+    if part_body.is_empty() {
+        return Ok(None);
+    }
+    if part_body.len() > MAX_FILE_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "image part exceeds size limit of 10 MB ({})",
+                part_body.len()
+            ),
+        ));
+    }
+    if current_count >= MAX_IMAGE_PARTS {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("too many image attachments: maximum is {MAX_IMAGE_PARTS}"),
+        ));
+    }
+    match detect_image_mime(part_body, content_type) {
+        Ok(mime) => {
+            let ext = super::super::image::guess_extension(&mime);
+            Ok(Some(ProcessedImage::Raw(part_body.to_vec(), ext)))
+        }
+        Err(orig_err) => {
+            if filename.is_none() {
+                let processed = resolve_fallback_image_ref(field_name, part_body, orig_err)?;
+                Ok(Some(processed))
+            } else {
+                Err(orig_err)
+            }
+        }
+    }
+}
+
+fn persist_raw_images(raw_images: &[(Vec<u8>, &'static str)]) -> io::Result<Vec<String>> {
+    let mut images = Vec::with_capacity(raw_images.len());
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    for (image_bytes, ext) in &raw_images {
+    for (image_bytes, ext) in raw_images {
         let img_id = format!("img-upload-{}", uuid::Uuid::new_v4());
         super::super::image::save_image_media(&img_id, image_bytes, ext)?;
 
@@ -143,6 +129,71 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
         images.push(format!("/muse-ai/v1/images/{img_id}/content"));
     }
 
+    Ok(images)
+}
+
+fn validate_prompt_field(fields: &HashMap<String, String>) -> io::Result<()> {
+    let prompt_valid = fields
+        .get("prompt")
+        .map(|p| !p.trim().is_empty())
+        .unwrap_or(false);
+    if !prompt_valid {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "missing 'prompt' field",
+        ));
+    }
+    Ok(())
+}
+
+/// Parses a multipart/form-data body into a JSON Value compatible with `parse_and_validate_video_request`.
+pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
+    let boundary_line = extract_boundary_line(body).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "malformed multipart/form-data: missing boundary delimiter",
+        )
+    })?;
+
+    let parts = split_multipart_parts(body, &boundary_line)?;
+    let mut fields: HashMap<String, String> = HashMap::new();
+    let mut raw_images: Vec<(Vec<u8>, &'static str)> = Vec::new();
+    let mut string_image_refs: Vec<String> = Vec::new();
+
+    for (headers, part_body) in parts {
+        let (name, filename, content_type) = parse_part_headers(&headers);
+        let Some(field_name) = name else {
+            continue;
+        };
+
+        if is_file_field(&field_name, filename.is_some()) {
+            let current_count = raw_images.len() + string_image_refs.len();
+            if let Some(processed) = process_image_part(
+                &field_name,
+                filename.as_deref(),
+                content_type.as_deref(),
+                part_body,
+                current_count,
+            )? {
+                match processed {
+                    ProcessedImage::Raw(bytes, ext) => raw_images.push((bytes, ext)),
+                    ProcessedImage::Reference(ref_str) => string_image_refs.push(ref_str),
+                }
+            }
+        } else {
+            let val = String::from_utf8(part_body.to_vec()).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid UTF-8 in field '{field_name}': {e}"),
+                )
+            })?;
+            fields.insert(field_name, val.trim().to_string());
+        }
+    }
+
+    validate_prompt_field(&fields)?;
+
+    let mut images = persist_raw_images(&raw_images)?;
     images.extend(string_image_refs);
 
     build_json_from_fields(fields, images)

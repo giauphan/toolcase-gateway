@@ -63,10 +63,9 @@ fn extract_prompt(body: &serde_json::Value) -> io::Result<String> {
     Ok(prompt)
 }
 
-pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<ValidatedVideoRequest> {
-    let body = parse_request_json(request_body)?;
-    let prompt = extract_prompt(&body)?;
-
+fn load_parent_job(
+    body: &serde_json::Value,
+) -> io::Result<Option<super::super::lifecycle::VideoJobRecord>> {
     let parent_job_id = body
         .get("job_id")
         .or_else(|| body.get("parent_id"))
@@ -74,25 +73,32 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
-    let existing_job = match parent_job_id {
-        Some(id) => Some(super::super::lifecycle::load_video_job(id)?),
-        None => None,
-    };
+    match parent_job_id {
+        Some(id) => Ok(Some(super::super::lifecycle::load_video_job(id)?)),
+        None => Ok(None),
+    }
+}
 
-    let submission_key = body
-        .get("idempotency_key")
+fn extract_submission_key(body: &serde_json::Value) -> Option<String> {
+    body.get("idempotency_key")
         .or_else(|| body.get("submission_key"))
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(str::to_string);
+        .map(str::to_string)
+}
 
+fn resolve_model(
+    body: &serde_json::Value,
+    existing_job: Option<&super::super::lifecycle::VideoJobRecord>,
+) -> io::Result<(String, String)> {
     let requested_model = body
         .get("model")
         .and_then(|v| v.as_str())
         .map(str::to_string)
-        .or_else(|| existing_job.as_ref().map(|j| j.requested_model.clone()))
+        .or_else(|| existing_job.map(|j| j.requested_model.clone()))
         .unwrap_or_else(|| "muse-video".to_string());
+
     if !SUPPORTED_MODELS.contains(&requested_model.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -103,13 +109,20 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         ));
     }
     let upstream_model = normalize_video_model(&requested_model).to_string();
+    Ok((requested_model, upstream_model))
+}
 
+fn resolve_aspect_ratio(
+    body: &serde_json::Value,
+    existing_job: Option<&super::super::lifecycle::VideoJobRecord>,
+) -> io::Result<String> {
     let aspect_ratio = body
         .get("aspect_ratio")
         .and_then(|v| v.as_str())
         .map(str::to_string)
-        .or_else(|| existing_job.as_ref().map(|j| j.aspect_ratio.clone()))
+        .or_else(|| existing_job.map(|j| j.aspect_ratio.clone()))
         .unwrap_or_else(|| "16:9".to_string());
+
     if !SUPPORTED_ASPECT_RATIOS.contains(&aspect_ratio.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -119,9 +132,15 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
             ),
         ));
     }
+    Ok(aspect_ratio)
+}
 
-    let duration = match body.get("duration") {
-        None => existing_job.as_ref().map(|j| j.duration).unwrap_or(5),
+fn resolve_duration(
+    body: &serde_json::Value,
+    existing_job: Option<&super::super::lifecycle::VideoJobRecord>,
+) -> io::Result<u64> {
+    match body.get("duration") {
+        None => Ok(existing_job.map(|j| j.duration).unwrap_or(5)),
         Some(value) => {
             let parsed = value.as_u64().or_else(|| {
                 value
@@ -133,29 +152,40 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
                     io::ErrorKind::InvalidInput,
                     "duration must be a positive integer",
                 )
-            })?
+            })
         }
-    };
+    }
+}
 
-    let attachments = parse_and_validate_attachments(&body)?;
-    let mut attachment_urls: Vec<String> = attachments
+fn resolve_attachment_urls(
+    attachments: &[VideoAttachment],
+    existing_job: Option<&super::super::lifecycle::VideoJobRecord>,
+) -> Vec<String> {
+    let mut urls: Vec<String> = attachments
         .iter()
         .map(|a| a.as_reference().to_string())
         .collect();
-    if attachment_urls.is_empty() {
-        if let Some(ref parent) = existing_job {
+
+    if urls.is_empty() {
+        if let Some(parent) = existing_job {
             if !parent.attachment_urls.is_empty() {
-                attachment_urls = parent.attachment_urls.clone();
+                urls = parent.attachment_urls.clone();
             } else if let Some(ref single) = parent.attachment_url {
-                attachment_urls = vec![single.clone()];
+                urls = vec![single.clone()];
             }
         }
     }
-    let attachment_url = attachment_urls.first().cloned();
-    let attachment = attachments.first().cloned();
+    urls
+}
 
-    // For text prompts, replace data URI blobs with human-readable labels
-    // so the full base64 string isn't embedded in the text message.
+fn build_full_prompt(
+    prompt: &str,
+    upstream_model: &str,
+    aspect_ratio: &str,
+    duration: u64,
+    attachments: &[VideoAttachment],
+    existing_job: Option<&super::super::lifecycle::VideoJobRecord>,
+) -> String {
     let display_refs: Vec<String> = attachments
         .iter()
         .enumerate()
@@ -165,7 +195,7 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         })
         .collect();
 
-    let full_prompt = if let Some(ref parent) = existing_job {
+    if let Some(parent) = existing_job {
         if !display_refs.is_empty() {
             let refs = display_refs.join(", ");
             format!(
@@ -180,14 +210,74 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
         }
     } else {
         build_video_prompt_with_attachments(
-            &upstream_model,
-            &prompt,
-            &aspect_ratio,
+            upstream_model,
+            prompt,
+            aspect_ratio,
             duration,
             &display_refs,
         )
-    };
+    }
+}
 
+fn build_attachment_item(i: usize, att: &VideoAttachment) -> serde_json::Value {
+    match att {
+        VideoAttachment::InternalImage { job_id, path } => {
+            let filename = format!("{job_id}.png");
+            let vm_path = format!("workspace/your_files/{filename}");
+            serde_json::json!({
+                "type": "file_ref",
+                "mime_type": "image/png",
+                "filename": filename,
+                "path": vm_path,
+                "internal_job_id": job_id,
+                "internal_ref": path
+            })
+        }
+        VideoAttachment::DataUri { mime_type, .. } => {
+            let ext = if mime_type.contains("jpeg") || mime_type.contains("jpg") {
+                "jpg"
+            } else if mime_type.contains("webp") {
+                "webp"
+            } else {
+                "png"
+            };
+            let filename = format!("upload_{}.{ext}", i + 1);
+            let vm_path = format!("workspace/your_files/{filename}");
+            serde_json::json!({
+                "type": "file_ref",
+                "mime_type": mime_type,
+                "filename": filename,
+                "path": vm_path,
+                "data_uri": att.as_reference()
+            })
+        }
+        VideoAttachment::ExternalUrl { url } => {
+            let clean_url = url.split('?').next().unwrap_or(url);
+            let filename = clean_url.rsplit('/').next().unwrap_or("input_image.png");
+            let filename = if filename.is_empty() || !filename.contains('.') {
+                "input_image.png"
+            } else {
+                filename
+            };
+            let vm_path = format!("workspace/your_files/{filename}");
+            serde_json::json!({
+                "type": "file_ref",
+                "mime_type": "image/png",
+                "filename": filename,
+                "path": vm_path,
+                "external_url": url
+            })
+        }
+    }
+}
+
+fn build_request_payload(
+    body: &serde_json::Value,
+    full_prompt: &str,
+    attachments: &[VideoAttachment],
+    existing_job: Option<&super::super::lifecycle::VideoJobRecord>,
+    request_body: &[u8],
+) -> (String, serde_json::Value) {
     let allocated_job_id = body
         .get("id")
         .and_then(|v| v.as_str())
@@ -203,63 +293,17 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
             {"role": "user", "content": full_prompt}
         ]
     });
+
     if !attachments.is_empty() {
         let items: Vec<serde_json::Value> = attachments
             .iter()
             .enumerate()
-            .map(|(i, att)| match att {
-                VideoAttachment::InternalImage { job_id, path } => {
-                    let filename = format!("{job_id}.png");
-                    let vm_path = format!("workspace/your_files/{filename}");
-                    serde_json::json!({
-                        "type": "file_ref",
-                        "mime_type": "image/png",
-                        "filename": filename,
-                        "path": vm_path,
-                        "internal_job_id": job_id,
-                        "internal_ref": path
-                    })
-                }
-                VideoAttachment::DataUri { mime_type, .. } => {
-                    let ext = if mime_type.contains("jpeg") || mime_type.contains("jpg") {
-                        "jpg"
-                    } else if mime_type.contains("webp") {
-                        "webp"
-                    } else {
-                        "png"
-                    };
-                    let filename = format!("upload_{}.{ext}", i + 1);
-                    let vm_path = format!("workspace/your_files/{filename}");
-                    serde_json::json!({
-                        "type": "file_ref",
-                        "mime_type": mime_type,
-                        "filename": filename,
-                        "path": vm_path,
-                        "data_uri": att.as_reference()
-                    })
-                }
-                VideoAttachment::ExternalUrl { url } => {
-                    let clean_url = url.split('?').next().unwrap_or(url);
-                    let filename = clean_url.rsplit('/').next().unwrap_or("input_image.png");
-                    let filename = if filename.is_empty() || !filename.contains('.') {
-                        "input_image.png"
-                    } else {
-                        filename
-                    };
-                    let vm_path = format!("workspace/your_files/{filename}");
-                    serde_json::json!({
-                        "type": "file_ref",
-                        "mime_type": "image/png",
-                        "filename": filename,
-                        "path": vm_path,
-                        "external_url": url
-                    })
-                }
-            })
+            .map(|(i, att)| build_attachment_item(i, att))
             .collect();
         request_val["attachment_items"] = serde_json::Value::Array(items);
     }
-    if let Some(ref parent) = existing_job {
+
+    if let Some(parent) = existing_job {
         if let Some(ref tid) = parent.thread_id {
             if !tid.is_empty() {
                 request_val["thread_id"] = serde_json::Value::String(tid.clone());
@@ -268,6 +312,40 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
     } else if let Ok(Some(tid)) = crate::providers::museai::chat::extract_thread_id(request_body) {
         request_val["thread_id"] = serde_json::Value::String(tid);
     }
+
+    (allocated_job_id, request_val)
+}
+
+pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<ValidatedVideoRequest> {
+    let body = parse_request_json(request_body)?;
+    let prompt = extract_prompt(&body)?;
+    let existing_job = load_parent_job(&body)?;
+    let submission_key = extract_submission_key(&body);
+    let (requested_model, upstream_model) = resolve_model(&body, existing_job.as_ref())?;
+    let aspect_ratio = resolve_aspect_ratio(&body, existing_job.as_ref())?;
+    let duration = resolve_duration(&body, existing_job.as_ref())?;
+
+    let attachments = parse_and_validate_attachments(&body)?;
+    let attachment_urls = resolve_attachment_urls(&attachments, existing_job.as_ref());
+    let attachment_url = attachment_urls.first().cloned();
+    let attachment = attachments.first().cloned();
+
+    let full_prompt = build_full_prompt(
+        &prompt,
+        &upstream_model,
+        &aspect_ratio,
+        duration,
+        &attachments,
+        existing_job.as_ref(),
+    );
+
+    let (allocated_job_id, request_val) = build_request_payload(
+        &body,
+        &full_prompt,
+        &attachments,
+        existing_job.as_ref(),
+        request_body,
+    );
 
     let request_json = serde_json::to_vec(&request_val)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

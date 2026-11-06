@@ -1,7 +1,7 @@
 //! In-flight module upgrade registry to enforce serialization and prevent duplicate concurrent upgrades.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// Default maximum time-to-live for an in-flight upgrade lock before auto-eviction (5 minutes).
@@ -20,7 +20,7 @@ impl Drop for UpgradeGuard {
     fn drop(&mut self) {
         let mut guard = UPGRADING_MODULES
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(PoisonError::into_inner);
         if let Some(map) = guard.as_mut() {
             if let Some(&ts) = map.get(&self.module_id) {
                 if ts == self.acquired_at {
@@ -40,7 +40,7 @@ pub fn try_acquire_upgrade_with_ttl(
     let clean_id = module_id.trim().to_string();
     let mut guard = UPGRADING_MODULES
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(PoisonError::into_inner);
     let map = guard.get_or_insert_with(HashMap::new);
 
     if let Some(&start_time) = map.get(&clean_id) {
@@ -71,7 +71,7 @@ pub fn try_acquire_upgrade(module_id: &str) -> Result<UpgradeGuard, String> {
 pub fn clear_all_upgrade_locks() {
     let mut guard = UPGRADING_MODULES
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(PoisonError::into_inner);
     if let Some(map) = guard.as_mut() {
         map.clear();
     }
@@ -81,7 +81,7 @@ pub fn clear_all_upgrade_locks() {
 pub fn get_in_flight_upgrades() -> Vec<String> {
     let mut guard = UPGRADING_MODULES
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(PoisonError::into_inner);
     if let Some(map) = guard.as_mut() {
         map.retain(|_id, start_time| start_time.elapsed() < DEFAULT_UPGRADE_LOCK_TTL);
         let mut list: Vec<String> = map.keys().cloned().collect();
