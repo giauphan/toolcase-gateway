@@ -20,7 +20,8 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
 
     let parts = split_multipart_parts(body, &boundary_line)?;
     let mut fields: HashMap<String, String> = HashMap::new();
-    let mut raw_images: Vec<(&[u8], &'static str)> = Vec::new();
+    let mut raw_images: Vec<(Vec<u8>, &'static str)> = Vec::new();
+    let mut string_image_refs: Vec<String> = Vec::new();
 
     for (headers, part_body) in parts {
         let (name, filename, content_type) = parse_part_headers(&headers);
@@ -41,15 +42,54 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
                     ),
                 ));
             }
-            if raw_images.len() >= MAX_IMAGE_PARTS {
+            if raw_images.len() + string_image_refs.len() >= MAX_IMAGE_PARTS {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("too many image attachments: maximum is {MAX_IMAGE_PARTS}"),
                 ));
             }
-            let mime = detect_image_mime(part_body, content_type.as_deref())?;
-            let ext = super::super::image::guess_extension(&mime);
-            raw_images.push((part_body, ext));
+            match detect_image_mime(part_body, content_type.as_deref()) {
+                Ok(mime) => {
+                    let ext = super::super::image::guess_extension(&mime);
+                    raw_images.push((part_body.to_vec(), ext));
+                }
+                Err(orig_err) => {
+                    if filename.is_none() {
+                        if let Ok(text) = std::str::from_utf8(part_body) {
+                            let text = text.trim();
+                            if text.starts_with("https://")
+                                || text.starts_with("data:image/")
+                                || text.starts_with("/muse-ai/v1/images/")
+                            {
+                                string_image_refs.push(text.to_string());
+                                continue;
+                            }
+                            if text.starts_with('/')
+                                || text.starts_with("./")
+                                || text.ends_with(".png")
+                                || text.ends_with(".jpg")
+                                || text.ends_with(".jpeg")
+                                || text.ends_with(".webp")
+                            {
+                                if let Ok(disk_bytes) = std::fs::read(text) {
+                                    if let Ok(disk_mime) = detect_image_mime(&disk_bytes, None) {
+                                        let ext = super::super::image::guess_extension(&disk_mime);
+                                        raw_images.push((disk_bytes, ext));
+                                        continue;
+                                    }
+                                }
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "field '{field_name}' contains a file path string ('{text}') instead of file content. In curl, prefix the path with '@' (-F \"{field_name}=@{text}\") to upload the file directly"
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                    return Err(orig_err);
+                }
+            }
         } else {
             let val = String::from_utf8(part_body.to_vec()).map_err(|e| {
                 io::Error::new(
@@ -74,13 +114,13 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
     }
 
     // Persist validated images to gateway internal media store
-    let mut images: Vec<String> = Vec::with_capacity(raw_images.len());
+    let mut images: Vec<String> = Vec::with_capacity(raw_images.len() + string_image_refs.len());
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    for (image_bytes, ext) in raw_images {
+    for (image_bytes, ext) in &raw_images {
         let img_id = format!("img-upload-{}", uuid::Uuid::new_v4());
         super::super::image::save_image_media(&img_id, image_bytes, ext)?;
 
@@ -102,6 +142,8 @@ pub fn parse_multipart_form(body: &[u8]) -> io::Result<serde_json::Value> {
         super::super::image::save_image_job(&record)?;
         images.push(format!("/muse-ai/v1/images/{img_id}/content"));
     }
+
+    images.extend(string_image_refs);
 
     build_json_from_fields(fields, images)
 }

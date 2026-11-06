@@ -607,3 +607,70 @@ fn test_multipart_curl_form_exact_user_payload() {
     assert_eq!(res_bytes, image_bytes);
     assert_eq!(res_mime, "image/png");
 }
+
+#[test]
+fn test_multipart_missing_at_sign_with_existing_local_file() {
+    let tmp_file = "/tmp/test_local_image_auto_resolve.png";
+    let dummy_png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc`\x00\x00\x00\x02\x00\x01H\xaf\xa4q\x00\x00\x00\x00IEND\xaeB`\x82";
+    std::fs::write(tmp_file, dummy_png).unwrap();
+
+    let boundary = "------------------------userCurlBoundaryPathTest";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"image\"\r\n\r\n");
+    body.extend_from_slice(tmp_file.as_bytes());
+    body.extend_from_slice(b"\r\n");
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
+    body.extend_from_slice(b"Animate local file path\r\n");
+    body.extend_from_slice(format!("{boundary}--\r\n").as_bytes());
+
+    let req = parse_and_validate_video_request(&body)
+        .expect("existing server path without @ must be auto-resolved from disk");
+    assert_eq!(req.attachment_urls.len(), 1);
+    assert!(req.attachment_urls[0].starts_with("/muse-ai/v1/images/img-upload-"));
+
+    let _ = std::fs::remove_file(tmp_file);
+}
+
+#[test]
+fn test_multipart_missing_at_sign_with_nonexistent_file_gives_actionable_error() {
+    let boundary = "------------------------userCurlBoundaryMissingAt";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"image\"\r\n\r\n");
+    body.extend_from_slice(b"/home/ubuntu/nonexistent_image.png\r\n");
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
+    body.extend_from_slice(b"Animate nonexistent file\r\n");
+    body.extend_from_slice(format!("{boundary}--\r\n").as_bytes());
+
+    let err = parse_and_validate_video_request(&body).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("prefix the path with '@'")
+            && msg.contains("-F \"image=@/home/ubuntu/nonexistent_image.png\""),
+        "error message must guide user about missing '@': {msg}"
+    );
+}
+
+#[test]
+fn test_multipart_image_url_string() {
+    let boundary = "------------------------userCurlBoundaryUrl";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"image\"\r\n\r\n");
+    body.extend_from_slice(b"https://images.example.com/owl.png\r\n");
+
+    body.extend_from_slice(format!("{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"prompt\"\r\n\r\n");
+    body.extend_from_slice(b"Animate URL image\r\n");
+    body.extend_from_slice(format!("{boundary}--\r\n").as_bytes());
+
+    let req = parse_and_validate_video_request(&body)
+        .expect("URL string in multipart field must succeed");
+    assert_eq!(req.attachment_urls.len(), 1);
+    assert_eq!(req.attachment_urls[0], "https://images.example.com/owl.png");
+}
