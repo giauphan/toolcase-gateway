@@ -69,10 +69,41 @@ curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
   -F "prompt=Create a smooth cinematic morph transition between these two character poses." \
   -F "images[]=@pose_start.png" \
   -F "images[]=@pose_end.png" \
-  -F "model=muse-video"
+  -F "model=muse-video" \
+  -F "aspect_ratio=16:9" \
+  -F "duration=10"
 ```
 
-### 2.3 JSON Base64 Data URI or Gateway Image Reference
+> [!TIP]
+> Both client uploads (`-F "images[]=@path/to/file.png"`) and server file paths (`-F "images[]=/path/to/file.png"`) are accepted. The gateway automatically resolves server file paths, sniffs MIME types from magic bytes, and provides clear diagnostics if a file does not exist. Up to 5 image attachments (10 MB each) are supported per video generation.
+
+### 2.3 Verified Live Multi-Image Response (`200 OK`)
+
+When multiple image attachments are provided, each image is uploaded into the CVM workspace sequentially over Noise XX and referenced in the Hatch `items` wire schema (`file_ref` objects). A sample verified response from live execution:
+
+```json
+{
+  "id": "video-a3f2d1da-1290-4f36-b80c-23b1fe7e5035",
+  "object": "video.generation",
+  "created": 1793948370,
+  "status": "completed",
+  "model": "muse-video",
+  "prompt": "Create a smooth cinematic video transitioning between the first image and the second image.",
+  "requested_aspect_ratio": "16:9",
+  "requested_duration": 10,
+  "requested_model": "muse-video",
+  "resolved_model": "muse-video",
+  "resolved_provider": "muse_chat",
+  "provider": "muse_chat",
+  "provider_status": "artifact_url_reported",
+  "output_verified": true,
+  "media_validated": true,
+  "video_url": "/muse-ai/v1/videos/video-a3f2d1da-1290-4f36-b80c-23b1fe7e5035/content",
+  "full_video_url": "http://127.0.0.1:20129/muse-ai/v1/videos/video-a3f2d1da-1290-4f36-b80c-23b1fe7e5035/content"
+}
+```
+
+### 2.4 JSON Base64 Data URI or Gateway Image Reference
 ```bash
 curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
   -H "Content-Type: application/json" \
