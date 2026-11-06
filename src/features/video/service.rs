@@ -20,6 +20,38 @@ fn write_json_response(
     client.flush()
 }
 
+fn write_video_error(
+    client: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    code: &str,
+    category: &str,
+    message: &str,
+) -> io::Result<()> {
+    let err_body = serde_json::json!({
+        "error": {
+            "code": code,
+            "category": category,
+            "retryable": false,
+            "submission_unknown": false,
+            "message": message
+        },
+        "request_id": "redacted-request-id"
+    });
+    write_json_response(client, status, reason, &err_body)
+}
+
+fn write_invalid_input(client: &mut TcpStream, message: &str) -> io::Result<()> {
+    write_video_error(
+        client,
+        400,
+        "Bad Request",
+        "INVALID_INPUT",
+        "invalid_input",
+        message,
+    )
+}
+
 pub fn handle_video_providers_catalog(client: &mut TcpStream) -> io::Result<()> {
     let catalog = VideoCapabilityCatalog {
         schema_version: "video.transport.v1".into(),
@@ -45,51 +77,30 @@ pub fn handle_video_task_submit(
     let prompt = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
 
     if model.is_empty() || prompt.trim().is_empty() || provider.is_empty() {
-        let err_body = serde_json::json!({
-            "error": {
-                "code": "INVALID_INPUT",
-                "category": "invalid_input",
-                "retryable": false,
-                "submission_unknown": false,
-                "message": "missing required model, prompt, or provider"
-            },
-            "request_id": "redacted-request-id"
-        });
-        return write_json_response(client, 400, "Bad Request", &err_body);
+        return write_invalid_input(client, "missing required model, prompt, or provider");
     }
 
     if let Some(images) = body.get("reference_images").and_then(|v| v.as_array()) {
         for img in images {
             if let Some(url) = img.get("url").and_then(|v| v.as_str()) {
                 if !validate_secure_url(url) {
-                    let err_body = serde_json::json!({
-                        "error": {
-                            "code": "INVALID_INPUT",
-                            "category": "invalid_input",
-                            "retryable": false,
-                            "submission_unknown": false,
-                            "message": "reference_images url failed security validation"
-                        },
-                        "request_id": "redacted-request-id"
-                    });
-                    return write_json_response(client, 400, "Bad Request", &err_body);
+                    return write_invalid_input(
+                        client,
+                        "reference_images url failed security validation",
+                    );
                 }
             }
         }
     }
 
-    let err_body = serde_json::json!({
-        "error": {
-            "code": "UNSUPPORTED_CAPABILITY",
-            "category": "invalid_input",
-            "retryable": false,
-            "submission_unknown": false,
-            "message": "provider/model/operation is not production-ready"
-        },
-        "request_id": "redacted-request-id"
-    });
-
-    write_json_response(client, 422, "Unprocessable Entity", &err_body)
+    write_video_error(
+        client,
+        422,
+        "Unprocessable Entity",
+        "UNSUPPORTED_CAPABILITY",
+        "invalid_input",
+        "provider/model/operation is not production-ready",
+    )
 }
 
 pub fn handle_video_task_status(
@@ -98,31 +109,17 @@ pub fn handle_video_task_status(
     task_id: &str,
 ) -> io::Result<()> {
     if provider.is_empty() || task_id.is_empty() {
-        let err_body = serde_json::json!({
-            "error": {
-                "code": "INVALID_INPUT",
-                "category": "invalid_input",
-                "retryable": false,
-                "submission_unknown": false,
-                "message": "missing provider or task id"
-            },
-            "request_id": "redacted-request-id"
-        });
-        return write_json_response(client, 400, "Bad Request", &err_body);
+        return write_invalid_input(client, "missing provider or task id");
     }
 
-    let err_body = serde_json::json!({
-        "error": {
-            "code": "NOT_FOUND",
-            "category": "not_found",
-            "retryable": false,
-            "submission_unknown": false,
-            "message": "task not found on upstream provider"
-        },
-        "request_id": "redacted-request-id"
-    });
-
-    write_json_response(client, 404, "Not Found", &err_body)
+    write_video_error(
+        client,
+        404,
+        "Not Found",
+        "NOT_FOUND",
+        "not_found",
+        "task not found on upstream provider",
+    )
 }
 
 pub fn handle_video_task_reconciliation(
@@ -131,29 +128,15 @@ pub fn handle_video_task_reconciliation(
     idempotency_key: &str,
 ) -> io::Result<()> {
     if provider.is_empty() || idempotency_key.is_empty() {
-        let err_body = serde_json::json!({
-            "error": {
-                "code": "INVALID_INPUT",
-                "category": "invalid_input",
-                "retryable": false,
-                "submission_unknown": false,
-                "message": "missing provider or idempotency key"
-            },
-            "request_id": "redacted-request-id"
-        });
-        return write_json_response(client, 400, "Bad Request", &err_body);
+        return write_invalid_input(client, "missing provider or idempotency key");
     }
 
-    let err_body = serde_json::json!({
-        "error": {
-            "code": "RECONCILE_UNSUPPORTED",
-            "category": "unsupported",
-            "retryable": false,
-            "submission_unknown": false,
-            "message": "provider does not support key-based reconciliation lookup"
-        },
-        "request_id": "redacted-request-id"
-    });
-
-    write_json_response(client, 501, "Not Implemented", &err_body)
+    write_video_error(
+        client,
+        501,
+        "Not Implemented",
+        "RECONCILE_UNSUPPORTED",
+        "unsupported",
+        "provider does not support key-based reconciliation lookup",
+    )
 }

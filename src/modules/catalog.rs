@@ -22,6 +22,33 @@ pub struct SystemCatalogModule {
     pub config_schema: Option<serde_json::Value>,
 }
 
+#[allow(clippy::too_many_arguments)]
+fn rich_catalog_item(
+    id: &str,
+    name: &str,
+    short_name: Option<&str>,
+    description: &str,
+    namespace: &str,
+    capabilities: &[&str],
+    icon: Option<&str>,
+    source: Option<&str>,
+    config_schema: Option<serde_json::Value>,
+) -> SystemCatalogModule {
+    SystemCatalogModule {
+        id: id.to_string(),
+        name: name.to_string(),
+        short_name: short_name.map(ToString::to_string),
+        description: description.to_string(),
+        namespace: namespace.to_string(),
+        version: "1.0.0".to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: capabilities.iter().map(ToString::to_string).collect(),
+        icon: icon.map(ToString::to_string),
+        source: source.map(ToString::to_string),
+        config_schema,
+    }
+}
+
 fn catalog_item(
     id: &str,
     name: &str,
@@ -29,19 +56,17 @@ fn catalog_item(
     namespace: &str,
     capabilities: &[&str],
 ) -> SystemCatalogModule {
-    SystemCatalogModule {
-        id: id.to_string(),
-        name: name.to_string(),
-        short_name: None,
-        description: description.to_string(),
-        namespace: namespace.to_string(),
-        version: "1.0.0".to_string(),
-        protocol: "stdio-stream".to_string(),
-        capabilities: capabilities.iter().map(ToString::to_string).collect(),
-        icon: None,
-        source: None,
-        config_schema: None,
-    }
+    rich_catalog_item(
+        id,
+        name,
+        None,
+        description,
+        namespace,
+        capabilities,
+        None,
+        None,
+        None,
+    )
 }
 
 fn text_field(key: &str, label: &str, placeholder: &str, desc: &str) -> serde_json::Value {
@@ -73,6 +98,24 @@ fn bool_field(key: &str, label: &str, default_val: bool, desc: &str) -> serde_js
         "default": default_val,
         "description": desc,
     })
+}
+
+fn enabled_field(module_name: &str) -> serde_json::Value {
+    bool_field(
+        "enabled",
+        "Module Status",
+        true,
+        &format!("Enable or disable {module_name} requests"),
+    )
+}
+
+fn cookie_field(module_name: &str) -> serde_json::Value {
+    secret_field(
+        "cookie",
+        "Session Cookie",
+        "Leave empty to keep existing cookie",
+        &format!("{module_name} authenticated session cookie"),
+    )
 }
 
 fn config_schema(
@@ -124,19 +167,17 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
             "/custom/mistral",
             &["chat_completions", "models"],
         ),
-        SystemCatalogModule {
-            id: "local-echo".to_string(),
-            name: "Local Echo Test Module".to_string(),
-            short_name: None,
-            description: "Diagnostic echo adapter for local routing testing".to_string(),
-            namespace: "/custom/echo".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec!["chat_completions".to_string(), "models".to_string()],
-            icon: None,
-            source: Some("examples/modules/echo-provider".to_string()),
-            config_schema: None,
-        },
+        rich_catalog_item(
+            "local-echo",
+            "Local Echo Test Module",
+            None,
+            "Diagnostic echo adapter for local routing testing",
+            "/custom/echo",
+            &["chat_completions", "models"],
+            None,
+            Some("examples/modules/echo-provider"),
+            None,
+        ),
         catalog_item(
             "suite-test",
             "Suite Provider Group",
@@ -144,23 +185,21 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
             "/custom/suite-test",
             &["chat_completions", "vision", "models"],
         ),
-        SystemCatalogModule {
-            id: "tiktok-studio".to_string(),
-            name: "TikTok Creator Studio Adapter".to_string(),
-            short_name: Some("TikTok Creator Studio".to_string()),
-            description: "TikTok Creator Studio video management, download extraction, and publishing adapter".to_string(),
-            namespace: "/custom/tiktok".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![
-                "video_download".to_string(),
-                "items_manage".to_string(),
-                "publish".to_string(),
-                "studio".to_string(),
+        rich_catalog_item(
+            "tiktok-studio",
+            "TikTok Creator Studio Adapter",
+            Some("TikTok Creator Studio"),
+            "TikTok Creator Studio video management, download extraction, and publishing adapter",
+            "/custom/tiktok",
+            &[
+                "video_download",
+                "items_manage",
+                "publish",
+                "studio",
             ],
-            icon: Some("♬".to_string()),
-            source: Some("https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git".to_string()),
-            config_schema: Some(config_schema(
+            Some("♬"),
+            Some("https://github.com/giauphan/TikTok-Creator-Studio-Adapter.git"),
+            Some(config_schema(
                 "TikTok Creator Studio Config & HAR Import",
                 "tiktok-studio",
                 "/custom/tiktok",
@@ -168,31 +207,29 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "Drop download-tiktok.har here or select file (.har, .json) to auto-extract Cookie and CSRF token",
                 vec![
                     text_field("base_url", "TikTok Base URL", "https://www.tiktok.com", "Primary TikTok Creator Studio upstream URL"),
-                    bool_field("enabled", "Module Status", true, "Enable or disable TikTok Creator Studio requests"),
-                    secret_field("cookie", "Session Cookie", "Leave empty to keep existing cookie", "TikTok Creator Studio authenticated session cookie"),
+                    enabled_field("TikTok Creator Studio"),
+                    cookie_field("TikTok Creator Studio"),
                     secret_field("csrf_token", "CSRF Token (tt-csrf-token)", "Leave empty to keep existing CSRF token", "TikTok CSRF protection token extracted from x-tt-csrf-token or cookies"),
                 ],
             )),
-        },
-        SystemCatalogModule {
-            id: "facebook-suite".to_string(),
-            name: "Meta Business Suite / Facebook Creator Studio Adapter".to_string(),
-            short_name: Some("Meta Business Suite".to_string()),
-            description: "Meta Business Suite / Facebook Creator Studio video management, rupload resumable upload, and Reel/Story publishing adapter".to_string(),
-            namespace: "/custom/facebook".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![
-                "video_upload".to_string(),
-                "rupload".to_string(),
-                "reels".to_string(),
-                "stories".to_string(),
-                "publish".to_string(),
-                "studio".to_string(),
+        ),
+        rich_catalog_item(
+            "facebook-suite",
+            "Meta Business Suite / Facebook Creator Studio Adapter",
+            Some("Meta Business Suite"),
+            "Meta Business Suite / Facebook Creator Studio video management, rupload resumable upload, and Reel/Story publishing adapter",
+            "/custom/facebook",
+            &[
+                "video_upload",
+                "rupload",
+                "reels",
+                "stories",
+                "publish",
+                "studio",
             ],
-            icon: Some("ⓕ".to_string()),
-            source: Some("addons/facebook-suite".to_string()),
-            config_schema: Some(config_schema(
+            Some("ⓕ"),
+            Some("addons/facebook-suite"),
+            Some(config_schema(
                 "Meta Business Suite Config & HAR Import",
                 "facebook-suite",
                 "/custom/facebook",
@@ -200,8 +237,8 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "Drop download-facebook.har here or select file (.har, .json) to auto-extract credentials and Comet parameters",
                 vec![
                     text_field("base_url", "Meta Business Base URL", "https://business.facebook.com", "Primary Meta Business Suite upstream URL"),
-                    bool_field("enabled", "Module Status", true, "Enable or disable Meta Business Suite requests"),
-                    secret_field("cookie", "Session Cookie", "Leave empty to keep existing cookie", "Facebook authenticated session cookie"),
+                    enabled_field("Meta Business Suite"),
+                    cookie_field("Facebook"),
                     secret_field("fb_dtsg", "CSRF Token (fb_dtsg)", "Leave empty to keep existing fb_dtsg token", "Comet anti-CSRF token extracted from HAR or page payload"),
                     text_field("user_id", "Facebook User ID (__user)", "1000...", "Authenticated Facebook User ID"),
                     text_field("actor_id", "Actor ID (av)", "1435...", "Active acting identity or Page ID"),
@@ -209,24 +246,22 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                     text_field("business_id", "Business ID (__bid)", "2567...", "Associated Meta Business Account ID"),
                 ],
             )),
-        },
-        SystemCatalogModule {
-            id: "daily-news".to_string(),
-            name: "Daily News & Content Discovery Service".to_string(),
-            short_name: Some("Daily News".to_string()),
-            description: "Daily automated news and latest content discovery, canonicalization, and tiered ranking adapter".to_string(),
-            namespace: "/custom/daily-news".to_string(),
-            version: "1.0.0".to_string(),
-            protocol: "stdio-stream".to_string(),
-            capabilities: vec![
-                "news".to_string(),
-                "content_discovery".to_string(),
-                "chat_completions".to_string(),
-                "models".to_string(),
+        ),
+        rich_catalog_item(
+            "daily-news",
+            "Daily News & Content Discovery Service",
+            Some("Daily News"),
+            "Daily automated news and latest content discovery, canonicalization, and tiered ranking adapter",
+            "/custom/daily-news",
+            &[
+                "news",
+                "content_discovery",
+                "chat_completions",
+                "models",
             ],
-            icon: Some("📰".to_string()),
-            source: Some("https://github.com/giauphan/gateway-modules/tree/main/modules/daily-news".to_string()),
-            config_schema: Some(config_schema(
+            Some("📰"),
+            Some("https://github.com/giauphan/gateway-modules/tree/main/modules/daily-news"),
+            Some(config_schema(
                 "Daily News & Content Discovery Service Config",
                 "daily-news",
                 "/custom/daily-news",
@@ -238,6 +273,6 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                     text_field("default_sources", "Default Feeds", "hackernews,github,producthunt", "Comma-separated feed sources to query"),
                 ],
             )),
-        },
+        ),
     ]
 }

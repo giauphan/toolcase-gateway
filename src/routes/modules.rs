@@ -107,6 +107,40 @@ fn dispatch_personal(
     )
 }
 
+type MatchedModuleRoute = (
+    crate::gateway::modules::ModuleDescriptor,
+    String,
+    Option<crate::gateway::modules::SubProviderDescriptor>,
+    Option<PersonalManifest>,
+);
+
+fn match_module_route(
+    client: &mut TcpStream,
+    store: &ConfigStore,
+    clean_path: &str,
+) -> io::Result<Result<Option<MatchedModuleRoute>, u16>> {
+    let reg = store.module_registry();
+    let reg_guard = match reg.read() {
+        Ok(g) => g,
+        Err(e) => {
+            write_error(client, 500, "Internal Error", &e.to_string())?;
+            return Ok(Err(500));
+        }
+    };
+
+    let matched = reg_guard
+        .match_path_with_provider(clean_path)
+        .map(|(d, s, p)| {
+            (
+                d.clone(),
+                s.to_string(),
+                p.cloned(),
+                reg_guard.get_personal_manifest(&d.id).cloned(),
+            )
+        });
+    Ok(Ok(matched))
+}
+
 pub fn dispatch_module_route(
     client: &mut TcpStream,
     request: &crate::http::Request,
@@ -114,55 +148,20 @@ pub fn dispatch_module_route(
     config: &Config,
     clean_path: &str,
 ) -> io::Result<Option<u16>> {
-    let matched = {
-        let reg = store.module_registry();
-        let reg_guard = match reg.read() {
-            Ok(g) => g,
-            Err(e) => {
-                write_error(client, 500, "Internal Error", &e.to_string())?;
-                return Ok(Some(500));
-            }
-        };
-
-        reg_guard
-            .match_path_with_provider(clean_path)
-            .map(|(d, s, p)| {
-                (
-                    d.clone(),
-                    s.to_string(),
-                    p.cloned(),
-                    reg_guard.get_personal_manifest(&d.id).cloned(),
-                )
-            })
-    };
-
-    let matched = match matched {
-        Some(m) => Some(m),
-        None => {
+    let matched = match match_module_route(client, store, clean_path)? {
+        Ok(Some(m)) => Some(m),
+        Ok(None) => {
             let new_addons = store.rescan_addons();
             if !new_addons.is_empty() {
-                let reg = store.module_registry();
-                let reg_guard = match reg.read() {
-                    Ok(g) => g,
-                    Err(e) => {
-                        write_error(client, 500, "Internal Error", &e.to_string())?;
-                        return Ok(Some(500));
-                    }
-                };
-                reg_guard
-                    .match_path_with_provider(clean_path)
-                    .map(|(d, s, p)| {
-                        (
-                            d.clone(),
-                            s.to_string(),
-                            p.cloned(),
-                            reg_guard.get_personal_manifest(&d.id).cloned(),
-                        )
-                    })
+                match match_module_route(client, store, clean_path)? {
+                    Ok(m) => m,
+                    Err(err_status) => return Ok(Some(err_status)),
+                }
             } else {
                 None
             }
         }
+        Err(err_status) => return Ok(Some(err_status)),
     };
 
     let Some((desc, subpath, sub_prov, personal_manifest)) = matched else {

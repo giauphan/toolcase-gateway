@@ -40,6 +40,47 @@ exec python3 "$SCRIPT_DIR/adapter.py" "$@"
     }
 }
 
+fn resolve_entrypoint_path(entrypoint: &str) -> std::path::PathBuf {
+    let entry_path = Path::new(entrypoint);
+    if entry_path.is_file() {
+        entry_path
+            .canonicalize()
+            .unwrap_or_else(|_| entry_path.to_path_buf())
+    } else {
+        entry_path.to_path_buf()
+    }
+}
+
+fn configure_module_command(
+    cmd: &mut Command,
+    work_dir: Option<&Path>,
+    manifest: &PersonalManifest,
+    sub_provider_id: Option<&str>,
+) {
+    if let Some(parent) = work_dir {
+        if parent.is_dir() {
+            cmd.current_dir(parent);
+        }
+    }
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // Isolate secrets by only inheriting safe runtime environment variables
+    cmd.env_clear();
+    for key in ALLOWED_ENV_VARS {
+        if let Ok(val) = std::env::var(key) {
+            cmd.env(key, val);
+        }
+    }
+    cmd.env("MODULE_ID", &manifest.id);
+    cmd.env("MODULE_NAME", &manifest.name);
+    cmd.env("MODULE_NAMESPACE", &manifest.namespace);
+    if let Some(sub_id) = sub_provider_id {
+        cmd.env("MODULE_SUB_PROVIDER_ID", sub_id);
+    }
+}
+
 pub(crate) fn build_command(manifest: &PersonalManifest, sub_provider_id: Option<&str>) -> Command {
     let entry_path = Path::new(&manifest.entrypoint);
     let resolved_entrypoint = if entry_path.is_file() {
@@ -65,28 +106,12 @@ pub(crate) fn build_command(manifest: &PersonalManifest, sub_provider_id: Option
     };
 
     let mut cmd = Command::new(&resolved_entrypoint);
-    if let Some(parent) = resolved_entrypoint.parent() {
-        if parent.is_dir() {
-            cmd.current_dir(parent);
-        }
-    }
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    // Isolate secrets by only inheriting safe runtime environment variables
-    cmd.env_clear();
-    for key in ALLOWED_ENV_VARS {
-        if let Ok(val) = std::env::var(key) {
-            cmd.env(key, val);
-        }
-    }
-    cmd.env("MODULE_ID", &manifest.id);
-    cmd.env("MODULE_NAME", &manifest.name);
-    cmd.env("MODULE_NAMESPACE", &manifest.namespace);
-    if let Some(sub_id) = sub_provider_id {
-        cmd.env("MODULE_SUB_PROVIDER_ID", sub_id);
-    }
+    configure_module_command(
+        &mut cmd,
+        resolved_entrypoint.parent(),
+        manifest,
+        sub_provider_id,
+    );
     cmd
 }
 
@@ -96,14 +121,7 @@ pub(crate) fn build_fallback_interpreter_command(
     manifest: &PersonalManifest,
     sub_provider_id: Option<&str>,
 ) -> Option<Command> {
-    let entry_path = Path::new(&manifest.entrypoint);
-    let resolved = if entry_path.is_file() {
-        entry_path
-            .canonicalize()
-            .unwrap_or_else(|_| entry_path.to_path_buf())
-    } else {
-        entry_path.to_path_buf()
-    };
+    let resolved = resolve_entrypoint_path(&manifest.entrypoint);
 
     if !resolved.is_file() {
         return None;
@@ -143,26 +161,6 @@ pub(crate) fn build_fallback_interpreter_command(
 
     let mut cmd = Command::new(interpreter);
     cmd.arg(&resolved);
-    if let Some(parent) = resolved.parent() {
-        if parent.is_dir() {
-            cmd.current_dir(parent);
-        }
-    }
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    cmd.env_clear();
-    for key in ALLOWED_ENV_VARS {
-        if let Ok(val) = std::env::var(key) {
-            cmd.env(key, val);
-        }
-    }
-    cmd.env("MODULE_ID", &manifest.id);
-    cmd.env("MODULE_NAME", &manifest.name);
-    cmd.env("MODULE_NAMESPACE", &manifest.namespace);
-    if let Some(sub_id) = sub_provider_id {
-        cmd.env("MODULE_SUB_PROVIDER_ID", sub_id);
-    }
+    configure_module_command(&mut cmd, resolved.parent(), manifest, sub_provider_id);
     Some(cmd)
 }

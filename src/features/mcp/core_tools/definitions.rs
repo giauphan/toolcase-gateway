@@ -3,34 +3,59 @@
 use crate::api::mcp::protocol::{McpResource, McpTool};
 use serde_json::json;
 
+fn tool(name: &str, description: &str, input_schema: serde_json::Value) -> McpTool {
+    McpTool {
+        name: name.to_string(),
+        description: description.to_string(),
+        input_schema,
+    }
+}
+
+fn empty_object_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}
+
+fn id_object_schema(id_description: &str) -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "id": { "type": "string", "description": id_description }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+    })
+}
+
+fn json_resource(uri: &str, name: &str, description: &str) -> McpResource {
+    McpResource {
+        uri: uri.to_string(),
+        name: name.to_string(),
+        description: description.to_string(),
+        mime_type: Some("application/json".to_string()),
+    }
+}
+
 /// Returns the registry of official core MCP management tools.
 pub fn list_core_tools() -> Vec<McpTool> {
     vec![
-        McpTool {
-            name: "gateway_list_modules".to_string(),
-            description: "List all installed provider modules (built-in and personal), their URL namespaces, and enablement status.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-        },
-        McpTool {
-            name: "gateway_get_module_info".to_string(),
-            description: "Get detailed manifest and configuration information for a specific module by id.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "description": "The module identifier (e.g. 'omniroute', 'muse', 'jev')" }
-                },
-                "required": ["id"],
-                "additionalProperties": false
-            }),
-        },
-        McpTool {
-            name: "gateway_set_module_state".to_string(),
-            description: "Enable or disable a gateway module dynamically.".to_string(),
-            input_schema: json!({
+        tool(
+            "gateway_list_modules",
+            "List all installed provider modules (built-in and personal), their URL namespaces, and enablement status.",
+            empty_object_schema(),
+        ),
+        tool(
+            "gateway_get_module_info",
+            "Get detailed manifest and configuration information for a specific module by id.",
+            id_object_schema("The module identifier (e.g. 'omniroute', 'muse', 'jev')"),
+        ),
+        tool(
+            "gateway_set_module_state",
+            "Enable or disable a gateway module dynamically.",
+            json!({
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "The module identifier" },
@@ -39,11 +64,11 @@ pub fn list_core_tools() -> Vec<McpTool> {
                 "required": ["id", "enabled"],
                 "additionalProperties": false
             }),
-        },
-        McpTool {
-            name: "gateway_install_personal_module".to_string(),
-            description: "Install and register an out-of-tree personal provider module manifest at runtime without recompiling the gateway.".to_string(),
-            input_schema: json!({
+        ),
+        tool(
+            "gateway_install_personal_module",
+            "Install and register an out-of-tree personal provider module manifest at runtime without recompiling the gateway.",
+            json!({
                 "type": "object",
                 "properties": {
                     "source": { "type": "string", "description": "GitHub URL, ZIP URL, or local path" },
@@ -60,11 +85,11 @@ pub fn list_core_tools() -> Vec<McpTool> {
                 },
                 "additionalProperties": true
             }),
-        },
-        McpTool {
-            name: "gateway_upgrade_personal_module".to_string(),
-            description: "Upgrade and recompile an installed personal provider module, preserving configuration while atomically replacing the binary.".to_string(),
-            input_schema: json!({
+        ),
+        tool(
+            "gateway_upgrade_personal_module",
+            "Upgrade and recompile an installed personal provider module, preserving configuration while atomically replacing the binary.",
+            json!({
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "The personal module identifier to upgrade" },
@@ -75,53 +100,37 @@ pub fn list_core_tools() -> Vec<McpTool> {
                 "required": ["id"],
                 "additionalProperties": false
             }),
-        },
-        McpTool {
-            name: "gateway_remove_personal_module".to_string(),
-            description: "Unregister and remove an installed personal provider module.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "description": "The personal module identifier" }
-                },
-                "required": ["id"],
-                "additionalProperties": false
-            }),
-        },
-        McpTool {
-            name: "gateway_get_system_metrics".to_string(),
-            description: "Retrieve gateway metrics, admission state, and provider pool health.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-        },
+        ),
+        tool(
+            "gateway_remove_personal_module",
+            "Unregister and remove an installed personal provider module.",
+            id_object_schema("The personal module identifier"),
+        ),
+        tool(
+            "gateway_get_system_metrics",
+            "Retrieve gateway metrics, admission state, and provider pool health.",
+            empty_object_schema(),
+        ),
     ]
 }
 
 /// Returns the registry of official core MCP resources.
 pub fn list_core_resources() -> Vec<McpResource> {
     vec![
-        McpResource {
-            uri: "gateway://modules".to_string(),
-            name: "Gateway Installed Modules".to_string(),
-            description: "Active registry of installed modules, status, and URL namespaces."
-                .to_string(),
-            mime_type: Some("application/json".to_string()),
-        },
-        McpResource {
-            uri: "gateway://routes".to_string(),
-            name: "Gateway Active Routes".to_string(),
-            description: "Routing topology and module namespace bindings.".to_string(),
-            mime_type: Some("application/json".to_string()),
-        },
-        McpResource {
-            uri: "gateway://health".to_string(),
-            name: "Gateway Health and Admission".to_string(),
-            description: "Gateway health, account pools, and admission controller statistics."
-                .to_string(),
-            mime_type: Some("application/json".to_string()),
-        },
+        json_resource(
+            "gateway://modules",
+            "Gateway Installed Modules",
+            "Active registry of installed modules, status, and URL namespaces.",
+        ),
+        json_resource(
+            "gateway://routes",
+            "Gateway Active Routes",
+            "Routing topology and module namespace bindings.",
+        ),
+        json_resource(
+            "gateway://health",
+            "Gateway Health and Admission",
+            "Gateway health, account pools, and admission controller statistics.",
+        ),
     ]
 }
