@@ -46,7 +46,48 @@ The HTTP connection stays open while the Confidential VM produces the video and 
 
 ---
 
-## 2. Verifying and Streaming the Video Media
+## 2. Image-to-Video Conditioning (Multipart Image Attachments)
+
+To animate an existing picture (Image-to-Video), supply the reference image via multipart form upload (`-F "image=@..."` or `-F "images[]=@..."`) or via JSON data URI / internal reference.
+
+> [!NOTE]
+> The gateway automatically resolves the image, uploads it directly into the remote CVM disk at `workspace/your_files/` using 512 KB chunked streaming over Noise XX, and instructs Muse AI using native `file_ref` wire attachments. This completely avoids upstream LLM refusals such as *"Your image came through inline, not as a file I can use... If you attach the image as a file with the paperclip, I can animate that exact image"*.
+
+### 2.1 Single Image Attachment via Multipart
+```bash
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
+  -F "prompt=Animate this owl gently turning its head and blinking its glowing eyes, keeping the moonlit radiant wings intact." \
+  -F "model=muse-video" \
+  -F "aspect_ratio=16:9" \
+  -F "duration=10" \
+  -F "image=@/path/to/owl.png"
+```
+
+### 2.2 Multiple Images Attachment via Multipart
+```bash
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
+  -F "prompt=Create a smooth cinematic morph transition between these two character poses." \
+  -F "images[]=@pose_start.png" \
+  -F "images[]=@pose_end.png" \
+  -F "model=muse-video"
+```
+
+### 2.3 JSON Base64 Data URI or Gateway Image Reference
+```bash
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Animate this reference image with vibrant magical particle motion.",
+    "model": "muse-video",
+    "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "aspect_ratio": "16:9",
+    "duration": 5
+  }'
+```
+
+---
+
+## 3. Verifying and Streaming the Video Media
 
 Once the video is generated, you can inspect or stream the real MP4 media:
 
@@ -79,7 +120,7 @@ Open the player in your browser at:
 
 ---
 
-## 3. Querying Video Job Details
+## 4. Querying Video Job Details
 
 You can query the durable job record anytime:
 
@@ -89,7 +130,7 @@ curl -s http://127.0.0.1:28130/muse-ai/v1/videos/video-6d4a9d57-5c61-408b-8825-a
 
 ---
 
-## 4. Asynchronous Submission (Optional)
+## 5. Asynchronous Submission (Optional)
 
 If you prefer non-blocking submission and polling:
 
@@ -115,7 +156,7 @@ curl -s http://127.0.0.1:28130/muse-ai/v1/videos/video-...
 
 ---
 
-## 5. Handling Approvals (`409 Conflict`)
+## 6. Handling Approvals (`409 Conflict`)
 
 If the response returns `409 Conflict` with `MuseApprovalRequired`:
 1. **Manual Resolution**: Open the session in your browser and grant permission. Then rerun the curl command with the same prompt.

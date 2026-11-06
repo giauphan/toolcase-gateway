@@ -113,7 +113,15 @@ impl MuseChatStream {
             if line.iter().all(u8::is_ascii_whitespace) {
                 continue;
             }
-            let record: serde_json::Value = serde_json::from_slice(&line).map_err(|_| {
+            let record: serde_json::Value = serde_json::from_slice(&line).map_err(|e| {
+                crate::runtime::logger::log_message(
+                    "ERROR",
+                    "museai_chat",
+                    &format!(
+                        "Failed to parse Muse chat JSON record: {e}; raw: {}",
+                        String::from_utf8_lossy(&line)
+                    ),
+                );
                 io::Error::new(io::ErrorKind::InvalidData, "Invalid Muse chat JSON record")
             })?;
             self.record(&record)?;

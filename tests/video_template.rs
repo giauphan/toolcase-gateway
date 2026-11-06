@@ -12,3 +12,6 @@ mod media_validation_tests;
 
 #[path = "video_template/attachment_tests.rs"]
 mod attachment_tests;
+
+#[path = "video_template/native_attachment_tests.rs"]
+mod native_attachment_tests;

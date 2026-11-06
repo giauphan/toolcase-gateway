@@ -156,15 +156,47 @@ pub fn build_muse_chat_request_with_session(
     prompt: &str,
     session_id: Option<&str>,
 ) -> serde_json::Value {
+    build_muse_chat_request_with_items(prompt, session_id, None)
+}
+
+pub fn build_muse_chat_request_with_items(
+    prompt: &str,
+    session_id: Option<&str>,
+    items: Option<&[serde_json::Value]>,
+) -> serde_json::Value {
     let session = session_id
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-    serde_json::json!({
-        "message": prompt,
-        "node_id": Uuid::new_v4().to_string(),
-        "session_id": session,
-        "capabilities": ["chat_cancel", "delta_stream"]
-    })
+    match items {
+        Some(att_items) if !att_items.is_empty() => {
+            let mut list = att_items.to_vec();
+            if !prompt.trim().is_empty() {
+                list.push(serde_json::json!({
+                    "type": "text",
+                    "text": prompt
+                }));
+            }
+            serde_json::json!({
+                "items": list,
+                "node_id": Uuid::new_v4().to_string(),
+                "session_id": session,
+                "capabilities": ["chat_cancel", "delta_stream"]
+            })
+        }
+        _ => serde_json::json!({
+            "message": prompt,
+            "node_id": Uuid::new_v4().to_string(),
+            "session_id": session,
+            "capabilities": ["chat_cancel", "delta_stream"]
+        }),
+    }
+}
+
+pub fn extract_attachment_items(request_body: &[u8]) -> Option<Vec<serde_json::Value>> {
+    let json: serde_json::Value = serde_json::from_slice(request_body).ok()?;
+    json.get("attachment_items")
+        .and_then(|v| v.as_array())
+        .cloned()
 }

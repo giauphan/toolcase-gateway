@@ -1,6 +1,6 @@
 use super::{
-    build_muse_chat_request_with_session, debug_log, explicit_video_refusal,
-    extract_continuation_prompt, extract_thread_id, extract_user_prompt,
+    build_muse_chat_request_with_items, debug_log, explicit_video_refusal,
+    extract_attachment_items, extract_continuation_prompt, extract_thread_id, extract_user_prompt,
     extract_video_url_from_stream, MuseChatStream,
 };
 use crate::config::Config;
@@ -57,15 +57,21 @@ fn drive_chat_stream(
     mut stream: MuseChatStream,
     config: &Config,
     headers: &[Header],
+    initial_stream_id: u64,
 ) -> io::Result<(String, String, u64)> {
-    let stream_id: u64 = 1;
-    let mut active_stream_id: u64 = stream_id;
+    let mut active_stream_id: u64 = initial_stream_id;
     for _ in 0..1000 {
         let frame = socket.read_encrypted_service_frame(session)?;
         if frame.stream_id != active_stream_id {
+            if frame.stream_id < active_stream_id {
+                continue;
+            }
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Unexpected Muse response stream",
+                format!(
+                    "Unexpected Muse response stream: got {}, expected {}",
+                    frame.stream_id, active_stream_id
+                ),
             ));
         }
         let (bytes, ended) = match frame.kind {
@@ -95,7 +101,7 @@ fn drive_chat_stream(
             }
         };
         stream.push(&bytes, ended)?;
-        if ended && active_stream_id == stream_id && !stream.completed {
+        if ended && active_stream_id == initial_stream_id && !stream.completed {
             let session_id = stream.session_id.clone().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -114,7 +120,7 @@ fn drive_chat_stream(
                 "after_chat_event_seq": 0,
                 "capabilities": ["chat_cancel", "delta_stream"]
             });
-            active_stream_id = 2;
+            active_stream_id += 1;
             socket.send_encrypted_service_request(
                 session,
                 SERVICE_DAEMON,
@@ -317,10 +323,32 @@ pub fn request_museai_chat_completion(
 
     let (mut socket, mut session) = init_noise_session(&config, base_origin)?;
 
-    let stream_id = 1;
+    let raw_att_items = extract_attachment_items(request_body);
+    let mut next_stream_id = 1;
+
+    let prepared_items = if let Some(ref items) = raw_att_items {
+        crate::providers::museai::video::upload_attachments_to_vm_workspace(
+            &mut socket,
+            &mut session,
+            items,
+            &mut next_stream_id,
+        )
+    } else {
+        Vec::new()
+    };
+
+    let stream_id = next_stream_id;
     let headers = crate::providers::museai::protocol::standard_hatch_headers("text/event-stream");
 
-    let chat_payload = build_muse_chat_request_with_session(&prompt, existing_thread_id.as_deref());
+    let chat_payload = build_muse_chat_request_with_items(
+        &prompt,
+        existing_thread_id.as_deref(),
+        if prepared_items.is_empty() {
+            None
+        } else {
+            Some(&prepared_items)
+        },
+    );
     let payload_bytes = serde_json::to_vec(&chat_payload)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
@@ -341,8 +369,14 @@ pub fn request_museai_chat_completion(
     )?;
 
     let stream = MuseChatStream::with_expected_turn(existing_thread_id, Some(prompt.clone()));
-    let (thread_id, mut full_assistant_text, active_stream_id) =
-        drive_chat_stream(&mut socket, &mut session, stream, &config, &headers)?;
+    let (thread_id, mut full_assistant_text, active_stream_id) = drive_chat_stream(
+        &mut socket,
+        &mut session,
+        stream,
+        &config,
+        &headers,
+        stream_id,
+    )?;
 
     let mut video_url = {
         let extracted =

@@ -127,6 +127,7 @@ Dedicated video synthesis models dispatched through `/muse-ai/v1/create-video`.
 
 #### Example Request
 ```bash
+# Text-to-Video
 curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
   -H "Content-Type: application/json" \
   -d '{
@@ -135,6 +136,14 @@ curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
     "aspect_ratio": "16:9",
     "duration": 5
   }'
+
+# Image-to-Video (Conditioning with reference image)
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
+  -F "prompt=Animate this character turning its head and smiling gently" \
+  -F "model=muse-video" \
+  -F "aspect_ratio=16:9" \
+  -F "duration=10" \
+  -F "image=@/path/to/character.png"
 ```
 
 ---

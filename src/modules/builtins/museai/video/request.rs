@@ -203,6 +203,62 @@ pub fn parse_and_validate_video_request(request_body: &[u8]) -> io::Result<Valid
             {"role": "user", "content": full_prompt}
         ]
     });
+    if !attachments.is_empty() {
+        let items: Vec<serde_json::Value> = attachments
+            .iter()
+            .enumerate()
+            .map(|(i, att)| match att {
+                VideoAttachment::InternalImage { job_id, path } => {
+                    let filename = format!("{job_id}.png");
+                    let vm_path = format!("workspace/your_files/{filename}");
+                    serde_json::json!({
+                        "type": "file_ref",
+                        "mime_type": "image/png",
+                        "filename": filename,
+                        "path": vm_path,
+                        "internal_job_id": job_id,
+                        "internal_ref": path
+                    })
+                }
+                VideoAttachment::DataUri { mime_type, .. } => {
+                    let ext = if mime_type.contains("jpeg") || mime_type.contains("jpg") {
+                        "jpg"
+                    } else if mime_type.contains("webp") {
+                        "webp"
+                    } else {
+                        "png"
+                    };
+                    let filename = format!("upload_{}.{ext}", i + 1);
+                    let vm_path = format!("workspace/your_files/{filename}");
+                    serde_json::json!({
+                        "type": "file_ref",
+                        "mime_type": mime_type,
+                        "filename": filename,
+                        "path": vm_path,
+                        "data_uri": att.as_reference()
+                    })
+                }
+                VideoAttachment::ExternalUrl { url } => {
+                    let clean_url = url.split('?').next().unwrap_or(url);
+                    let filename = clean_url.rsplit('/').next().unwrap_or("input_image.png");
+                    let filename = if filename.is_empty() || !filename.contains('.') {
+                        "input_image.png"
+                    } else {
+                        filename
+                    };
+                    let vm_path = format!("workspace/your_files/{filename}");
+                    serde_json::json!({
+                        "type": "file_ref",
+                        "mime_type": "image/png",
+                        "filename": filename,
+                        "path": vm_path,
+                        "external_url": url
+                    })
+                }
+            })
+            .collect();
+        request_val["attachment_items"] = serde_json::Value::Array(items);
+    }
     if let Some(ref parent) = existing_job {
         if let Some(ref tid) = parent.thread_id {
             if !tid.is_empty() {

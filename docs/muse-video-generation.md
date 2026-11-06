@@ -79,7 +79,88 @@ When called asynchronously, the endpoint returns immediately with:
 
 ---
 
-### 2.2 Get Video Job Status (`GET /muse-ai/v1/videos/{id}`)
+### 2.2 Image Conditioning & Attachments (Image-to-Video)
+
+`toolcase-gateway` provides full image conditioning support, allowing users to animate existing reference images into video.
+
+#### Supported Attachment Formats
+1. **Multipart Form Data (`multipart/form-data`)**:
+   - Single image: `-F "image=@reference.png"` or `-F "file=@reference.png"`
+   - Multiple images: `-F "images[]=@frame1.png" -F "images[]=@frame2.png"`
+   - Metadata fields: `-F "prompt=..." -F "model=muse-video" -F "aspect_ratio=16:9" -F "duration=10"`
+2. **JSON Payloads (`application/json`)**:
+   - Data URIs: `{"image": "data:image/png;base64,..."}`
+   - Internal Gateway Image References: `{"image": "/muse-ai/v1/images/{id}/content"}`
+   - Reference image array: `{"images": ["data:image/png;base64,...", "https://example.com/ref.png"]}`
+   - Structured objects: `{"reference_images": [{"url": "https://example.com/ref.png"}]}`
+
+#### Multipart Request Example
+```bash
+curl -X POST http://127.0.0.1:20129/muse-ai/v1/create-video \
+  -F "prompt=Animate this owl gently turning its head and blinking its glowing eyes, keeping the moonlit radiant wings intact." \
+  -F "model=muse-video" \
+  -F "aspect_ratio=16:9" \
+  -F "duration=10" \
+  -F "image=@/path/to/owl.png"
+```
+
+#### Native Hatch CVM Conditioning Protocol
+In the Hatch/Muse architecture, reference images cannot simply be embedded as inline text or base64 strings inside the prompt—doing so causes the model to refuse with:
+> *"Your image came through inline, not as a file I can use, so I couldn't animate that exact image. If you attach the owl image as a file with the paperclip, I can animate that exact image."*
+
+To simulate genuine UI paperclip attachment conditioning, the gateway handles reference images through a dedicated three-tier pipeline:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Gateway as toolcase-gateway
+    participant CVM as Muse CVM Daemon (Noise XX)
+    participant Model as Hatch LLM / Video Engine
+
+    Client->>Gateway: POST /muse-ai/v1/create-video (multipart or JSON)
+    Gateway->>Gateway: Parse image bytes & assign workspace path
+    loop 512 KB Chunked Streaming
+        Gateway->>CVM: POST /fs/write (512 KB slice, stream_id++)
+        CVM-->>Gateway: HTTP 200 OK
+    end
+    Note over CVM: File stored at workspace/your_files/{filename}
+    Gateway->>CVM: POST /chat/stream (with items: [file_ref, text])
+    Gateway->>CVM: POST /chat/subscribe (listen to generation stream)
+    Model-->>Gateway: Video artifact URL reported
+    Gateway->>CVM: GET /fs/raw (download MP4 artifact over Noise)
+    Gateway-->>Client: HTTP 200 OK (status: completed, video_url)
+```
+
+1. **512 KB Chunked Workspace Upload (`POST /fs/write`)**:
+   - The gateway uploads the file directly to the Confidential VM's disk at `workspace/your_files/{filename}` using `POST /fs/write` encrypted over Noise XX.
+   - Large files are streamed in 512 KB (`524,288` byte) chunks (`overwrite: true` on first chunk, `append: true` on subsequent chunks), preventing upstream `HTTP 413 (Payload Too Large)` rejections.
+2. **Structured `items` Wire Schema**:
+   - Instead of sending a flat `{"message": "..."}` string, the gateway constructs the native Hatch chat request with a structured `items` array:
+     ```json
+     {
+       "items": [
+         {
+           "type": "file_ref",
+           "mime_type": "image/png",
+           "filename": "owl.png",
+           "path": "workspace/your_files/img-upload-546f9d10.png"
+         },
+         {
+           "type": "text",
+           "text": "Animate this owl gently turning its head..."
+         }
+       ],
+       "node_id": "...",
+       "session_id": "...",
+       "capabilities": ["chat_cancel", "delta_stream"]
+     }
+     ```
+3. **Artifact Caching & Local Streaming**:
+   - Upon completion, the synthesized MP4 video is fetched over Noise from `workspace/your_files/...` and cached locally under `.gw_state/media/{job_id}.mp4` for fast, seekable HTTP byte-range playback.
+
+---
+
+### 2.3 Get Video Job Status (`GET /muse-ai/v1/videos/{id}`)
 
 Retrieves status, artifacts, and approval details for a specific video job.
 
@@ -116,7 +197,7 @@ Host: 127.0.0.1:28130
 
 ---
 
-### 2.3 Video Media Content & Streaming (`GET /muse-ai/v1/videos/{id}/content`)
+### 2.4 Video Media Content & Streaming (`GET /muse-ai/v1/videos/{id}/content`)
 
 Streams genuine ISO MP4 bytes for verified and downloaded video artifacts directly from the gateway.
 
@@ -146,7 +227,7 @@ Connection: close
 
 ---
 
-### 2.4 Update Video Prompt (`PUT /muse-ai/v1/videos/{id}`)
+### 2.5 Update Video Prompt (`PUT /muse-ai/v1/videos/{id}`)
 
 Updates the prompt of an existing video job and records a revision.
 
@@ -173,7 +254,7 @@ Content-Type: application/json
 
 ---
 
-### 2.5 Delete Thread (`DELETE /muse-ai/v1/threads/{id}`)
+### 2.6 Delete Thread (`DELETE /muse-ai/v1/threads/{id}`)
 
 Cleans up an active thread on the Muse upstream server.
 
@@ -193,7 +274,7 @@ DELETE /muse-ai/v1/threads/thread-123e4567
 
 ---
 
-### 2.6 Run Thread Cleanup Cycle (`POST /muse-ai/v1/threads/cleanup`)
+### 2.7 Run Thread Cleanup Cycle (`POST /muse-ai/v1/threads/cleanup`)
 
 Triggers an on-demand cleanup sweep to purge all threads that have exceeded their retention period (`GW_MUSEAI_THREAD_RETENTION_SECS`).
 

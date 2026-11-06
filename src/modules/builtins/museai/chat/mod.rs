@@ -9,7 +9,8 @@ pub use parser::{
     parse_assistant_content_from_json,
 };
 pub use prompt::{
-    build_muse_chat_request, build_muse_chat_request_with_session, extract_continuation_prompt,
+    build_muse_chat_request, build_muse_chat_request_with_items,
+    build_muse_chat_request_with_session, extract_attachment_items, extract_continuation_prompt,
     extract_thread_id, extract_thread_id_from_value, extract_user_prompt,
 };
 pub use stream::MuseChatStream;
