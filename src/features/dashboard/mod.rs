@@ -13,9 +13,9 @@ pub use module_ui::{
 };
 pub(crate) use modules::resolve_upgrade_source_candidate;
 pub use modules::{
-    handle_get_upgrade_queue_status, handle_install_personal_module, handle_remove_personal_module,
-    handle_set_module_state, handle_test_personal_module, handle_upgrade_personal_module,
-    try_acquire_upgrade,
+    clear_all_upgrade_locks, handle_get_upgrade_queue_status, handle_install_personal_module,
+    handle_remove_personal_module, handle_set_module_state, handle_test_personal_module,
+    handle_upgrade_personal_module, try_acquire_upgrade, try_acquire_upgrade_with_ttl,
 };
 pub use muse::{handle_muse_manual_cleanup, handle_update_muse_config};
 pub use service::{

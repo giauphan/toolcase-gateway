@@ -69,8 +69,10 @@ pub(super) fn ingest_github(
     clone_args.push(&clone_repo_url);
     clone_args.push(target_dir.to_str().unwrap_or(""));
     git_cmd.args(&clone_args);
-    if let Ok(status) = git_cmd.status() {
-        if status.success() {
+    if let Ok(output) =
+        super::builder::run_command_with_timeout(git_cmd, std::time::Duration::from_secs(60))
+    {
+        if output.status.success() {
             let _ = fs::remove_dir_all(target_dir.join(".git"));
             return Ok(());
         }
@@ -167,7 +169,8 @@ pub(super) fn unwrap_single_top_level_directory(dir: &Path) {
     }
 }
 
-pub(super) fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+#[allow(clippy::incompatible_msrv)]
+pub fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -178,6 +181,17 @@ pub(super) fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
             copy_dir_all(&from, &to)?;
         } else {
             fs::copy(&from, &to)?;
+            if let Ok(meta) = from.metadata() {
+                if let Ok(mtime) = meta.modified() {
+                    if let Ok(f) = fs::OpenOptions::new().write(true).open(&to) {
+                        let _ = f.set_modified(mtime);
+                    }
+                }
+                #[cfg(unix)]
+                {
+                    let _ = fs::set_permissions(&to, meta.permissions());
+                }
+            }
         }
     }
     Ok(())

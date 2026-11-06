@@ -421,3 +421,74 @@ fn test_dashboard_upgrade_queue_status_and_in_flight_guard() {
     let _ = fs::remove_file(&tmp_env);
     let _ = fs::remove_file(&store.config_file);
 }
+
+#[test]
+fn test_upgrade_lock_stale_expiration_and_recovery() {
+    use std::time::Duration;
+    toolcase_gateway::features::dashboard::clear_all_upgrade_locks();
+
+    let test_mod = "test-expire-mod";
+    let short_ttl = Duration::from_millis(50);
+
+    // Acquire lock with short TTL
+    let _guard =
+        toolcase_gateway::features::dashboard::try_acquire_upgrade_with_ttl(test_mod, short_ttl)
+            .expect("initial acquire succeeds");
+
+    // Immediate second acquire must fail with conflict
+    let err =
+        toolcase_gateway::features::dashboard::try_acquire_upgrade_with_ttl(test_mod, short_ttl);
+    assert!(err.is_err());
+    assert!(err.unwrap_err().contains("currently being upgraded"));
+
+    // Sleep past TTL to simulate orphaned / stale lock
+    std::thread::sleep(Duration::from_millis(70));
+
+    // Next acquire should succeed and evict the stale lock
+    let guard2 =
+        toolcase_gateway::features::dashboard::try_acquire_upgrade_with_ttl(test_mod, short_ttl)
+            .expect("acquire succeeds by evicting expired lock");
+    drop(guard2);
+
+    toolcase_gateway::features::dashboard::clear_all_upgrade_locks();
+}
+
+#[test]
+fn test_copy_dir_all_preserves_modification_times() {
+    let tmp_src = std::env::temp_dir().join(format!("test_src_mtime_{}", uuid::Uuid::new_v4()));
+    let tmp_dst = std::env::temp_dir().join(format!("test_dst_mtime_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&tmp_src).unwrap();
+
+    let file_path = tmp_src.join("sample.bin");
+    fs::write(&file_path, b"hello binary").unwrap();
+
+    // Set an older timestamp (1 hour ago)
+    let older_time = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    let f = fs::OpenOptions::new().write(true).open(&file_path).unwrap();
+    f.set_modified(older_time).unwrap();
+    drop(f);
+
+    let src_mtime = fs::metadata(&file_path).unwrap().modified().unwrap();
+
+    // Copy via copy_dir_all
+    toolcase_gateway::gateway::installer::copy_dir_all(&tmp_src, &tmp_dst).unwrap();
+
+    let dst_file = tmp_dst.join("sample.bin");
+    assert!(dst_file.is_file());
+    let dst_mtime = fs::metadata(&dst_file).unwrap().modified().unwrap();
+
+    // Destination mtime should match source mtime (within 1 second tolerance for fs precision)
+    let diff = if src_mtime > dst_mtime {
+        src_mtime.duration_since(dst_mtime).unwrap()
+    } else {
+        dst_mtime.duration_since(src_mtime).unwrap()
+    };
+    assert!(
+        diff < std::time::Duration::from_secs(2),
+        "mtime diff too large: {:?}",
+        diff
+    );
+
+    let _ = fs::remove_dir_all(&tmp_src);
+    let _ = fs::remove_dir_all(&tmp_dst);
+}

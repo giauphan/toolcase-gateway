@@ -9,7 +9,7 @@ mod ingest;
 mod manifest;
 mod upgrade;
 
-pub use ingest::{decode_base64, resolve_source};
+pub use ingest::{copy_dir_all, decode_base64, resolve_source};
 pub use upgrade::upgrade_module;
 
 use crate::gateway::modules::{ModuleError, PersonalManifest};

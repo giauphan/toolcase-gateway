@@ -603,6 +603,13 @@
             nextItem.status = "completed";
             nextItem.version = result.json.version || result.json.module?.version || "latest";
             this.handleSuccess(nextItem);
+          } else if (result.status === 409 && (result.json.message || "").includes("currently being upgraded")) {
+            moduleRequestsInFlight.add(nextItem.id);
+            nextItem.status = "upgrading";
+            nextItem.startedAt = nextItem.startedAt || Date.now();
+            nextItem.error = null;
+            showToast("Module '" + nextItem.id + "' is currently being upgraded on server. Waiting for completion...", false, 4000);
+            this.startPolling();
           } else {
             nextItem.status = "failed";
             nextItem.error = result.json.message || ("HTTP " + result.status);
@@ -673,6 +680,88 @@
       renderQueuePill(active, queued, completed, failed);
       renderQueueBanner(active, queued);
       renderQueueList(this.items);
+    },
+
+    pollTimer: null,
+
+    startPolling: function() {
+      if (this.pollTimer) return;
+      this.pollTimer = setInterval(() => {
+        this.syncWithServer();
+      }, 2000);
+    },
+
+    stopPolling: function() {
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+    },
+
+    syncWithServer: function() {
+      fetch("/api/v1/dashboard/modules/upgrade/status")
+        .then(function(r) { return r.json(); })
+        .then((data) => {
+          if (!data || !data.ok) return;
+          const serverInFlight = Array.isArray(data.in_flight) ? data.in_flight : [];
+          let changed = false;
+
+          serverInFlight.forEach((id) => {
+            const existing = this.getItem(id);
+            if (!existing || (existing.status !== "upgrading" && existing.status !== "queued")) {
+              if (existing) {
+                existing.status = "upgrading";
+                existing.startedAt = existing.startedAt || Date.now();
+              } else {
+                this.items.push({
+                  id: id,
+                  source: "",
+                  branch: "",
+                  status: "upgrading",
+                  queuedAt: Date.now(),
+                  startedAt: Date.now(),
+                  completedAt: null,
+                  version: null,
+                  error: null,
+                });
+              }
+              moduleRequestsInFlight.add(id);
+              changed = true;
+            }
+          });
+
+          let hasFinished = false;
+          this.items.forEach((item) => {
+            if (item.status === "upgrading" && !serverInFlight.includes(item.id) && this.activeItem?.id !== item.id) {
+              const currentMod = allModules.find(function(m) { return m.id === item.id; });
+              if (currentMod && currentMod.version) {
+                item.version = currentMod.version;
+              }
+              item.status = "completed";
+              item.completedAt = Date.now();
+              moduleRequestsInFlight.delete(item.id);
+              changed = true;
+              hasFinished = true;
+            }
+          });
+
+          if (changed) {
+            this.renderQueueUI();
+            renderModules(renderedModules, true);
+            renderCatalog(allCatalogItems);
+          }
+
+          if (hasFinished) {
+            loadOverview();
+          }
+
+          if (serverInFlight.length > 0) {
+            this.startPolling();
+          } else {
+            this.stopPolling();
+          }
+        })
+        .catch(function() {});
     }
   };
 
@@ -1772,6 +1861,7 @@
         renderDynamicProviderMenus(allModules, data.module_configs || {});
         filterModules();
         renderCatalog(allCatalogItems);
+        upgradeQueue.syncWithServer();
       })
       .catch(function(err) {
         if (omniDesc) omniDesc.textContent = "Error loading overview: " + err.message;

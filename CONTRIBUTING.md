@@ -5,7 +5,7 @@ dependencies. Keep it that way where you can.
 
 ## Setup
 
-Requires Rust 1.74 or newer.
+Requires Rust 1.75 or newer.
 
 ```sh
 git clone https://github.com/giauphan/toolcase-gateway.git

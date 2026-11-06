@@ -104,6 +104,63 @@ fn ensure_executable(path: &Path) {
     }
 }
 
+/// Executes a command with a bounded execution timeout, killing the process on expiration.
+pub fn run_command_with_timeout(
+    mut cmd: Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<std::process::Output> {
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+
+    let stdout_handle = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        if let Some(mut r) = stdout_pipe.take() {
+            let _ = std::io::Read::read_to_end(&mut r, &mut b);
+        }
+        b
+    });
+    let stderr_handle = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        if let Some(mut r) = stderr_pipe.take() {
+            let _ = std::io::Read::read_to_end(&mut r, &mut b);
+        }
+        b
+    });
+
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait()? {
+            Some(st) => break st,
+            None => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_handle.join();
+                    let _ = stderr_handle.join();
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("Command timed out after {timeout:?}"),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    };
+
+    let stdout = stdout_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_default();
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
 /// Compiles a Rust module in staging if `Cargo.toml` is present and binary needs building.
 pub fn build_rust_module_if_present(
     staging_dir: &Path,
@@ -156,9 +213,10 @@ pub fn build_rust_module_if_present(
         .current_dir(&abs_staging)
         .env("CARGO_TARGET_DIR", &module_target_dir);
 
-    let output = cmd.output().map_err(|e| {
-        ModuleError::InvalidManifest(format!("Failed to execute 'cargo build': {e}"))
-    })?;
+    let output =
+        run_command_with_timeout(cmd, std::time::Duration::from_secs(180)).map_err(|e| {
+            ModuleError::InvalidManifest(format!("Failed to execute 'cargo build': {e}"))
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

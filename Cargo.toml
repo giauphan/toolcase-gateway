@@ -2,7 +2,7 @@
 name = "toolcase-gateway"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.75"
 description = "Zero-dependency Rust HTTP reverse proxy for LLM APIs: tool-name case repair and model failover for OpenAI-compatible endpoints"
 documentation = "https://github.com/giauphan/toolcase-gateway#readme"
 repository = "https://github.com/giauphan/toolcase-gateway"
