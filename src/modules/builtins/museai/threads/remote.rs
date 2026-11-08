@@ -196,7 +196,8 @@ pub fn delete_muse_thread(base_url: &str, thread_id: &str, config: &Config) -> i
 
     // 2. HTTP fallback
     let delete_thread_url = format!("{base_url}/api/thread/{thread_id}");
-    let mut req = ureq::delete(&delete_thread_url)
+    let mut req = crate::providers::museai::transport::ureq_agent_for(&delete_thread_url)
+        .delete(&delete_thread_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json");
 

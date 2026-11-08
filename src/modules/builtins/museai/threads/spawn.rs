@@ -3,7 +3,8 @@ use std::io;
 
 pub fn spawn_muse_thread(base_url: &str, config: &Config) -> io::Result<String> {
     let create_thread_url = format!("{base_url}/thread/new");
-    let mut req = ureq::post(&create_thread_url)
+    let mut req = crate::providers::museai::transport::ureq_agent_for(&create_thread_url)
+        .post(&create_thread_url)
         .header("Content-Type", "text/plain;charset=UTF-8")
         .header("Accept", "text/x-component")
         .header("Referer", &format!("{base_url}/thread/new"))

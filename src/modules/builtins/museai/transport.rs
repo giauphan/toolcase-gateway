@@ -37,6 +37,20 @@ pub fn apply_muse_http_headers<B>(
     req
 }
 
+/// Returns true if the URL points to a loopback host (127.0.0.1, localhost, [::1]).
+pub fn is_loopback_url(url: &str) -> bool {
+    url.contains("://127.0.0.1") || url.contains("://localhost") || url.contains("://[::1]")
+}
+
+/// Returns a `ureq::Agent` configured to bypass ambient HTTP/HTTPS proxies for loopback hosts.
+pub fn ureq_agent_for(url: &str) -> ureq::Agent {
+    let mut builder = ureq::Agent::config_builder();
+    if is_loopback_url(url) {
+        builder = builder.proxy(None);
+    }
+    ureq::Agent::new_with_config(builder.build())
+}
+
 #[allow(dead_code)]
 pub struct MuseWebSocket {
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
@@ -283,7 +297,8 @@ pub fn send_museai_request(
     let is_auth_check = url.ends_with("/api/auth/check") && method.eq_ignore_ascii_case("post");
 
     let response_res = if method.eq_ignore_ascii_case("get") {
-        let mut b = ureq::get(url)
+        let mut b = ureq_agent_for(url)
+            .get(url)
             .header("Accept", "application/json")
             .header("Origin", base)
             .header("Referer", &format!("{base}/"))
@@ -302,7 +317,8 @@ pub fn send_museai_request(
         }
         b.call()
     } else {
-        let mut b = ureq::post(url)
+        let mut b = ureq_agent_for(url)
+            .post(url)
             .header("Accept", "application/json")
             .header("Origin", base)
             .header("Referer", &format!("{base}/"))

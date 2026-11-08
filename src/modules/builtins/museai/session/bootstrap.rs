@@ -35,7 +35,8 @@ fn wake_vm_if_needed(base_url: &str, active_vm_id: &str, cookie: &str) {
         "retry_count": 0,
         "connect_attempt_id": uuid::Uuid::new_v4().to_string()
     });
-    let mut wake_req = ureq::post(&format!("{base_url}/api/hatch/vm/wake"))
+    let mut wake_req = crate::providers::museai::transport::ureq_agent_for(base_url)
+        .post(&format!("{base_url}/api/hatch/vm/wake"))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .header("Origin", base_url)
@@ -82,7 +83,8 @@ fn wake_vm_if_needed(base_url: &str, active_vm_id: &str, cookie: &str) {
 }
 
 fn fetch_auth_check_token(base_url: &str, cookie: &str) -> Option<String> {
-    let mut auth_request = ureq::post(&format!("{base_url}/api/auth/check"))
+    let mut auth_request = crate::providers::museai::transport::ureq_agent_for(base_url)
+        .post(&format!("{base_url}/api/auth/check"))
         .header("Accept", "application/json")
         .header("Origin", base_url)
         .header("Referer", &format!("{base_url}/"))
@@ -120,7 +122,8 @@ fn fetch_hatch_token(
     body: serde_json::Value,
     bootstrapped: &mut Config,
 ) {
-    let mut request = ureq::post(&format!("{base_url}/api/hatch/token"))
+    let mut request = crate::providers::museai::transport::ureq_agent_for(base_url)
+        .post(&format!("{base_url}/api/hatch/token"))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .header("Origin", base_url)
@@ -159,7 +162,8 @@ fn fetch_hatch_token(
 }
 
 fn fetch_session_metadata(base_url: &str, cookie: &str) -> io::Result<serde_json::Value> {
-    let mut request = ureq::get(&format!("{base_url}/api/session"))
+    let mut request = crate::providers::museai::transport::ureq_agent_for(base_url)
+        .get(&format!("{base_url}/api/session"))
         .header("Accept", "application/json")
         .header("Origin", base_url)
         .header("Referer", &format!("{base_url}/"));

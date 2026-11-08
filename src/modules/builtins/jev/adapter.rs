@@ -188,10 +188,15 @@ pub fn handle_jev_ai(
     };
     let idempotency = header_value(&request.headers, "idempotency-key");
 
+    let is_loopback = base_url.contains("127.0.0.1")
+        || base_url.contains("localhost")
+        || or_base_url.contains("127.0.0.1")
+        || or_base_url.contains("localhost");
     let failover_config = FailoverConfig {
         timeout: config.io_timeout,
         retry_base_delay_ms: config.retry_base_delay_ms,
         max_retry_delay_ms: config.max_retry_delay_ms,
+        bypass_proxy: is_loopback,
     };
 
     execute_http_failover_with_callback(

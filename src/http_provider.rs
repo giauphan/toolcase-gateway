@@ -62,6 +62,7 @@ pub struct FailoverConfig {
     pub timeout: Option<Duration>,
     pub retry_base_delay_ms: u64,
     pub max_retry_delay_ms: u64,
+    pub bypass_proxy: bool,
 }
 
 pub fn write_ureq_response(
@@ -136,12 +137,14 @@ where
         &ureq::Agent,
     ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
 {
-    let agent_config = ureq::Agent::config_builder()
+    let mut agent_builder = ureq::Agent::config_builder()
         .timeout_global(config.timeout)
         .max_redirects(0)
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(agent_config);
+        .http_status_as_error(false);
+    if config.bypass_proxy {
+        agent_builder = agent_builder.proxy(None);
+    }
+    let agent = ureq::Agent::new_with_config(agent_builder.build());
     let mut last_status: Option<u16> = None;
 
     for (index, candidate) in candidates.iter().enumerate() {
