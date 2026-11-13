@@ -170,14 +170,20 @@ pub fn extract_image_url_from_text(text: &str) -> String {
 }
 
 fn extract_markdown_image_url(text: &str) -> Option<String> {
+    extract_markdown_artifact_url(text, true).or_else(|| extract_markdown_artifact_url(text, false))
+}
+
+fn extract_markdown_artifact_url(text: &str, image_marker_only: bool) -> Option<String> {
+    let marker = if image_marker_only { "![" } else { "[" };
+    let skip = if image_marker_only { 2 } else { 1 };
     let mut search = text;
-    while let Some(idx) = search.find("![") {
-        let rest = &search[idx + 2..];
+    while let Some(idx) = search.find(marker) {
+        let rest = &search[idx + skip..];
         if let Some(close_bracket) = rest.find(']') {
             let after_bracket = &rest[close_bracket + 1..];
-            if after_bracket.starts_with('(') {
-                if let Some(close_paren) = after_bracket.find(')') {
-                    let target = after_bracket[1..close_paren].trim();
+            if let Some(after_open) = after_bracket.strip_prefix('(') {
+                if let Some(close_paren) = after_open.find(')') {
+                    let target = after_open[..close_paren].trim();
                     let url = if let Some((u, _)) = target.split_once(" \"") {
                         u.trim()
                     } else if let Some((u, _)) = target.split_once(" '") {
@@ -186,9 +192,7 @@ fn extract_markdown_image_url(text: &str) -> Option<String> {
                         target
                     };
                     let cleaned = trim_trailing_punct(url);
-                    if has_supported_image_extension(cleaned)
-                        || is_raw_image_artifact_url(cleaned)
-                        || is_vm_media_url(cleaned)
+                    if has_supported_image_extension(cleaned) || is_raw_image_artifact_url(cleaned)
                     {
                         return Some(cleaned.to_string());
                     }
@@ -198,4 +202,25 @@ fn extract_markdown_image_url(text: &str) -> Option<String> {
         search = rest;
     }
     None
+}
+
+pub fn explicit_image_refusal(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    let mentions_image_action = text.contains("image generation")
+        || text.contains("generate an image")
+        || text.contains("generate image")
+        || text.contains("generate images")
+        || text.contains("create an image")
+        || text.contains("create image")
+        || text.contains("create images")
+        || text.contains("create this image")
+        || text.contains("image artifact");
+    let mentions_inability = text.contains("unavailable")
+        || text.contains("cannot")
+        || text.contains("can't")
+        || text.contains("not available")
+        || text.contains("unable")
+        || text.contains("don't have")
+        || text.contains("do not have");
+    mentions_image_action && mentions_inability
 }

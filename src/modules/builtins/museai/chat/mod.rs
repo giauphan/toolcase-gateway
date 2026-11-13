@@ -3,10 +3,13 @@ mod parser;
 mod prompt;
 mod stream;
 
-pub use executor::{request_museai_chat_completion, MUSE_POST_COMPLETION_WAIT_SECS};
+pub use executor::{
+    request_museai_chat_completion, ArtifactWait, MUSE_POST_COMPLETION_IMAGE_WAIT_SECS,
+    MUSE_POST_COMPLETION_WAIT_SECS,
+};
 pub use parser::{
-    explicit_video_refusal, extract_video_url_from_stream, find_video_url_in_json,
-    parse_assistant_content_from_json,
+    explicit_video_refusal, extract_video_url_from_stream, find_image_url_in_json,
+    find_video_url_in_json, parse_assistant_content_from_json,
 };
 pub use prompt::{
     build_muse_chat_request, build_muse_chat_request_with_items,

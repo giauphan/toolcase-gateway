@@ -13,6 +13,22 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub const MUSE_POST_COMPLETION_WAIT_SECS: u64 = 300;
+pub const MUSE_POST_COMPLETION_IMAGE_WAIT_SECS: u64 = 180;
+
+/// Which deferred artifact the caller wants the executor to keep reading for
+/// after Muse completes the assistant message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactWait {
+    None,
+    Video,
+    Image,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MediaKind {
+    Video,
+    Image,
+}
 
 fn init_noise_session(
     config: &Config,
@@ -159,13 +175,18 @@ fn attach_scoped_approval_handler(stream: &mut MuseChatStream, config: &Config, 
     }
 }
 
-fn await_video_artifact(
+fn await_media_artifact(
     socket: &mut MuseWebSocket,
     session: &mut MuseNoiseSession,
     config: &Config,
     thread_id: &str,
+    kind: MediaKind,
 ) -> io::Result<Option<String>> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(MUSE_POST_COMPLETION_WAIT_SECS);
+    let budget_secs = match kind {
+        MediaKind::Video => MUSE_POST_COMPLETION_WAIT_SECS,
+        MediaKind::Image => MUSE_POST_COMPLETION_IMAGE_WAIT_SECS,
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(budget_secs);
     let mut presentation_stream = MuseChatStream {
         session_id: Some(thread_id.to_string()),
         ..Default::default()
@@ -180,13 +201,22 @@ fn await_video_artifact(
                     ServiceFrameKind::Reset { .. } => break,
                 };
                 presentation_stream.push(&bytes, ended)?;
-                if let Some(extracted) = extract_video_url_from_stream(&presentation_stream) {
-                    debug_log("Video artifact URL received");
+                let extracted = match kind {
+                    MediaKind::Video => extract_video_url_from_stream(&presentation_stream),
+                    MediaKind::Image => {
+                        let url = crate::providers::museai::image::extract_image_url_from_text(
+                            &presentation_stream.text,
+                        );
+                        (!url.is_empty()).then_some(url)
+                    }
+                };
+                if let Some(extracted) = extracted {
+                    debug_log("Deferred media artifact URL received");
                     return Ok(Some(extracted));
                 }
             }
             Err(e) => {
-                debug_log(&format!("Video URL read error: {e}"));
+                debug_log(&format!("Deferred media URL read error: {e}"));
                 break;
             }
         }
@@ -301,7 +331,7 @@ fn handle_thread_cleanup(
 pub fn request_museai_chat_completion(
     request_body: &[u8],
     config: &Config,
-    wait_for_video_artifact: bool,
+    artifact_wait: ArtifactWait,
 ) -> io::Result<String> {
     let existing_thread_id = extract_thread_id(request_body)?;
     let prompt = if existing_thread_id.is_some() {
@@ -383,21 +413,43 @@ pub fn request_museai_chat_completion(
             crate::providers::museai::video::extract_url_from_text(&full_assistant_text);
         (!extracted.is_empty()).then_some(extracted)
     };
-    let image_url = {
+    let mut image_url = {
         let extracted =
             crate::providers::museai::image::extract_image_url_from_text(&full_assistant_text);
         (!extracted.is_empty()).then_some(extracted)
     };
 
-    if wait_for_video_artifact
-        && video_url.is_none()
-        && !explicit_video_refusal(&full_assistant_text)
-    {
-        if let Some(artifact) =
-            await_video_artifact(&mut socket, &mut session, &config, &thread_id)?
+    match artifact_wait {
+        ArtifactWait::Video
+            if video_url.is_none() && !explicit_video_refusal(&full_assistant_text) =>
         {
-            video_url = Some(artifact);
+            if let Some(artifact) = await_media_artifact(
+                &mut socket,
+                &mut session,
+                &config,
+                &thread_id,
+                MediaKind::Video,
+            )? {
+                video_url = Some(artifact);
+            }
         }
+        ArtifactWait::Image
+            if image_url.is_none()
+                && !crate::providers::museai::image::explicit_image_refusal(
+                    &full_assistant_text,
+                ) =>
+        {
+            if let Some(artifact) = await_media_artifact(
+                &mut socket,
+                &mut session,
+                &config,
+                &thread_id,
+                MediaKind::Image,
+            )? {
+                image_url = Some(artifact);
+            }
+        }
+        _ => {}
     }
 
     for (raw_url, is_image) in [(&video_url, false), (&image_url, true)] {

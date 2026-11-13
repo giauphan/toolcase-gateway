@@ -124,6 +124,15 @@ pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<Stri
     if let Some(url) = find_video_url_in_json(val, 0) {
         return Some(format!("\nVideo URL: {url}\n"));
     }
+    if let Some(url) = find_image_url_in_json(val, 0) {
+        let mut content = extract_array_contents(val, "events")
+            .or_else(|| extract_array_contents(val, "items"))
+            .unwrap_or_default();
+        if !content.contains(url.as_str()) {
+            content.push_str(&format!("\nImage URL: {url}\n"));
+        }
+        return Some(content);
+    }
     if let Some(fallback) = extract_fallback_video_text(val) {
         return Some(fallback);
     }
@@ -152,14 +161,22 @@ fn inspect_video_candidate(s: &str) -> Option<String> {
     }
 }
 
-fn search_video_object(
+fn inspect_image_candidate(s: &str) -> Option<String> {
+    let extracted = crate::providers::museai::image::extract_image_url_from_text(s);
+    (!extracted.is_empty()).then_some(extracted)
+}
+
+fn search_media_object(
     map: &serde_json::Map<String, serde_json::Value>,
     depth: usize,
+    inspect: fn(&str) -> Option<String>,
 ) -> Option<String> {
     for key in &[
         "url",
         "video_url",
         "videoUrl",
+        "image_url",
+        "imageUrl",
         "uri",
         "src",
         "path",
@@ -168,7 +185,7 @@ fn search_video_object(
         "media_url",
     ] {
         if let Some(serde_json::Value::String(s)) = map.get(*key) {
-            if let Some(candidate) = inspect_video_candidate(s) {
+            if let Some(candidate) = inspect(s) {
                 return Some(candidate);
             }
         }
@@ -192,7 +209,7 @@ fn search_video_object(
         "presentations",
     ] {
         if let Some(child) = map.get(*key) {
-            if let Some(url) = find_video_url_in_json(child, depth + 1) {
+            if let Some(url) = find_media_url_in_json(child, depth + 1, inspect) {
                 return Some(url);
             }
         }
@@ -219,6 +236,8 @@ fn search_video_object(
                 | "url"
                 | "video_url"
                 | "videoUrl"
+                | "image_url"
+                | "imageUrl"
                 | "uri"
                 | "src"
                 | "path"
@@ -230,7 +249,7 @@ fn search_video_object(
                 | "message_id"
                 | "id"
         ) {
-            if let Some(url) = find_video_url_in_json(child, depth + 1) {
+            if let Some(url) = find_media_url_in_json(child, depth + 1, inspect) {
                 return Some(url);
             }
         }
@@ -238,25 +257,41 @@ fn search_video_object(
     None
 }
 
-fn search_video_array(arr: &[serde_json::Value], depth: usize) -> Option<String> {
+fn search_media_array(
+    arr: &[serde_json::Value],
+    depth: usize,
+    inspect: fn(&str) -> Option<String>,
+) -> Option<String> {
     for item in arr {
-        if let Some(url) = find_video_url_in_json(item, depth + 1) {
+        if let Some(url) = find_media_url_in_json(item, depth + 1, inspect) {
             return Some(url);
         }
     }
     None
 }
 
-pub fn find_video_url_in_json(val: &serde_json::Value, depth: usize) -> Option<String> {
+fn find_media_url_in_json(
+    val: &serde_json::Value,
+    depth: usize,
+    inspect: fn(&str) -> Option<String>,
+) -> Option<String> {
     if depth > 10 {
         return None;
     }
     match val {
-        serde_json::Value::String(s) => inspect_video_candidate(s),
-        serde_json::Value::Object(map) => search_video_object(map, depth),
-        serde_json::Value::Array(arr) => search_video_array(arr, depth),
+        serde_json::Value::String(s) => inspect(s),
+        serde_json::Value::Object(map) => search_media_object(map, depth, inspect),
+        serde_json::Value::Array(arr) => search_media_array(arr, depth, inspect),
         _ => None,
     }
+}
+
+pub fn find_video_url_in_json(val: &serde_json::Value, depth: usize) -> Option<String> {
+    find_media_url_in_json(val, depth, inspect_video_candidate)
+}
+
+pub fn find_image_url_in_json(val: &serde_json::Value, depth: usize) -> Option<String> {
+    find_media_url_in_json(val, depth, inspect_image_candidate)
 }
 
 pub fn extract_video_url_from_stream(stream: &MuseChatStream) -> Option<String> {

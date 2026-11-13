@@ -1,7 +1,7 @@
 //! Muse image generation application service.
 
 use crate::config::Config;
-use crate::providers::museai::chat::request_museai_chat_completion;
+use crate::providers::museai::chat::{request_museai_chat_completion, ArtifactWait};
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -202,7 +202,7 @@ pub fn create_image_with_completion<F>(
     request_completion: F,
 ) -> io::Result<serde_json::Value>
 where
-    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
+    F: Fn(&[u8], &Config, ArtifactWait) -> io::Result<String>,
 {
     let req = parse_and_validate_image_request(request_body)?;
     if let Some(cached) = check_or_reserve_image_job(&req)? {
@@ -222,7 +222,7 @@ pub fn submit_image_with_completion<F>(
     request_completion: F,
 ) -> io::Result<serde_json::Value>
 where
-    F: Fn(&[u8], &Config, bool) -> io::Result<String> + Send + Sync + 'static,
+    F: Fn(&[u8], &Config, ArtifactWait) -> io::Result<String> + Send + Sync + 'static,
 {
     let req = parse_and_validate_image_request(request_body)?;
     if let Some(cached) = check_or_reserve_image_job(&req)? {
@@ -269,9 +269,9 @@ fn finish_image_request<F>(
     request_completion: F,
 ) -> io::Result<serde_json::Value>
 where
-    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
+    F: Fn(&[u8], &Config, ArtifactWait) -> io::Result<String>,
 {
-    let completion = match request_completion(&req.request_json, config, false) {
+    let completion = match request_completion(&req.request_json, config, ArtifactWait::Image) {
         Ok(c) => c,
         Err(e) => {
             crate::runtime::logger::log_message(
@@ -301,6 +301,12 @@ where
 
     let raw_image_url = extract_image_url_from_text(&completion);
     if raw_image_url.is_empty() {
+        let failure_message =
+            if crate::providers::museai::image::explicit_image_refusal(&completion) {
+                "Muse image generation was declined by Muse"
+            } else {
+                "Muse image generation completed without a supported public HTTPS artifact"
+            };
         crate::runtime::logger::log_message(
             "WARN",
             "museai_image",
@@ -310,16 +316,8 @@ where
                 &completion[..completion.len().min(500)]
             ),
         );
-        let _ = update_image_job(
-            &req.allocated_job_id,
-            "failed",
-            None,
-            Some("Muse image generation completed without a supported public HTTPS artifact"),
-        );
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Muse image generation completed without a supported public HTTPS artifact",
-        ));
+        let _ = update_image_job(&req.allocated_job_id, "failed", None, Some(failure_message));
+        return Err(io::Error::new(io::ErrorKind::Unsupported, failure_message));
     }
 
     let is_vm = crate::providers::museai::video::is_vm_media_url(&raw_image_url);

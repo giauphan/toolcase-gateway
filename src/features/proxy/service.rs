@@ -26,7 +26,11 @@ impl ProxyService {
         index: usize,
         last: bool,
     ) -> io::Result<Option<u16>> {
-        match crate::museai::request_museai_chat_completion(&request.body, config, false) {
+        match crate::museai::request_museai_chat_completion(
+            &request.body,
+            config,
+            crate::museai::chat::ArtifactWait::None,
+        ) {
             Ok(response) => {
                 crate::runtime::logger::log_message(
                     "INFO",

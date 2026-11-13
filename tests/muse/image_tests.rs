@@ -1,6 +1,7 @@
 //! Muse image generation unit and integration tests.
 
 use toolcase_gateway::config::Config;
+use toolcase_gateway::museai::chat::ArtifactWait;
 use toolcase_gateway::museai::image::{
     build_image_prompt, create_image_with_completion, extract_image_url_from_text, load_image_job,
     map_size_to_aspect_ratio, normalize_image_model, parse_and_validate_image_request,
@@ -181,9 +182,10 @@ fn test_create_image_synchronous_success() {
         "aspect_ratio": "16:9"
     });
 
-    let mock_completion = |_body: &[u8], _cfg: &Config, _wait: bool| -> std::io::Result<String> {
-        Ok("Generated image: https://muse.ai/files/111/222/cyberpunk.png".to_string())
-    };
+    let mock_completion =
+        |_body: &[u8], _cfg: &Config, _wait: ArtifactWait| -> std::io::Result<String> {
+            Ok("Generated image: https://muse.ai/files/111/222/cyberpunk.png".to_string())
+        };
 
     let result = create_image_with_completion(
         &serde_json::to_vec(&payload).unwrap(),
@@ -228,9 +230,10 @@ fn test_create_image_synchronous_missing_artifact_fails() {
         "aspect_ratio": "1:1"
     });
 
-    let mock_completion = |_body: &[u8], _cfg: &Config, _wait: bool| -> std::io::Result<String> {
-        Ok("I cannot create this image right now.".to_string())
-    };
+    let mock_completion =
+        |_body: &[u8], _cfg: &Config, _wait: ArtifactWait| -> std::io::Result<String> {
+            Ok("I cannot create this image right now.".to_string())
+        };
 
     let result = create_image_with_completion(
         &serde_json::to_vec(&payload).unwrap(),
@@ -239,10 +242,19 @@ fn test_create_image_synchronous_missing_artifact_fails() {
     );
 
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::Unsupported);
+    let error = result.unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    assert!(
+        error.to_string().contains("declined"),
+        "refusals must be reported as declines, got: {error}"
+    );
 
     let saved = load_image_job(&unique_id).unwrap();
     assert_eq!(saved.status, "failed");
+    assert_eq!(
+        saved.error.as_deref(),
+        Some("Muse image generation was declined by Muse")
+    );
 }
 
 #[test]
@@ -255,10 +267,11 @@ fn test_submit_image_asynchronous_success() {
         "aspect_ratio": "4:3"
     });
 
-    let mock_completion = |_body: &[u8], _cfg: &Config, _wait: bool| -> std::io::Result<String> {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        Ok("Finished: https://muse.ai/files/333/444/lavender.jpg".to_string())
-    };
+    let mock_completion =
+        |_body: &[u8], _cfg: &Config, _wait: ArtifactWait| -> std::io::Result<String> {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            Ok("Finished: https://muse.ai/files/333/444/lavender.jpg".to_string())
+        };
 
     let result = submit_image_with_completion(
         &serde_json::to_vec(&payload).unwrap(),
@@ -376,4 +389,229 @@ fn test_image_media_path_traversal_hardening() {
     assert!(find_image_media("../../bad_job").is_none());
     assert!(load_image_media("../../bad_job").is_err());
     assert!(save_image_media("../../bad_job", b"test", "png").is_err());
+}
+
+#[test]
+fn test_extract_image_url_from_plain_markdown_link_with_sandbox_artifact() {
+    let completion = "Image generation is available, and I've generated your 9:16 image and verified it matches the brief — an iPad mini tablet on a futuristic minimalist desk.\n\n[Ipad Mini Futuristic Minimalist Desk](sandbox://workspace/your_files/ipad-mini-futuristic-minimalist-desk/ipad-mini-futuristic-minimalist-desk.webp)\n\nSpec: 1152x2048, 9:16.";
+    assert_eq!(
+        extract_image_url_from_text(completion),
+        "sandbox://workspace/your_files/ipad-mini-futuristic-minimalist-desk/ipad-mini-futuristic-minimalist-desk.webp"
+    );
+}
+
+#[test]
+fn test_extract_image_url_from_bare_sandbox_artifact_and_markdown_image() {
+    let bare = "Here is your image: sandbox://workspace/your_files/owl/owl.webp";
+    assert_eq!(
+        extract_image_url_from_text(bare),
+        "sandbox://workspace/your_files/owl/owl.webp"
+    );
+
+    let markdown_image = "![Owl](sandbox://workspace/your_files/owl/owl.webp)";
+    assert_eq!(
+        extract_image_url_from_text(markdown_image),
+        "sandbox://workspace/your_files/owl/owl.webp"
+    );
+}
+
+#[test]
+fn test_extract_image_url_from_markdown_link_to_public_https_artifact() {
+    let completion =
+        "Finished. [Final render](https://muse.ai/files/777/888/render.webp \"Final render\")";
+    assert_eq!(
+        extract_image_url_from_text(completion),
+        "https://muse.ai/files/777/888/render.webp"
+    );
+}
+
+#[test]
+fn test_extract_image_url_ignores_markdown_links_to_non_image_targets() {
+    let completion = "Read more in the [guide](https://muse.ai/help/article) or [video](https://muse.ai/files/1/2/clip.mp4).";
+    assert_eq!(extract_image_url_from_text(completion), "");
+}
+
+#[test]
+fn test_explicit_image_refusal_detection() {
+    use toolcase_gateway::museai::image::explicit_image_refusal;
+
+    assert!(explicit_image_refusal(
+        "I cannot create this image right now."
+    ));
+    assert!(explicit_image_refusal(
+        "Image generation is unavailable for this request."
+    ));
+    assert!(!explicit_image_refusal(
+        "Image generation is available — I'll create your 9:16 data center image now."
+    ));
+    assert!(!explicit_image_refusal(
+        "Image generation is available, and I'm packaging your 9:16 image as an artifact now. I'll send the artifact link here once it's ready."
+    ));
+}
+
+#[test]
+fn test_create_image_succeeds_with_sandbox_markdown_link_artifact() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let config = Config::default();
+    let unique_id = format!("image-mdlink-{}", Uuid::new_v4());
+    let payload = serde_json::json!({
+        "id": unique_id,
+        "prompt": "an ipad mini on a minimalist desk",
+        "aspect_ratio": "9:16"
+    });
+
+    let requested_image_wait = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&requested_image_wait);
+    let mock_completion =
+        move |_body: &[u8], _cfg: &Config, wait: ArtifactWait| -> std::io::Result<String> {
+            flag.store(wait == ArtifactWait::Image, Ordering::SeqCst);
+            Ok("Here it is.\n\n[Desk](sandbox://workspace/your_files/ipad/ipad.webp)".to_string())
+        };
+
+    let result = create_image_with_completion(
+        &serde_json::to_vec(&payload).unwrap(),
+        &config,
+        mock_completion,
+    )
+    .unwrap();
+
+    assert!(
+        requested_image_wait.load(Ordering::SeqCst),
+        "image generation must request a deferred image artifact wait"
+    );
+    assert_eq!(result["status"], "completed");
+    assert_eq!(
+        result["image_url"],
+        format!("/muse-ai/v1/images/{unique_id}/content")
+    );
+    assert_eq!(
+        result["data"][0]["url"],
+        format!("/muse-ai/v1/images/{unique_id}/content")
+    );
+
+    let saved = load_image_job(&unique_id).unwrap();
+    assert_eq!(saved.status, "completed");
+    assert_eq!(
+        saved.image_url,
+        format!("/muse-ai/v1/images/{unique_id}/content")
+    );
+}
+
+#[test]
+fn test_submit_image_completes_from_sandbox_markdown_link() {
+    let config = Config::default();
+    let unique_id = format!("image-mdlink-async-{}", Uuid::new_v4());
+    let payload = serde_json::json!({
+        "id": unique_id,
+        "prompt": "a lighthouse at dusk",
+        "aspect_ratio": "1:1"
+    });
+
+    let mock_completion = |_body: &[u8],
+                           _cfg: &Config,
+                           _wait: ArtifactWait|
+     -> std::io::Result<String> {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        Ok("[Lighthouse](sandbox://workspace/your_files/lighthouse/lighthouse.webp)".to_string())
+    };
+
+    let result = submit_image_with_completion(
+        &serde_json::to_vec(&payload).unwrap(),
+        &config,
+        mock_completion,
+    )
+    .unwrap();
+    assert_eq!(result["status"], "submitting");
+
+    let mut completed = false;
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        if let Ok(job) = load_image_job(&unique_id) {
+            if job.status == "completed" {
+                completed = true;
+                assert_eq!(
+                    job.image_url,
+                    format!("/muse-ai/v1/images/{unique_id}/content")
+                );
+                break;
+            }
+        }
+    }
+    assert!(
+        completed,
+        "Background worker did not complete the job from a sandbox markdown link"
+    );
+}
+
+#[test]
+fn test_create_image_recovers_from_real_completion_json_with_sandbox_link() {
+    let config = Config::default();
+    let unique_id = format!("image-real-json-{}", Uuid::new_v4());
+    let payload = serde_json::json!({
+        "id": unique_id,
+        "prompt": "an iPad mini on a futuristic minimalist desk",
+        "aspect_ratio": "9:16"
+    });
+
+    let completion = serde_json::json!({
+        "choices": [{
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+                "content": "Image generation is available, and I've generated your 9:16 image and verified it matches the brief — an iPad mini tablet on a futuristic minimalist desk, with glowing blue circuit light and dramatic studio lighting.\n\n[Ipad Mini Futuristic Minimalist Desk](sandbox://workspace/your_files/ipad-mini-futuristic-minimalist-desk/ipad-mini-futuristic-minimalist-desk.webp)\n\nSpec: 1152x2048, 9:16.",
+                "role": "assistant"
+            }
+        }],
+        "created": 1793253231,
+        "id": "chatcmpl-72428dff-484a-49df-bf00-f2207707ab26",
+        "model": "muse",
+        "object": "chat.completion",
+        "reply_thread_id": "194e1db0-1c3c-4986-9d92-ea4fd7f03d63",
+        "session_id": "194e1db0-1c3c-4986-9d92-ea4fd7f03d63",
+        "thread_id": "194e1db0-1c3c-4986-9d92-ea4fd7f03d63"
+    })
+    .to_string();
+
+    let mock_completion = move |_body: &[u8],
+                                _cfg: &Config,
+                                _wait: ArtifactWait|
+          -> std::io::Result<String> { Ok(completion.clone()) };
+
+    let result = create_image_with_completion(
+        &serde_json::to_vec(&payload).unwrap(),
+        &config,
+        mock_completion,
+    )
+    .expect("image generation must accept the recorded Muse completion shape");
+
+    assert_eq!(result["status"], "completed");
+    assert_eq!(
+        result["image_url"],
+        format!("/muse-ai/v1/images/{unique_id}/content")
+    );
+    assert_eq!(result["error"], serde_json::Value::Null);
+}
+
+#[test]
+fn test_extract_image_url_prefers_markdown_image_over_plain_link() {
+    let completion = "[Thumbnail](https://muse.ai/files/1/2/thumb.jpg)\n\n![Final render](sandbox://workspace/your_files/final/final.webp)";
+    assert_eq!(
+        extract_image_url_from_text(completion),
+        "sandbox://workspace/your_files/final/final.webp"
+    );
+}
+
+#[test]
+fn test_extract_image_url_skips_non_image_workspace_markdown_links() {
+    let completion =
+        "[Source](sandbox://workspace/source.txt)\n\n[Image](sandbox://workspace/render.webp)";
+    assert_eq!(
+        extract_image_url_from_text(completion),
+        "sandbox://workspace/render.webp"
+    );
+
+    let only_non_image = "[Source](sandbox://workspace/source.txt)";
+    assert_eq!(extract_image_url_from_text(only_non_image), "");
 }

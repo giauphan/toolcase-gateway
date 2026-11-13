@@ -22,7 +22,7 @@ pub fn handle_museai_chat_completions(
     match crate::providers::museai::chat::request_museai_chat_completion(
         request_body,
         config,
-        false,
+        crate::providers::museai::chat::ArtifactWait::None,
     ) {
         Ok(response) => write_chat_completion(client, &response),
         Err(err) => {

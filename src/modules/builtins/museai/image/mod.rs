@@ -24,8 +24,8 @@ pub use service::{
     ValidatedImageRequest,
 };
 pub use url::{
-    build_image_prompt, extract_image_url_from_text, has_supported_image_extension,
-    is_raw_image_artifact_url, is_supported_image_url, map_size_to_aspect_ratio,
-    normalize_image_model, DEFAULT_IMAGE_ASPECT_RATIO, SUPPORTED_IMAGE_ASPECT_RATIOS,
-    SUPPORTED_IMAGE_MODELS,
+    build_image_prompt, explicit_image_refusal, extract_image_url_from_text,
+    has_supported_image_extension, is_raw_image_artifact_url, is_supported_image_url,
+    map_size_to_aspect_ratio, normalize_image_model, DEFAULT_IMAGE_ASPECT_RATIO,
+    SUPPORTED_IMAGE_ASPECT_RATIOS, SUPPORTED_IMAGE_MODELS,
 };

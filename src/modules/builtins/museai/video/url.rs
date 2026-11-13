@@ -68,32 +68,40 @@ pub fn build_video_prompt_with_attachments(
     }
 }
 
+fn is_media_url_token(value: &str) -> bool {
+    value.starts_with("https://")
+        || value.starts_with("http://")
+        || value.starts_with("sandbox://workspace/")
+        || value.starts_with("sandbox:///workspace/")
+        || value.starts_with("/fs/raw/workspace/")
+        || value.starts_with("workspace/")
+        || value.starts_with("/workspace/")
+}
+
+fn next_media_url_start(text: &str) -> Option<usize> {
+    ["https://", "http://", "sandbox://"]
+        .iter()
+        .filter_map(|scheme| text.find(scheme))
+        .min()
+}
+
 pub fn extract_candidate_urls(text: &str) -> Vec<String> {
     let mut urls = Vec::new();
     for word in text.split_whitespace() {
         let cleaned = trim_trailing_punct(word);
-        if cleaned.starts_with("https://") || cleaned.starts_with("http://") {
+        if is_media_url_token(cleaned) {
             if !urls.iter().any(|u| u == cleaned) {
                 urls.push(cleaned.to_string());
             }
-        } else if cleaned.starts_with("/fs/raw/workspace/")
-            || cleaned.starts_with("workspace/")
-            || cleaned.starts_with("/workspace/")
-        {
-            if !urls.iter().any(|u| u == cleaned) {
-                urls.push(cleaned.to_string());
-            }
-        } else if let Some(idx) = word.find("https://").or_else(|| word.find("http://")) {
+        } else if let Some(idx) = next_media_url_start(word) {
             let slice = trim_trailing_punct(&word[idx..]);
-            if (slice.starts_with("https://") || slice.starts_with("http://"))
-                && !urls.iter().any(|u| u == slice)
-            {
+            if is_media_url_token(slice) && !urls.iter().any(|u| u == slice) {
                 urls.push(slice.to_string());
             }
         }
     }
     let mut rest = text;
-    while let Some(idx) = rest.find("https://").or_else(|| rest.find("http://")) {
+    while let Some(idx) = next_media_url_start(rest) {
         let after = &rest[idx..];
         let end = after
             .find(|c: char| {
@@ -105,9 +113,7 @@ pub fn extract_candidate_urls(text: &str) -> Vec<String> {
             })
             .unwrap_or(after.len());
         let candidate = trim_trailing_punct(&after[..end]);
-        if (candidate.starts_with("https://") || candidate.starts_with("http://"))
-            && !urls.iter().any(|u| u == candidate)
-        {
+        if is_media_url_token(candidate) && !urls.iter().any(|u| u == candidate) {
             urls.push(candidate.to_string());
         }
         rest = &after[end.max(1)..];
@@ -187,6 +193,8 @@ pub fn is_raw_video_artifact_url(url: &str) -> bool {
     is_supported_video_url(url)
         || ((url.starts_with("https://")
             || url.starts_with("http://")
+            || url.starts_with("sandbox://workspace/")
+            || url.starts_with("sandbox:///workspace/")
             || url.starts_with('/')
             || url.starts_with("workspace/"))
             && is_vm_media_url(url)

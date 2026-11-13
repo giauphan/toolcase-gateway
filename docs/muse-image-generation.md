@@ -8,6 +8,7 @@
 - **Configurable Aspect Ratios**: Choose from `1:1` (default), `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `5:4`, `4:5`.
 - **OpenAI Size Compatibility**: Accepts standard OpenAI `size` fields (e.g. `1024x1024` &rarr; `1:1`, `1792x1024` &rarr; `16:9`, `1024x1792` &rarr; `9:16`, `1024x768` &rarr; `4:3`).
 - **Encrypted Noise XX Media Fetching**: When Muse CVM generates images in its internal sandbox workspace (`sandbox://workspace/...`), the gateway transparently fetches the binary media over the encrypted Noise XX session and caches it under `$GW_STATE_DIR/media/{id}.{ext}`.
+- **Artifact Link Recovery**: Image artifact links are recognized in every form Muse emits — Markdown images (`![alt](url)`), plain Markdown links (`[title](url)`), bare URLs, and links nested in stream presentation/attachment events. When Muse finishes the assistant message before the artifact is ready, the gateway keeps reading the stream for a bounded window instead of failing the job immediately.
 - **Direct Preview & Download Links**:
   - `preview_url` (`/muse-ai/v1/images/{id}/content`): Serves the image inline (`Content-Disposition: inline`) for browser rendering.
   - `download_url` (`/muse-ai/v1/images/{id}/download`): Serves the image as a downloadable attachment (`Content-Disposition: attachment`).

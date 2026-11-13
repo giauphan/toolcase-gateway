@@ -321,3 +321,67 @@ fn test_explicit_video_refusal_skips_delayed_artifact_wait() {
     assert!(explicit_video_refusal("I cannot create videos right now."));
     assert!(!explicit_video_refusal("Your video is being prepared."));
 }
+
+#[test]
+fn test_post_completion_parser_handles_image_presentation_artifact() {
+    let artifact = "sandbox://workspace/your_files/ipad-mini-futuristic-minimalist-desk/ipad-mini-futuristic-minimalist-desk.webp";
+    let mut stream = MuseChatStream {
+        session_id: Some("00000000-0000-4000-8000-000000000001".to_string()),
+        ..Default::default()
+    };
+    stream
+        .record(&serde_json::json!({
+            "event": "delta.presentation",
+            "payload": {"data": {"url": artifact}}
+        }))
+        .unwrap();
+
+    assert!(stream.text.contains(artifact));
+    assert_eq!(
+        toolcase_gateway::museai::image::extract_image_url_from_text(&stream.text),
+        artifact
+    );
+    assert_eq!(
+        extract_video_url_from_stream(&stream),
+        None,
+        "image artifacts must not be reported as video artifacts"
+    );
+}
+
+#[test]
+fn test_post_completion_parser_keeps_video_presentation_ahead_of_image_scan() {
+    let mut stream = MuseChatStream {
+        session_id: Some("00000000-0000-4000-8000-000000000001".to_string()),
+        ..Default::default()
+    };
+    stream
+        .record(&serde_json::json!({
+            "event": "delta.presentation",
+            "payload": {"data": {"url": "https://muse.ai/files/1/2/clip.mp4"}}
+        }))
+        .unwrap();
+
+    assert_eq!(
+        extract_video_url_from_stream(&stream),
+        Some("https://muse.ai/files/1/2/clip.mp4".to_string())
+    );
+}
+
+#[test]
+fn test_parse_assistant_content_preserves_batch_text_with_image_artifact() {
+    use toolcase_gateway::museai::chat::parse_assistant_content_from_json;
+
+    let parsed = parse_assistant_content_from_json(&serde_json::json!({
+        "events": [
+            {"text": "Here is the result"},
+            {"image_url": "https://example.com/result.png"}
+        ]
+    }))
+    .expect("batch with an image artifact must produce content");
+
+    assert!(parsed.contains("Here is the result"), "got: {parsed}");
+    assert!(
+        parsed.contains("https://example.com/result.png"),
+        "got: {parsed}"
+    );
+}

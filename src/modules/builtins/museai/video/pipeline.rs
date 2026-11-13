@@ -7,7 +7,7 @@ use super::request::{
 use super::response::{build_video_result_with_job_id, video_job_response};
 use super::url::{extract_url_from_text, is_vm_media_url};
 use crate::config::Config;
-use crate::providers::museai::chat::request_museai_chat_completion;
+use crate::providers::museai::chat::{request_museai_chat_completion, ArtifactWait};
 use std::io;
 
 pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
@@ -20,7 +20,7 @@ pub fn create_video_with_completion<F>(
     request_completion: F,
 ) -> io::Result<serde_json::Value>
 where
-    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
+    F: Fn(&[u8], &Config, ArtifactWait) -> io::Result<String>,
 {
     let req = parse_and_validate_video_request(request_body)?;
 
@@ -44,7 +44,7 @@ pub fn submit_video_with_completion<F>(
     request_completion: F,
 ) -> io::Result<serde_json::Value>
 where
-    F: Fn(&[u8], &Config, bool) -> io::Result<String> + Send + Sync + 'static,
+    F: Fn(&[u8], &Config, ArtifactWait) -> io::Result<String> + Send + Sync + 'static,
 {
     let req = parse_and_validate_video_request(request_body)?;
 
@@ -151,9 +151,9 @@ fn finish_video_request<F>(
     request_completion: F,
 ) -> io::Result<serde_json::Value>
 where
-    F: Fn(&[u8], &Config, bool) -> io::Result<String>,
+    F: Fn(&[u8], &Config, ArtifactWait) -> io::Result<String>,
 {
-    let completion = match request_completion(&req.request_json, config, true) {
+    let completion = match request_completion(&req.request_json, config, ArtifactWait::Video) {
         Ok(c) => c,
         Err(e) => {
             handle_video_request_error(&e, &req)?;

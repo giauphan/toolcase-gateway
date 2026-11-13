@@ -105,7 +105,7 @@ fn test_live_muse_chat_multiturn_continuation() {
     let resp1_str = match toolcase_gateway::museai::request_museai_chat_completion(
         turn1_body.to_string().as_bytes(),
         &config,
-        false,
+        toolcase_gateway::museai::chat::ArtifactWait::None,
     ) {
         Ok(s) => s,
         Err(e) => {
@@ -141,7 +141,7 @@ fn test_live_muse_chat_multiturn_continuation() {
     let resp2_str = match toolcase_gateway::museai::request_museai_chat_completion(
         turn2_body.to_string().as_bytes(),
         &config,
-        false,
+        toolcase_gateway::museai::chat::ArtifactWait::None,
     ) {
         Ok(s) => s,
         Err(e) => {
