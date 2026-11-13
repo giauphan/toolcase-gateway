@@ -4,11 +4,13 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub mod crypto;
+mod db_migration;
 pub mod migration;
 pub mod sqlite;
 #[cfg(test)]
 mod sqlite_tests;
 
+pub(crate) use db_migration::resolve_database_engine;
 pub use migration::migrate_legacy_json_files;
 pub use sqlite::SqliteStorage;
 
