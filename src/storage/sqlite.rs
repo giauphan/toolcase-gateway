@@ -8,6 +8,12 @@ use std::sync::Mutex;
 use super::{DatabaseEngine, StorageError, StorageRepository, StoredAccount, StoredModule};
 use crate::gateway::modules::PersonalManifest;
 
+impl From<rusqlite::Error> for StorageError {
+    fn from(err: rusqlite::Error) -> Self {
+        Self::Database(err.to_string())
+    }
+}
+
 /// Embedded SQLite storage implementation.
 pub struct SqliteStorage {
     pub(crate) conn: Mutex<Connection>,

@@ -36,12 +36,6 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
-impl From<rusqlite::Error> for StorageError {
-    fn from(err: rusqlite::Error) -> Self {
-        Self::Database(err.to_string())
-    }
-}
-
 impl From<serde_json::Error> for StorageError {
     fn from(err: serde_json::Error) -> Self {
         Self::Serialization(err.to_string())
