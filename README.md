@@ -105,6 +105,27 @@ cargo build --release
 
 The compiled binary will be placed at `target/release/toolcase-gateway` (~350 KB, stripped, LTO).
 
+### Runtime Modes
+
+| Mode | Typical build | Selection |
+| :--- | :--- | :--- |
+| `development` | `cargo build` / `cargo run` | default for debug builds |
+| `production` | `cargo build --release` | default for release builds |
+
+Explicit selection uses `--mode <development|production>` or `GATEWAY_ENV`
+(`GW_ENV` is accepted as a fallback). Precedence:
+`--mode` > `GATEWAY_ENV` > `GW_ENV` > build profile.
+
+Production mode fails closed when `GW_ENCRYPTION_KEY` is empty. Set
+`GW_ALLOW_PLAINTEXT_CREDENTIALS=1` only for an explicit plaintext opt-in.
+
+```bash
+cargo run                                  # development
+cargo run -- --mode production             # production mode, debug binary
+cargo build --release                      # optimized production binary
+./target/release/toolcase-gateway          # production by default
+```
+
 ---
 
 ## Quick Start
@@ -114,10 +135,11 @@ Start the binary (binds to `127.0.0.1:28130` and initializes local database stor
 ```bash
 ./target/release/toolcase-gateway
 ```
-*(Optional: copy `.env.example` to `.env` to customize the database path, listen port, or encryption key).*
+*(Production: copy `.env.example` to `.env` and set `GW_ENCRYPTION_KEY`; production mode fails closed without it.)*
 
-To enable AES-256-GCM credential envelope encryption at rest in SQLite, generate a master encryption key:
+Production mode requires AES-256-GCM credential envelope encryption at rest in SQLite. Generate a master encryption key:
 ```bash
+cp .env.example .env
 # Generate a secure 256-bit encryption key
 openssl rand -hex 32
 # Alternative: python3 -c "import secrets; print(secrets.token_hex(32))"

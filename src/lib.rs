@@ -32,13 +32,12 @@ pub use routes::*;
 pub use storage::*;
 
 pub fn run() -> io::Result<()> {
-    let _ = dotenvy::dotenv();
-    let state_dir = crate::gateway::installer::get_state_dir();
-    if let Some(parent) = state_dir.parent() {
-        let env_file = parent.join(".env");
-        if env_file.is_file() {
-            let _ = dotenvy::from_path(&env_file);
-        }
+    let env_file = crate::config::resolve_env_file();
+    if env_file.is_file() && dotenvy::from_path(&env_file).is_err() {
+        eprintln!(
+            "warning: cannot load env file {:?}; continuing with process environment",
+            env_file
+        );
     }
 
     let args: Vec<String> = std::env::args().collect();
@@ -50,6 +49,7 @@ pub fn run() -> io::Result<()> {
         println!();
         println!("Options:");
         println!("  --mcp, --mcp-stdio    Run Model Context Protocol (MCP) in stdio mode for IDE integration");
+        println!("  --mode <MODE>         Runtime mode: development or production");
         println!("  -h, --help            Print help information");
         println!("  -V, --version         Print version information");
         return Ok(());
@@ -57,6 +57,26 @@ pub fn run() -> io::Result<()> {
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+
+    let runtime_mode = crate::config::RuntimeMode::resolve(&args)
+        .map_err(|error| io::Error::new(ErrorKind::InvalidInput, error))?;
+    runtime_mode.apply();
+    if runtime_mode.is_production() {
+        let encryption_key = env_or("GW_ENCRYPTION_KEY", "");
+        let allow_plaintext = matches!(
+            env_or("GW_ALLOW_PLAINTEXT_CREDENTIALS", "0")
+                .to_ascii_lowercase()
+                .as_str(),
+            "1" | "true" | "yes"
+        );
+        if encryption_key.trim().is_empty() && !allow_plaintext {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "production mode requires GW_ENCRYPTION_KEY; \
+                 set GW_ALLOW_PLAINTEXT_CREDENTIALS=1 only for an explicit plaintext opt-in",
+            ));
+        }
     }
 
     let listen_host = env_or("GW_LISTEN_HOST", "127.0.0.1");

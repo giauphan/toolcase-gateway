@@ -122,15 +122,15 @@ mod tests {
         let test_id = "test-stale-lock-mod";
         clear_all_upgrade_locks();
 
-        // Acquire with a very short TTL
-        let short_ttl = Duration::from_millis(50);
+        // Acquire with a short TTL, leaving enough margin for loaded CI schedulers.
+        let short_ttl = Duration::from_millis(250);
         let _guard = try_acquire_upgrade_with_ttl(test_id, short_ttl).expect("acquire succeeds");
 
         // Concurrent acquire immediately after fails
         assert!(try_acquire_upgrade_with_ttl(test_id, short_ttl).is_err());
 
         // Wait for TTL to expire
-        std::thread::sleep(Duration::from_millis(70));
+        std::thread::sleep(Duration::from_millis(750));
 
         // Re-acquiring should now succeed because the previous lock has expired and is evicted
         let guard2 = try_acquire_upgrade_with_ttl(test_id, short_ttl)

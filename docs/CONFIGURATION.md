@@ -40,9 +40,12 @@ When the gateway initializes and handles requests, configuration resolves in the
 
 | Variable | Default | Type | Subsystem | Description |
 | :--- | :--- | :--- | :--- | :--- |
+| `GATEWAY_ENV` | build profile | enum | Core | Runtime mode: `development` or `production` (aliases `dev`/`prod`). CLI `--mode` overrides this. Production fails closed without `GW_ENCRYPTION_KEY`. |
+| `GW_ENV` | *(fallback)* | enum | Core | Alias for `GATEWAY_ENV`; lower precedence. |
 | `GW_STATE_DIR` | `.gw_state` | path | Core | Working state directory holding SQLite DB (`gateway.db`), job metadata, and dynamic personal modules. |
-| `GW_DATABASE_URL` | *(optional)* | string | Storage | SQLite database path override (defaults to `$GW_STATE_DIR/gateway.db`). |
-| `GW_ENCRYPTION_KEY` | *(optional)* | string | Storage | Master key for AES-256-GCM credential envelope encryption in SQLite (`openssl rand -hex 32`). |
+| `DATABASE_URL` | *(optional)* | string | Storage | Database connection URL. Relative SQLite paths resolve under `GW_STATE_DIR` (default `$GW_STATE_DIR/gateway.db`). |
+| `GW_ENCRYPTION_KEY` | *(optional)* | string | Storage | Master key for AES-256-GCM credential envelope encryption in SQLite (`openssl rand -hex 32`). Required in production unless explicitly opted out. |
+| `GW_ALLOW_PLAINTEXT_CREDENTIALS` | `0` | bool | Storage | Explicit opt-in (`1`/`true`/`yes`) to run production with plaintext credentials. |
 | `GW_CONFIG_FILE` | `gateway_config.json` | path | Core | Path to the dedicated persistent JSON configuration file. |
 | `GW_ENV_FILE` | `.env` | path | Core | Path to the environment bootstrap file. |
 | `GW_LISTEN_HOST` | `127.0.0.1` | host | Core | Bind IP address. Non-loopback addresses emit a security warning. |

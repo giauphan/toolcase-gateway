@@ -59,6 +59,74 @@ pub fn env_or_duration_ms(key: &str, fallback: u64) -> u64 {
         .unwrap_or(fallback)
 }
 
+/// Runtime profile selected from `--mode` or `GATEWAY_ENV`/`GW_ENV`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMode {
+    Development,
+    Production,
+}
+
+impl Default for RuntimeMode {
+    fn default() -> Self {
+        if cfg!(debug_assertions) {
+            Self::Development
+        } else {
+            Self::Production
+        }
+    }
+}
+
+impl RuntimeMode {
+    pub fn from_value(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" => Ok(Self::default()),
+            "dev" | "development" | "local" => Ok(Self::Development),
+            "prod" | "production" | "release" => Ok(Self::Production),
+            other => Err(format!(
+                "invalid runtime mode '{other}': expected development or production"
+            )),
+        }
+    }
+
+    /// Resolve precedence: `--mode` > `GATEWAY_ENV` > `GW_ENV` > build profile.
+    pub fn resolve(args: &[String]) -> Result<Self, String> {
+        if let Some(position) = args.iter().position(|arg| arg == "--mode") {
+            let value = args
+                .get(position + 1)
+                .ok_or_else(|| "--mode requires a value (development|production)".to_string())?;
+            return Self::from_value(value);
+        }
+        if let Some(value) = args.iter().find_map(|arg| arg.strip_prefix("--mode=")) {
+            return Self::from_value(value);
+        }
+        for key in ["GATEWAY_ENV", "GW_ENV"] {
+            if let Ok(value) = env::var(key) {
+                if !value.trim().is_empty() {
+                    return Self::from_value(&value);
+                }
+            }
+        }
+        Ok(Self::default())
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::Production => "production",
+        }
+    }
+
+    pub fn is_production(self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    /// Publish the canonical mode so child modules (e.g. daily-news) inherit it.
+    pub fn apply(self) {
+        env::set_var("GATEWAY_ENV", self.as_str());
+        env::set_var("GW_ENV", self.as_str());
+    }
+}
+
 pub fn resolve_env_file() -> PathBuf {
     if let Ok(configured) = env::var("GW_ENV_FILE") {
         let trimmed = configured.trim();
@@ -140,5 +208,59 @@ pub fn absolute_config_file(configured: PathBuf, current_dir: PathBuf) -> PathBu
         configured
     } else {
         current_dir.join(configured)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeMode;
+
+    #[test]
+    fn parses_mode_aliases_and_rejects_unknown() {
+        assert_eq!(
+            RuntimeMode::from_value("dev").expect("dev alias"),
+            RuntimeMode::Development
+        );
+        assert_eq!(
+            RuntimeMode::from_value("PRODUCTION").expect("production alias"),
+            RuntimeMode::Production
+        );
+        assert_eq!(
+            RuntimeMode::from_value("release").expect("release alias"),
+            RuntimeMode::Production
+        );
+        assert_eq!(
+            RuntimeMode::from_value("").expect("empty uses build default"),
+            RuntimeMode::default()
+        );
+        assert!(RuntimeMode::from_value("staging").is_err());
+    }
+
+    #[test]
+    fn cli_mode_overrides_build_default() {
+        let args = vec![
+            "toolcase-gateway".to_string(),
+            "--mode".to_string(),
+            "production".to_string(),
+        ];
+        assert_eq!(
+            RuntimeMode::resolve(&args).expect("--mode value"),
+            RuntimeMode::Production
+        );
+
+        let args = vec![
+            "toolcase-gateway".to_string(),
+            "--mode=development".to_string(),
+        ];
+        assert_eq!(
+            RuntimeMode::resolve(&args).expect("--mode=value"),
+            RuntimeMode::Development
+        );
+    }
+
+    #[test]
+    fn cli_mode_requires_value() {
+        let args = vec!["toolcase-gateway".to_string(), "--mode".to_string()];
+        assert!(RuntimeMode::resolve(&args).is_err());
     }
 }

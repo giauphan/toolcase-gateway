@@ -36,6 +36,10 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+[profile.dev]
+# Keep dev builds debuggable without multi-GB full debuginfo.
+debug = "line-tables-only"
+
 [dependencies]
 dotenvy = "0.15.7"
 serde = { version = "1.0.229", features = ["derive"] }
