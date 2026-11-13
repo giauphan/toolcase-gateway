@@ -48,9 +48,7 @@ pub fn get_state_dir() -> PathBuf {
             return if p.is_absolute() {
                 p
             } else {
-                std::env::current_dir()
-                    .map(|cwd| cwd.join(&p))
-                    .unwrap_or(p)
+                std::env::current_dir().map(|cwd| cwd.join(&p)).unwrap_or(p)
             };
         }
     }
