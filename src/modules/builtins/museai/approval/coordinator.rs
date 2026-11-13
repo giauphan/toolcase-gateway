@@ -76,7 +76,14 @@ impl ApprovalCoordinator {
             });
         }
 
-        let pending_list = match self.client.as_mut().unwrap().list_approvals() {
+        let Some(client) = self.client.as_mut() else {
+            return Ok(CoordinateResult::ManualRequired {
+                reason: "Sentinel client is unavailable".to_string(),
+                approval_id: None,
+            });
+        };
+
+        let pending_list = match client.list_approvals() {
             Ok(list) => list,
             Err(e) => {
                 return Ok(CoordinateResult::ManualRequired {
@@ -152,7 +159,12 @@ impl ApprovalCoordinator {
                     decision_id,
                     decision_kind,
                 } => {
-                    let client = self.client.as_mut().unwrap();
+                    let Some(client) = self.client.as_mut() else {
+                        return Ok(CoordinateResult::ManualRequired {
+                            reason: "Sentinel client is unavailable".to_string(),
+                            approval_id: Some(record.approval_id),
+                        });
+                    };
                     match client.decide_approval(&record.approval_id, &decision_id, &decision_kind)
                     {
                         Ok(approved_rec)

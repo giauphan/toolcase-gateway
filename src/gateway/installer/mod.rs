@@ -39,11 +39,75 @@ pub struct InstallOptions {
     pub branch: Option<String>,
 }
 
-/// Returns the runtime state directory from `GW_STATE_DIR` or defaults to `.gw_state`.
+/// Returns the runtime state directory from `GW_STATE_DIR` or defaults to the canonical `.gw_state`.
 pub fn get_state_dir() -> PathBuf {
-    std::env::var("GW_STATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".gw_state"))
+    if let Ok(dir) = std::env::var("GW_STATE_DIR") {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            return if p.is_absolute() {
+                p
+            } else {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(&p))
+                    .unwrap_or(p)
+            };
+        }
+    }
+
+    // 1. If currently in gateway directory with existing .gw_state
+    let local = Path::new(".gw_state");
+    if local.is_dir() {
+        if let Ok(cwd) = std::env::current_dir() {
+            return cwd.join(local);
+        }
+        return local.to_path_buf();
+    }
+
+    // 2. Discover via executable path (e.g. symlinked in ~/.cargo/bin or under target/)
+    if let Ok(exe) = std::env::current_exe() {
+        let resolved = std::fs::canonicalize(&exe).unwrap_or(exe);
+        for ancestor in resolved.ancestors() {
+            let candidate = ancestor.join(".gw_state");
+            if candidate.is_dir() {
+                return candidate;
+            }
+        }
+    }
+
+    // 3. Search up from current working directory within project boundary and depth limit
+    if let Ok(cwd) = std::env::current_dir() {
+        for (depth, ancestor) in cwd.ancestors().enumerate() {
+            if depth > 4 {
+                break;
+            }
+            let candidate = ancestor.join(".gw_state");
+            if candidate.is_dir() {
+                return candidate;
+            }
+            // Stop traversal once we reach a VCS root or project boundary so we don't
+            // silently adopt an unrelated parent directory's .gw_state.
+            if ancestor.join(".git").exists() || ancestor.join("Cargo.toml").exists() {
+                break;
+            }
+        }
+    }
+
+    // 4. Check user home directory paths
+    if let Ok(home) = std::env::var("HOME") {
+        let home_gw = PathBuf::from(&home).join(".gw_state");
+        if home_gw.is_dir() {
+            return home_gw;
+        }
+        let home_toolcase = PathBuf::from(&home)
+            .join(".toolcase-gateway")
+            .join(".gw_state");
+        if home_toolcase.is_dir() {
+            return home_toolcase;
+        }
+    }
+
+    PathBuf::from(".gw_state")
 }
 
 /// Resolves a local directory path across working directory, gateway state directory root,

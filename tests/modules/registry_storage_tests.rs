@@ -180,7 +180,14 @@ fn test_database_storage_url_parsing_and_sqlite_operations() {
     let sqlite_engine = parse_database_url(Some("sqlite://custom.db"), &temp_dir).unwrap();
     assert_eq!(
         sqlite_engine,
-        DatabaseEngine::Sqlite(std::path::PathBuf::from("custom.db"))
+        DatabaseEngine::Sqlite(temp_dir.join("custom.db"))
+    );
+
+    let repeated_separator_engine =
+        parse_database_url(Some("sqlite://.gw_state//gateway.db"), &temp_dir).unwrap();
+    assert_eq!(
+        repeated_separator_engine,
+        DatabaseEngine::Sqlite(temp_dir.join("gateway.db"))
     );
 
     let pg_engine =
@@ -385,4 +392,63 @@ fn test_config_store_migrates_legacy_json_into_sqlite() {
     }
 
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn test_single_database_and_arbitrary_project_isolation() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let previous_database_url = std::env::var("DATABASE_URL").ok();
+    let previous_state_dir = std::env::var("GW_STATE_DIR").ok();
+    std::env::remove_var("DATABASE_URL");
+    let mock_project_dir =
+        std::env::temp_dir().join(format!("mock_project_{}", uuid::Uuid::new_v4()));
+    let mock_state_dir = std::env::temp_dir().join(format!("mock_state_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&mock_project_dir).unwrap();
+    fs::create_dir_all(&mock_state_dir).unwrap();
+
+    // 1. Verify relative sqlite://.gw_state/gateway.db resolves into state_dir, not project_dir
+    let engine =
+        parse_database_url(Some("sqlite://.gw_state/gateway.db"), &mock_state_dir).unwrap();
+    assert_eq!(
+        engine,
+        DatabaseEngine::Sqlite(mock_state_dir.join("gateway.db"))
+    );
+
+    let engine_gw = parse_database_url(Some("sqlite://gateway.db"), &mock_state_dir).unwrap();
+    assert_eq!(
+        engine_gw,
+        DatabaseEngine::Sqlite(mock_state_dir.join("gateway.db"))
+    );
+
+    // 2. Setting GW_STATE_DIR isolates SQLite database completely inside mock_state_dir
+    std::env::set_var("GW_STATE_DIR", mock_state_dir.to_str().unwrap());
+    let cfg_file = mock_project_dir.join("gateway_config.json");
+    let env_file = mock_project_dir.join(".env");
+    let store = ConfigStore::new_with_limits_and_config_file(
+        Config::default(),
+        env_file,
+        cfg_file,
+        10,
+        1024 * 1024,
+    );
+
+    // Database must be in mock_state_dir, NEVER in mock_project_dir
+    assert!(mock_state_dir.join("gateway.db").exists());
+    assert!(!mock_project_dir.join("gateway.db").exists());
+
+    drop(store);
+    if let Some(value) = previous_state_dir {
+        std::env::set_var("GW_STATE_DIR", value);
+    } else {
+        std::env::remove_var("GW_STATE_DIR");
+    }
+    if let Some(value) = previous_database_url {
+        std::env::set_var("DATABASE_URL", value);
+    } else {
+        std::env::remove_var("DATABASE_URL");
+    }
+    let _ = fs::remove_dir_all(&mock_project_dir);
+    let _ = fs::remove_dir_all(&mock_state_dir);
 }

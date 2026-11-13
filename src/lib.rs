@@ -33,6 +33,13 @@ pub use storage::*;
 
 pub fn run() -> io::Result<()> {
     let _ = dotenvy::dotenv();
+    let state_dir = crate::gateway::installer::get_state_dir();
+    if let Some(parent) = state_dir.parent() {
+        let env_file = parent.join(".env");
+        if env_file.is_file() {
+            let _ = dotenvy::from_path(&env_file);
+        }
+    }
 
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {

@@ -69,6 +69,17 @@ impl std::fmt::Debug for DatabaseEngine {
     }
 }
 
+fn normalize_relative_db_path(raw: &str) -> PathBuf {
+    let mut parts: Vec<&str> = raw
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    if parts.first() == Some(&".gw_state") {
+        parts.remove(0);
+    }
+    parts.into_iter().collect()
+}
+
 /// Parses a database connection URL or falls back to local SQLite in `state_dir`.
 pub fn parse_database_url(
     url: Option<&str>,
@@ -77,12 +88,18 @@ pub fn parse_database_url(
     match url {
         Some(u) if u.starts_with("sqlite://") || u.starts_with("sqlite:") => {
             let path_part = u
-                .trim_start_matches("sqlite://")
-                .trim_start_matches("sqlite:");
+                .strip_prefix("sqlite://")
+                .or_else(|| u.strip_prefix("sqlite:"))
+                .unwrap_or(u);
             let path = if path_part.is_empty() || path_part == ":memory:" {
                 PathBuf::from(":memory:")
             } else {
-                PathBuf::from(path_part)
+                let p = PathBuf::from(path_part);
+                if p.is_absolute() {
+                    p
+                } else {
+                    state_dir.join(normalize_relative_db_path(path_part))
+                }
             };
             Ok(DatabaseEngine::Sqlite(path))
         }
