@@ -44,8 +44,7 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_ENV` | *(fallback)* | enum | Core | Alias for `GATEWAY_ENV`; lower precedence. |
 | `GW_STATE_DIR` | `.gw_state` | path | Core | Working state directory holding SQLite DB (`gateway.db`), job metadata, and dynamic personal modules. |
 | `DATABASE_URL` | *(optional)* | string | Storage | Database connection URL. Relative SQLite paths resolve under `GW_STATE_DIR` (default `$GW_STATE_DIR/gateway.db`). |
-| `GW_ENCRYPTION_KEY` | *(optional)* | string | Storage | Master key for AES-256-GCM credential envelope encryption in SQLite (`openssl rand -hex 32`). Required in production unless explicitly opted out. |
-| `GW_ALLOW_PLAINTEXT_CREDENTIALS` | `0` | bool | Storage | Explicit opt-in (`1`/`true`/`yes`) to run production with plaintext credentials. |
+| `GW_ENCRYPTION_KEY` | *(optional)* | string | Storage | Master key for AES-256-GCM credential envelope encryption in SQLite (`openssl rand -hex 32`). Required in production; legacy plaintext credentials are re-encrypted on startup when set. |
 | `GW_CONFIG_FILE` | `gateway_config.json` | path | Core | Path to the dedicated persistent JSON configuration file. |
 | `GW_ENV_FILE` | `.env` | path | Core | Path to the environment bootstrap file. |
 | `GW_LISTEN_HOST` | `127.0.0.1` | host | Core | Bind IP address. Non-loopback addresses emit a security warning. |
@@ -99,6 +98,10 @@ When the gateway initializes and handles requests, configuration resolves in the
 | `GW_LOG_MAX_SIZE_BYTES` | *(optional)* | u64 | Logging | Exact byte threshold override for log file rotation and zip compression. |
 | `GW_LOG_RETENTION_DAYS` | `2` | u64 | Logging | Days to retain rotated daily log files and archived `.zip` files before automatic daemon cleanup (defaults to 2 days). |
 | `GW_LOG_CONSOLE` | `true` | bool | Logging | Mirror formatted log entries to standard error (`stderr`). |
+
+### Production Bootstrap and Credential Policy
+
+The runtime mode resolves from `--mode`, then `GATEWAY_ENV`, then `GW_ENV`; otherwise the build profile decides (`development` for debug, `production` for release). Production fails closed at startup when `GW_ENCRYPTION_KEY` is empty; there is no opt-out flag. Credentials persisted as plaintext by older builds are re-encrypted by the SQLite adapter on startup before the gateway serves traffic. See `.env.example` for the inline warning.
 
 ### Logging Streams and Format
 

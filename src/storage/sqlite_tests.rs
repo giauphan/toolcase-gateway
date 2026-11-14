@@ -1,6 +1,6 @@
 //! Unit tests for SQLite storage adapter and migration logic.
 
-use super::sqlite::SqliteStorage;
+use super::sqlite::{SqliteStorage, PLAINTEXT_CLEANUP_MARKER};
 use super::{DatabaseEngine, StorageError, StorageRepository, StoredAccount};
 use crate::gateway::modules::PersonalManifest;
 use std::fs;
@@ -234,6 +234,256 @@ fn test_sqlite_legacy_modules_migration_from_gateway_config() {
         .expect("migrated-mod-2 should exist");
     assert!(!m2.enabled);
     assert_eq!(m2.manifest.namespace, "/custom/migrated2");
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_startup_reencrypts_legacy_plaintext_credentials() {
+    let temp_dir = std::env::temp_dir().join(format!("test_sqlite_reenc_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let master_key = "startup-reencryption-key-123".to_string();
+    let storage = SqliteStorage::open_with_key(
+        DatabaseEngine::Sqlite(PathBuf::from(":memory:")),
+        &temp_dir,
+        master_key,
+    )
+    .unwrap();
+
+    {
+        let conn = storage.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO accounts (id, provider, key, label, is_active)
+             VALUES ('legacy_one', 'openrouter', 'sk-legacy-plain-one', 'Legacy One', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (id, provider, key, label, is_active)
+             VALUES ('legacy_empty', 'openrouter', '', 'Legacy Empty', 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    assert_eq!(
+        storage.encrypt_plaintext_credentials().unwrap(),
+        1,
+        "only non-empty plaintext credentials are migrated"
+    );
+
+    {
+        let conn = storage.conn.lock().unwrap();
+        let raw_key: String = conn
+            .query_row(
+                "SELECT key FROM accounts WHERE id = 'legacy_one'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(super::crypto::is_protected_secret(&raw_key));
+        let empty_key: String = conn
+            .query_row(
+                "SELECT key FROM accounts WHERE id = 'legacy_empty'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(empty_key.is_empty());
+    }
+
+    let accounts = storage.get_accounts().unwrap();
+    let migrated = accounts
+        .iter()
+        .find(|account| account.id == "legacy_one")
+        .expect("migrated account must remain readable");
+    assert_eq!(migrated.key, "sk-legacy-plain-one");
+
+    assert_eq!(
+        storage.encrypt_plaintext_credentials().unwrap(),
+        0,
+        "migration is idempotent"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
+#[test]
+fn test_startup_migration_scrubs_plaintext_from_disk() {
+    let temp_dir = std::env::temp_dir().join(format!("test_sqlite_scrub_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let db_path = temp_dir.join("gateway.db");
+    let secret = "sk-file-legacy-plaintext-42";
+
+    {
+        let legacy = SqliteStorage::open_with_key(
+            DatabaseEngine::Sqlite(db_path.clone()),
+            &temp_dir,
+            String::new(),
+        )
+        .unwrap();
+        legacy
+            .save_accounts(&[StoredAccount {
+                id: "file_legacy".into(),
+                provider: "openrouter".into(),
+                key: secret.into(),
+                label: Some("Legacy File".into()),
+                is_active: true,
+            }])
+            .unwrap();
+    }
+
+    let storage = SqliteStorage::open_with_key(
+        DatabaseEngine::Sqlite(db_path.clone()),
+        &temp_dir,
+        "disk-scrub-master-key-77".to_string(),
+    )
+    .unwrap();
+
+    let database_bytes = fs::read(&db_path).unwrap();
+    assert!(
+        !contains_subslice(&database_bytes, secret.as_bytes()),
+        "plaintext credential must not remain in the database file"
+    );
+    let wal_path = temp_dir.join("gateway.db-wal");
+    if wal_path.exists() {
+        let wal_bytes = fs::read(&wal_path).unwrap();
+        assert!(
+            !contains_subslice(&wal_bytes, secret.as_bytes()),
+            "plaintext credential must not remain in the WAL file"
+        );
+    }
+
+    let accounts = storage.get_accounts().unwrap();
+    let migrated = accounts
+        .iter()
+        .find(|account| account.id == "file_legacy")
+        .expect("migrated account must remain readable");
+    assert_eq!(migrated.key, secret);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_pending_cleanup_marker_resumes_scrub_without_new_rows() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("test_sqlite_marker_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let db_path = temp_dir.join("gateway.db");
+
+    {
+        let legacy = SqliteStorage::open_with_key(
+            DatabaseEngine::Sqlite(db_path.clone()),
+            &temp_dir,
+            String::new(),
+        )
+        .unwrap();
+        legacy
+            .save_accounts(&[StoredAccount {
+                id: "marker_acc".into(),
+                provider: "openrouter".into(),
+                key: "sk-marker-secret".into(),
+                label: None,
+                is_active: true,
+            }])
+            .unwrap();
+    }
+
+    let storage = SqliteStorage::open_with_key(
+        DatabaseEngine::Sqlite(db_path.clone()),
+        &temp_dir,
+        "marker-master-key-99".to_string(),
+    )
+    .unwrap();
+
+    // Simulate a crash after the rows were encrypted but before the scrub ran.
+    storage.set_setting(PLAINTEXT_CLEANUP_MARKER, "1").unwrap();
+    assert_eq!(
+        storage.encrypt_plaintext_credentials().unwrap(),
+        0,
+        "no row needs re-encryption"
+    );
+    assert_eq!(
+        storage.get_setting(PLAINTEXT_CLEANUP_MARKER).unwrap(),
+        None,
+        "the pending marker must be cleared after a completed scrub"
+    );
+    let accounts = storage.get_accounts().unwrap();
+    let account = accounts
+        .iter()
+        .find(|account| account.id == "marker_acc")
+        .expect("account must remain readable");
+    assert_eq!(account.key, "sk-marker-secret");
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_blocked_checkpoint_keeps_cleanup_pending() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("test_sqlite_blocked_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let db_path = temp_dir.join("gateway.db");
+
+    {
+        let legacy = SqliteStorage::open_with_key(
+            DatabaseEngine::Sqlite(db_path.clone()),
+            &temp_dir,
+            String::new(),
+        )
+        .unwrap();
+        legacy
+            .save_accounts(&[StoredAccount {
+                id: "blocked_acc".into(),
+                provider: "openrouter".into(),
+                key: "sk-blocked-secret".into(),
+                label: None,
+                is_active: true,
+            }])
+            .unwrap();
+    }
+
+    let reader = rusqlite::Connection::open(&db_path).unwrap();
+    reader
+        .execute_batch("BEGIN; SELECT COUNT(*) FROM accounts;")
+        .unwrap();
+
+    let open_result = SqliteStorage::open_with_key(
+        DatabaseEngine::Sqlite(db_path.clone()),
+        &temp_dir,
+        "blocked-master-key-55".to_string(),
+    );
+    assert!(
+        open_result.is_err(),
+        "startup must not succeed while the plaintext scrub is blocked"
+    );
+    drop(reader);
+
+    let storage = SqliteStorage::open_with_key(
+        DatabaseEngine::Sqlite(db_path.clone()),
+        &temp_dir,
+        "blocked-master-key-55".to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        storage.get_setting(PLAINTEXT_CLEANUP_MARKER).unwrap(),
+        None,
+        "the resumed startup clears the marker after the scrub completes"
+    );
+    let accounts = storage.get_accounts().unwrap();
+    let account = accounts
+        .iter()
+        .find(|account| account.id == "blocked_acc")
+        .expect("account must remain readable");
+    assert_eq!(account.key, "sk-blocked-secret");
 
     let _ = fs::remove_dir_all(&temp_dir);
 }

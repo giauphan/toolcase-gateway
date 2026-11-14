@@ -62,22 +62,11 @@ pub fn run() -> io::Result<()> {
     let runtime_mode = crate::config::RuntimeMode::resolve(&args)
         .map_err(|error| io::Error::new(ErrorKind::InvalidInput, error))?;
     runtime_mode.apply();
-    if runtime_mode.is_production() {
-        let encryption_key = env_or("GW_ENCRYPTION_KEY", "");
-        let allow_plaintext = matches!(
-            env_or("GW_ALLOW_PLAINTEXT_CREDENTIALS", "0")
-                .to_ascii_lowercase()
-                .as_str(),
-            "1" | "true" | "yes"
-        );
-        if encryption_key.trim().is_empty() && !allow_plaintext {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                "production mode requires GW_ENCRYPTION_KEY; \
-                 set GW_ALLOW_PLAINTEXT_CREDENTIALS=1 only for an explicit plaintext opt-in",
-            ));
-        }
-    }
+    // SECURITY: production must not persist plaintext credentials; startup
+    // fails closed without a master key, and legacy plaintext rows are
+    // re-encrypted by the storage adapter before serving traffic.
+    crate::config::enforce_production_secret_policy(runtime_mode, &env_or("GW_ENCRYPTION_KEY", ""))
+        .map_err(|error| io::Error::new(ErrorKind::InvalidInput, error))?;
 
     let listen_host = env_or("GW_LISTEN_HOST", "127.0.0.1");
     let listen_port = env_or("GW_LISTEN_PORT", "28130").parse().unwrap_or(28130);

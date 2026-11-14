@@ -9,6 +9,11 @@ use sha2::{Digest, Sha256};
 
 const ENVELOPE_PREFIX: &str = "enc:v1:";
 
+/// Returns true when the stored value already uses the encrypted envelope.
+pub fn is_protected_secret(stored: &str) -> bool {
+    stored.starts_with(ENVELOPE_PREFIX)
+}
+
 /// Derives a 32-byte AES-256 key from any passphrase or master key string.
 fn derive_key(master_key: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();

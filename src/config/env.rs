@@ -127,6 +127,25 @@ impl RuntimeMode {
     }
 }
 
+/// Enforce the production credential policy.
+///
+/// Production must not persist plaintext credentials, so startup fails closed
+/// when no master key is configured. Legacy plaintext rows are re-encrypted by
+/// the storage adapter once a key is available.
+pub fn enforce_production_secret_policy(
+    mode: RuntimeMode,
+    encryption_key: &str,
+) -> Result<(), String> {
+    if mode.is_production() && encryption_key.trim().is_empty() {
+        return Err(
+            "production mode requires GW_ENCRYPTION_KEY; generate one with \
+             `openssl rand -hex 32` and store it only in the environment"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 pub fn resolve_env_file() -> PathBuf {
     if let Ok(configured) = env::var("GW_ENV_FILE") {
         let trimmed = configured.trim();
@@ -262,5 +281,27 @@ mod tests {
     fn cli_mode_requires_value() {
         let args = vec!["toolcase-gateway".to_string(), "--mode".to_string()];
         assert!(RuntimeMode::resolve(&args).is_err());
+    }
+
+    #[test]
+    fn production_fails_closed_without_encryption_key() {
+        use super::enforce_production_secret_policy;
+
+        assert!(
+            enforce_production_secret_policy(RuntimeMode::Development, "").is_ok(),
+            "development may run without a master key"
+        );
+        assert!(
+            enforce_production_secret_policy(RuntimeMode::Production, "").is_err(),
+            "production must fail closed without a master key"
+        );
+        assert!(
+            enforce_production_secret_policy(RuntimeMode::Production, "   ").is_err(),
+            "blank keys must not satisfy the production policy"
+        );
+        assert!(
+            enforce_production_secret_policy(RuntimeMode::Production, "deadbeef").is_ok(),
+            "production accepts a configured master key"
+        );
     }
 }

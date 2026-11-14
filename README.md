@@ -116,8 +116,9 @@ Explicit selection uses `--mode <development|production>` or `GATEWAY_ENV`
 (`GW_ENV` is accepted as a fallback). Precedence:
 `--mode` > `GATEWAY_ENV` > `GW_ENV` > build profile.
 
-Production mode fails closed when `GW_ENCRYPTION_KEY` is empty. Set
-`GW_ALLOW_PLAINTEXT_CREDENTIALS=1` only for an explicit plaintext opt-in.
+Production mode fails closed when `GW_ENCRYPTION_KEY` is empty; there is no
+plaintext opt-out. Credentials written as plaintext by older builds are
+re-encrypted at startup once a key is configured.
 
 ```bash
 cargo run                                  # development

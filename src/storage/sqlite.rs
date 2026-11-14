@@ -14,6 +14,9 @@ impl From<rusqlite::Error> for StorageError {
     }
 }
 
+/// Settings key recording that the plaintext-credential scrub is still owed.
+pub(crate) const PLAINTEXT_CLEANUP_MARKER: &str = "storage_plaintext_cleanup_pending";
+
 /// Embedded SQLite storage implementation.
 pub struct SqliteStorage {
     pub(crate) conn: Mutex<Connection>,
@@ -73,6 +76,7 @@ impl SqliteStorage {
 
         storage.init_schema()?;
         storage.migrate_legacy_json_files(state_dir)?;
+        storage.encrypt_plaintext_credentials()?;
 
         Ok(storage)
     }
@@ -122,6 +126,97 @@ impl SqliteStorage {
     /// Automatically migrates accounts, modules, and settings from legacy JSON files into SQLite on first run.
     fn migrate_legacy_json_files(&self, state_dir: &Path) -> Result<(), StorageError> {
         super::migration::migrate_legacy_json_files(self, state_dir)
+    }
+
+    /// Encrypts credentials that older builds stored as plaintext.
+    ///
+    /// Runs once per startup when a master key is configured, so production
+    /// databases stop carrying readable secrets regardless of their history.
+    pub fn encrypt_plaintext_credentials(&self) -> Result<usize, StorageError> {
+        if self.encryption_key.trim().is_empty() {
+            return Ok(0);
+        }
+
+        let cleanup_pending = self.get_setting(PLAINTEXT_CLEANUP_MARKER)?.as_deref() == Some("1");
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let tx = conn.transaction()?;
+        let pending = {
+            let mut stmt = tx.prepare("SELECT id, key FROM accounts")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        let mut migrated = 0usize;
+        for (id, stored) in pending {
+            if stored.is_empty() || super::crypto::is_protected_secret(&stored) {
+                continue;
+            }
+            let protected = super::crypto::protect_secret(&stored, &self.encryption_key);
+            if protected == stored {
+                continue;
+            }
+            tx.execute(
+                "UPDATE accounts SET key = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+                params![protected, id],
+            )?;
+            migrated += 1;
+        }
+        if migrated > 0 {
+            // Persist the intent in the same transaction: a crash before the
+            // scrub completes must not let the next startup skip cleanup just
+            // because every row already looks encrypted.
+            tx.execute(
+                "INSERT INTO settings (key, value, updated_at)
+                 VALUES (?1, '1', CURRENT_TIMESTAMP)
+                 ON CONFLICT(key) DO UPDATE SET value = '1', updated_at = CURRENT_TIMESTAMP",
+                params![PLAINTEXT_CLEANUP_MARKER],
+            )?;
+        }
+        tx.commit()?;
+
+        if migrated > 0 || cleanup_pending {
+            // WAL retains the pre-update pages until a checkpoint, and freed
+            // pages can still hold the old bytes. Rewrite the database so no
+            // readable credential survives on disk before startup completes.
+            Self::scrub_plaintext_pages(&conn)?;
+            conn.execute(
+                "DELETE FROM settings WHERE key = ?1",
+                params![PLAINTEXT_CLEANUP_MARKER],
+            )?;
+        }
+        Ok(migrated)
+    }
+
+    /// Flushes and rewrites the database file so no plaintext page survives.
+    fn scrub_plaintext_pages(conn: &Connection) -> Result<(), StorageError> {
+        Self::checkpoint_truncate(conn)?;
+        conn.execute_batch("VACUUM;")?;
+        Self::checkpoint_truncate(conn)
+    }
+
+    /// Runs `wal_checkpoint(TRUNCATE)` and fails when SQLite reports it blocked.
+    fn checkpoint_truncate(conn: &Connection) -> Result<(), StorageError> {
+        for attempt in 0..5 {
+            let busy = {
+                let mut stmt = conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)")?;
+                stmt.query_row([], |row| row.get::<_, i64>(0))?
+            };
+            if busy == 0 {
+                return Ok(());
+            }
+            if attempt < 4 {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+        Err(StorageError::Database(
+            "wal_checkpoint(TRUNCATE) was blocked; plaintext cleanup remains pending".to_string(),
+        ))
     }
 
     /// Access the underlying path of the SQLite database.
