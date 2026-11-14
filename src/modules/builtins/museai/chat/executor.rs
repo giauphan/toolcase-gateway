@@ -4,6 +4,7 @@ use super::{
     extract_video_url_from_stream, MuseChatStream,
 };
 use crate::config::Config;
+use crate::providers::museai::media::ArtifactWait;
 use crate::providers::museai::noise::{MuseNoiseSession, NOISE_PATTERN_XX};
 use crate::providers::museai::protocol::{Header, ServiceFrameKind, SERVICE_DAEMON};
 use crate::providers::museai::session::{bootstrap_museai_config, build_museai_ws_url};
@@ -14,15 +15,6 @@ use uuid::Uuid;
 
 pub const MUSE_POST_COMPLETION_WAIT_SECS: u64 = 300;
 pub const MUSE_POST_COMPLETION_IMAGE_WAIT_SECS: u64 = 180;
-
-/// Which deferred artifact the caller wants the executor to keep reading for
-/// after Muse completes the assistant message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArtifactWait {
-    None,
-    Video,
-    Image,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MediaKind {
@@ -235,7 +227,7 @@ fn cache_vm_media(
     if !crate::providers::museai::video::is_vm_media_url(raw_url) {
         return;
     }
-    let Some(vm_path) = crate::providers::museai::video::extract_vm_media_path(raw_url) else {
+    let Some(vm_path) = crate::providers::museai::media::extract_vm_media_path(raw_url) else {
         return;
     };
     let kind = if is_image { "image" } else { "video" };

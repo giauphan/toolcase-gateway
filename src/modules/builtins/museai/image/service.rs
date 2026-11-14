@@ -320,7 +320,7 @@ where
         return Err(io::Error::new(io::ErrorKind::Unsupported, failure_message));
     }
 
-    let is_vm = crate::providers::museai::video::is_vm_media_url(&raw_image_url);
+    let is_vm = crate::providers::museai::media::is_vm_media_url(&raw_image_url);
     let (image_url, media_validated) = if is_vm {
         let content_url = format!("/muse-ai/v1/images/{}/content", req.allocated_job_id);
         let validated = super::media::has_image_media(&req.allocated_job_id);

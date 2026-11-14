@@ -4,6 +4,7 @@ pub mod chat;
 pub mod handlers;
 pub mod image;
 pub mod lifecycle;
+pub mod media;
 pub mod noise;
 pub mod protocol;
 pub mod session;

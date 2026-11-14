@@ -1,7 +1,7 @@
 //! Image URL parsing, prompt construction, and aspect ratio handling.
 
-use crate::providers::museai::video::{
-    clean_url_path, extract_candidate_urls, is_google_drive_file_path, is_trusted_video_cdn_host,
+use crate::providers::museai::media::{
+    clean_url_path, extract_candidate_urls, is_google_drive_file_path, is_trusted_media_cdn_host,
     is_vm_media_url, trim_trailing_punct, url_authority,
 };
 
@@ -103,7 +103,7 @@ pub fn is_trusted_image_cdn_host(authority: &str) -> bool {
     if host == "muse.ai" || host.ends_with(".muse.ai") {
         return true;
     }
-    if is_trusted_video_cdn_host(authority) {
+    if is_trusted_media_cdn_host(authority) {
         return true;
     }
     host == "images.unsplash.com"

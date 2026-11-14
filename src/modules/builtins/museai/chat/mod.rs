@@ -3,8 +3,9 @@ mod parser;
 mod prompt;
 mod stream;
 
+pub use crate::providers::museai::media::ArtifactWait;
 pub use executor::{
-    request_museai_chat_completion, ArtifactWait, MUSE_POST_COMPLETION_IMAGE_WAIT_SECS,
+    request_museai_chat_completion, MUSE_POST_COMPLETION_IMAGE_WAIT_SECS,
     MUSE_POST_COMPLETION_WAIT_SECS,
 };
 pub use parser::{

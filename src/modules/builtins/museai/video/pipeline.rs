@@ -7,7 +7,8 @@ use super::request::{
 use super::response::{build_video_result_with_job_id, video_job_response};
 use super::url::{extract_url_from_text, is_vm_media_url};
 use crate::config::Config;
-use crate::providers::museai::chat::{request_museai_chat_completion, ArtifactWait};
+use crate::providers::museai::chat::request_museai_chat_completion;
+use crate::providers::museai::media::ArtifactWait;
 use std::io;
 
 pub fn create_video(request_body: &[u8], config: &Config) -> io::Result<serde_json::Value> {
