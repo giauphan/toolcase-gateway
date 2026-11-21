@@ -138,6 +138,16 @@ pub fn update_image_job(
     image_url: Option<&str>,
     error: Option<&str>,
 ) -> io::Result<()> {
+    update_image_job_with_thread(job_id, status, image_url, None, error)
+}
+
+pub fn update_image_job_with_thread(
+    job_id: &str,
+    status: &str,
+    image_url: Option<&str>,
+    thread_id: Option<&str>,
+    error: Option<&str>,
+) -> io::Result<()> {
     let _guard = image_job_lock()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -147,6 +157,9 @@ pub fn update_image_job(
         record.image_url = url.to_string();
         record.output_verified = !url.is_empty();
         record.media_validated = !url.is_empty();
+    }
+    if let Some(tid) = thread_id {
+        record.thread_id = Some(tid.to_string());
     }
     if let Some(err) = error {
         record.error = Some(err.to_string());

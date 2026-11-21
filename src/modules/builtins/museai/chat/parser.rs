@@ -110,21 +110,25 @@ pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<Stri
     if is_ignorable_event(val) {
         return None;
     }
-    if let Some(text) = extract_direct_string_fields(val) {
-        return Some(text);
-    }
-    if let Some(text) = extract_payload_content(val) {
-        return Some(text);
-    }
-    if let Some(message) = val.get("message") {
-        if let Some(text) = parse_assistant_content_from_json(message) {
-            return Some(text);
-        }
-    }
+    let direct_text = extract_direct_string_fields(val).or_else(|| extract_payload_content(val));
+
     if let Some(url) = find_video_url_in_json(val, 0) {
+        if let Some(text) = direct_text {
+            if text.contains(url.as_str()) {
+                return Some(text);
+            }
+            return Some(format!("{text}\nVideo URL: {url}\n"));
+        }
         return Some(format!("\nVideo URL: {url}\n"));
     }
+
     if let Some(url) = find_image_url_in_json(val, 0) {
+        if let Some(text) = direct_text {
+            if text.contains(url.as_str()) {
+                return Some(text);
+            }
+            return Some(format!("{text}\nImage URL: {url}\n"));
+        }
         let mut content = extract_array_contents(val, "events")
             .or_else(|| extract_array_contents(val, "items"))
             .unwrap_or_default();
@@ -132,6 +136,15 @@ pub fn parse_assistant_content_from_json(val: &serde_json::Value) -> Option<Stri
             content.push_str(&format!("\nImage URL: {url}\n"));
         }
         return Some(content);
+    }
+
+    if let Some(text) = direct_text {
+        return Some(text);
+    }
+    if let Some(message) = val.get("message") {
+        if let Some(text) = parse_assistant_content_from_json(message) {
+            return Some(text);
+        }
     }
     if let Some(fallback) = extract_fallback_video_text(val) {
         return Some(fallback);

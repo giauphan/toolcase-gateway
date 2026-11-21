@@ -7,7 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use super::lifecycle::{
-    is_valid_job_id, load_image_job, reserve_image_job, update_image_job, ImageJobRecord,
+    is_valid_job_id, load_image_job, reserve_image_job, update_image_job,
+    update_image_job_with_thread, ImageJobRecord,
 };
 use super::url::{
     build_image_prompt, extract_image_url_from_text, map_size_to_aspect_ratio,
@@ -299,24 +300,50 @@ where
         }
     };
 
-    let raw_image_url = extract_image_url_from_text(&completion);
+    let (content, thread_id) =
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&completion) {
+            let content = json
+                .get("choices")
+                .and_then(|c| c.as_array())
+                .and_then(|a| a.first())
+                .and_then(|c| c.get("message"))
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
+            let thread_id = json
+                .get("thread_id")
+                .or_else(|| json.get("session_id"))
+                .and_then(|t| t.as_str())
+                .map(str::to_string);
+            (content, thread_id)
+        } else {
+            (completion.clone(), None)
+        };
+
+    let raw_image_url = extract_image_url_from_text(&content);
     if raw_image_url.is_empty() {
-        let failure_message =
-            if crate::providers::museai::image::explicit_image_refusal(&completion) {
-                "Muse image generation was declined by Muse"
-            } else {
-                "Muse image generation completed without a supported public HTTPS artifact"
-            };
+        let failure_message = if crate::providers::museai::image::explicit_image_refusal(&content) {
+            "Muse image generation was declined by Muse"
+        } else {
+            "Muse image generation completed without a supported public HTTPS artifact"
+        };
         crate::runtime::logger::log_message(
             "WARN",
             "museai_image",
             &format!(
                 "Image generation returned no URL for job {}. Raw response snippet: {}",
                 req.allocated_job_id,
-                &completion[..completion.len().min(500)]
+                &content[..content.len().min(500)]
             ),
         );
-        let _ = update_image_job(&req.allocated_job_id, "failed", None, Some(failure_message));
+        let _ = update_image_job_with_thread(
+            &req.allocated_job_id,
+            "failed",
+            None,
+            thread_id.as_deref(),
+            Some(failure_message),
+        );
         return Err(io::Error::new(io::ErrorKind::Unsupported, failure_message));
     }
 
@@ -329,7 +356,13 @@ where
         (raw_image_url.clone(), true)
     };
 
-    let _ = update_image_job(&req.allocated_job_id, "completed", Some(&image_url), None);
+    let _ = update_image_job_with_thread(
+        &req.allocated_job_id,
+        "completed",
+        Some(&image_url),
+        thread_id.as_deref(),
+        None,
+    );
 
     let record = load_image_job(&req.allocated_job_id).unwrap_or_else(|_| ImageJobRecord {
         job_id: req.allocated_job_id.clone(),
@@ -338,7 +371,7 @@ where
         requested_model: req.requested_model.clone(),
         prompt: req.prompt.clone(),
         aspect_ratio: req.aspect_ratio.clone(),
-        thread_id: None,
+        thread_id,
         created_at: req.now,
         last_activity_at: req.now,
         status: "completed".to_string(),

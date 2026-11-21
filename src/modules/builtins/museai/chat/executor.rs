@@ -444,6 +444,8 @@ pub fn request_museai_chat_completion(
         _ => {}
     }
 
+    let mut next_action_stream_id = active_stream_id.max(2) + 1;
+
     for (raw_url, is_image) in [(&video_url, false), (&image_url, true)] {
         if let Some(ref url) = raw_url {
             let kind = if is_image { "image" } else { "video" };
@@ -456,10 +458,11 @@ pub fn request_museai_chat_completion(
                 &mut socket,
                 &mut session,
                 url,
-                active_stream_id.max(2) + 1,
+                next_action_stream_id,
                 job_id_hint.as_deref(),
                 is_image,
             );
+            next_action_stream_id += 1;
         }
     }
 
@@ -474,7 +477,7 @@ pub fn request_museai_chat_completion(
         &config,
         &thread_id,
         base_origin,
-        active_stream_id.max(2) + 1,
+        next_action_stream_id,
         &headers,
     );
 

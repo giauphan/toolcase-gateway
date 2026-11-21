@@ -11,10 +11,17 @@ fn is_media_url_token(value: &str) -> bool {
 }
 
 fn next_media_url_start(text: &str) -> Option<usize> {
-    ["https://", "http://", "sandbox://"]
-        .iter()
-        .filter_map(|scheme| text.find(scheme))
-        .min()
+    [
+        "https://",
+        "http://",
+        "sandbox://",
+        "/fs/raw/workspace/",
+        "/workspace/",
+        "workspace/",
+    ]
+    .iter()
+    .filter_map(|scheme| text.find(scheme))
+    .min()
 }
 
 pub fn extract_candidate_urls(text: &str) -> Vec<String> {

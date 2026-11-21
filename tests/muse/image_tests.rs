@@ -615,3 +615,78 @@ fn test_extract_image_url_skips_non_image_workspace_markdown_links() {
     let only_non_image = "[Source](sandbox://workspace/source.txt)";
     assert_eq!(extract_image_url_from_text(only_non_image), "");
 }
+
+#[test]
+fn test_create_image_parses_json_envelope_and_thread_id() {
+    let config = Config::default();
+    let unique_id = format!("image-json-env-{}", Uuid::new_v4());
+    let payload = serde_json::json!({
+        "id": unique_id,
+        "prompt": "a vibrant neon cityscape at midnight",
+        "aspect_ratio": "16:9"
+    });
+
+    let mock_completion = |_body: &[u8],
+                           _cfg: &Config,
+                           _wait: ArtifactWait|
+     -> std::io::Result<String> {
+        let envelope = serde_json::json!({
+            "id": "chatcmpl-test-12345",
+            "object": "chat.completion",
+            "created": 1700000000,
+            "model": "muse",
+            "thread_id": "thread-neon-city-99",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Finished generating.\n\n[Neon City](sandbox://workspace/your_files/city/neon.webp)"
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
+        Ok(envelope.to_string())
+    };
+
+    let result = create_image_with_completion(
+        &serde_json::to_vec(&payload).unwrap(),
+        &config,
+        mock_completion,
+    )
+    .expect("must parse JSON envelope and succeed");
+
+    assert_eq!(result["status"], "completed");
+    assert_eq!(
+        result["image_url"],
+        format!("/muse-ai/v1/images/{unique_id}/content")
+    );
+
+    let loaded = load_image_job(&unique_id).expect("job must be persisted");
+    assert_eq!(loaded.status, "completed");
+    assert_eq!(loaded.thread_id.as_deref(), Some("thread-neon-city-99"));
+}
+
+#[test]
+fn test_parse_assistant_content_preserves_image_with_accompanying_text() {
+    use toolcase_gateway::museai::chat::parse_assistant_content_from_json;
+
+    let event = serde_json::json!({
+        "event": "delta.presentation",
+        "payload": {
+            "text": "Your requested artwork is ready.",
+            "card": {
+                "image_url": "sandbox://workspace/your_files/gallery/art.webp"
+            }
+        }
+    });
+
+    let content = parse_assistant_content_from_json(&event)
+        .expect("must extract content from presentation event with card image");
+    assert!(content.contains("Your requested artwork is ready."));
+    assert!(content.contains("sandbox://workspace/your_files/gallery/art.webp"));
+
+    let extracted = extract_image_url_from_text(&content);
+    assert_eq!(extracted, "sandbox://workspace/your_files/gallery/art.webp");
+}

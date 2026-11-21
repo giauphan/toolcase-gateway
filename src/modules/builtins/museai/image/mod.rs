@@ -12,7 +12,7 @@ pub use handlers::{
 };
 pub use lifecycle::{
     ensure_image_state_dir, is_valid_job_id, load_image_job, reserve_image_job, save_image_job,
-    update_image_job, ImageJobRecord,
+    update_image_job, update_image_job_with_thread, ImageJobRecord,
 };
 pub use media::{
     find_image_media, guess_extension, guess_mime_type, has_image_media, load_image_media,
