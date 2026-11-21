@@ -384,3 +384,21 @@ fn persist_env_noop_when_no_managed_keys() {
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn cookie_text_extraction_accepts_netscape_and_header_formats() {
+    let header_cookie = b"Cookie: hatch_sess=test-sess-123; hatch_vml=test-vml-456";
+    let parsed = toolcase_gateway::har_config::extract_muse_config_from_har(header_cookie).unwrap();
+    assert_eq!(
+        parsed.cookie.as_deref(),
+        Some("hatch_sess=test-sess-123; hatch_vml=test-vml-456")
+    );
+
+    let netscape = b".muse.ai\tTRUE\t/\tTRUE\t1795240576\thatch_sess\tsess-netscape-val\n";
+    let parsed_netscape =
+        toolcase_gateway::har_config::extract_muse_config_from_har(netscape).unwrap();
+    assert_eq!(
+        parsed_netscape.cookie.as_deref(),
+        Some("hatch_sess=sess-netscape-val")
+    );
+}

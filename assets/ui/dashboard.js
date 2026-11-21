@@ -2013,7 +2013,7 @@
         if (!file) return;
         setMessageVisible(museHarOkMsg, false);
         setMessageVisible(museHarErrMsg, false);
-        showToast("Parsing HAR file: " + file.name + "...", false);
+        showToast("Parsing capture file: " + file.name + "...", false);
 
         file.text().then(function(text) {
           return fetch("/muse-ai/v1/config/har", {
@@ -2026,21 +2026,21 @@
         }).then(function(res) {
           museHarFile.value = "";
           if (!res.ok) {
-            const err = (res.data && res.data.error && res.data.error.message) || res.data.message || "Failed to import HAR file";
+            const err = (res.data && res.data.error && res.data.error.message) || res.data.message || "Failed to import capture file";
             if (museHarErrMsg) {
               museHarErrMsg.textContent = err;
               setMessageVisible(museHarErrMsg, true);
             }
-            showToast("HAR import failed: " + err, true);
+            showToast("Import failed: " + err, true);
             return;
           }
           const appliedKeys = (res.data.applied || []).map(function(item) { return item.key; }).join(", ");
-          const msg = "HAR capture applied successfully (" + (res.data.applied ? res.data.applied.length : 0) + " fields): " + (appliedKeys || "live configuration updated.");
+          const msg = "Configuration applied successfully (" + (res.data.applied ? res.data.applied.length : 0) + " fields): " + (appliedKeys || "live configuration updated.");
           if (museHarOkMsg) {
             museHarOkMsg.textContent = msg;
             setMessageVisible(museHarOkMsg, true);
           }
-          showToast("HAR capture imported and saved!", false);
+          showToast("Configuration imported and saved!", false);
           loadOverview();
         }).catch(function(err) {
           museHarFile.value = "";

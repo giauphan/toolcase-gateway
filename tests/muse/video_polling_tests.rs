@@ -143,6 +143,15 @@ fn test_session_readiness_requires_running_vm_state() {
     let error =
         validate_muse_session_readiness(&serde_json::json!({"vm_state":"UNKNOWN"})).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+
+    // Unknown vm_state is accepted when VM is assigned or vm_id is populated
+    validate_muse_session_readiness(&serde_json::json!({
+        "status": "assigned",
+        "vm_state": "UNKNOWN",
+        "vm_id": "57004190-bb16-4e36-8c1f-695a4de1d5e1"
+    }))
+    .unwrap();
+    validate_muse_session_readiness(&serde_json::json!({"vm_state": "ASSIGNED"})).unwrap();
 }
 
 #[test]

@@ -145,8 +145,25 @@ pub fn validate_muse_session_readiness(session: &serde_json::Value) -> io::Resul
         ));
     };
 
+    let status = session.get("status").and_then(|value| value.as_str());
+
     match state.to_ascii_uppercase().as_str() {
-        "RUNNING" => Ok(()),
+        "RUNNING" | "ASSIGNED" | "READY" => Ok(()),
+        "UNKNOWN" => {
+            if status == Some("assigned")
+                || session
+                    .get("vm_id")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|id| !id.is_empty() && id != "." && id != "vm-438")
+            {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Muse VM session returned an unsupported readiness state",
+                ))
+            }
+        }
         "UPDATING" | "STARTING" | "STOPPING" | "STOPPED" | "ERROR" => {
             Err(io::Error::other("Muse VM session is not ready"))
         }

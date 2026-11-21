@@ -85,7 +85,7 @@ fn dashboard_html_structure_and_assets() {
     assert!(combined.contains("/api/v1/dashboard/overview"));
     assert!(combined.contains("/api/v1/dashboard/accounts"));
     assert!(combined.contains("/api/v1/dashboard/muse-config"));
-    assert!(combined.contains("DevTools HAR Import"));
+    assert!(combined.contains("DevTools HAR / Cookie Import"));
     assert!(combined.contains("muse-har-file"));
     assert!(combined.contains("/muse-ai/v1/config/har"));
     assert!(combined.contains("/muse-config"));

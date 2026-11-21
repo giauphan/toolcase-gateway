@@ -63,8 +63,22 @@ pub fn extract_muse_config_from_har(bytes: &[u8]) -> Result<MuseHarConfig, HarEx
             "HAR exceeds 16 MB limit".to_string(),
         ));
     }
-    let value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|e| HarExtractError::InvalidJson(e.to_string()))?;
+    let value: serde_json::Value = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            if let Ok(text) = std::str::from_utf8(bytes) {
+                if let Some(cookie_str) = parse_plain_cookie_text(text) {
+                    let mut out = MuseHarConfig {
+                        cookie: Some(cookie_str),
+                        ..Default::default()
+                    };
+                    sanitize_extracted_config(&mut out);
+                    return Ok(out);
+                }
+            }
+            return Err(HarExtractError::InvalidJson(e.to_string()));
+        }
+    };
     let entries = value
         .get("log")
         .and_then(|l| l.get("entries"))
@@ -298,4 +312,42 @@ pub(crate) fn sanitize_value(s: &str) -> String {
     // Env-file injection prevention: remove ASCII control characters.
     // (Do not allow newline, carriage return, or NUL.)
     s.chars().filter(|c| !c.is_ascii_control()).collect()
+}
+
+pub(crate) fn parse_plain_cookie_text(text: &str) -> Option<String> {
+    let mut pairs = Vec::new();
+    if text.contains('\t') {
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = trimmed.split('\t').collect();
+            if parts.len() >= 7 {
+                let name = parts[5].trim();
+                let val = parts[6].trim();
+                if !name.is_empty() && !val.is_empty() {
+                    pairs.push(format!("{name}={val}"));
+                }
+            }
+        }
+    } else {
+        let clean = text.trim();
+        let clean = clean.strip_prefix("Cookie:").unwrap_or(clean).trim();
+        for part in clean.split(';') {
+            let part = part.trim();
+            if let Some((k, v)) = part.split_once('=') {
+                let k = k.trim();
+                let v = v.trim();
+                if !k.is_empty() && !v.is_empty() {
+                    pairs.push(format!("{k}={v}"));
+                }
+            }
+        }
+    }
+    if pairs.is_empty() {
+        None
+    } else {
+        Some(pairs.join("; "))
+    }
 }

@@ -30,6 +30,9 @@ fn build_vm_address(config: &Config) -> String {
 }
 
 fn wake_vm_if_needed(base_url: &str, active_vm_id: &str, cookie: &str) {
+    if active_vm_id.is_empty() || active_vm_id == "." || active_vm_id == "vm-438" {
+        return;
+    }
     let wake_body = serde_json::json!({
         "vm_id": active_vm_id,
         "retry_count": 0,
@@ -97,8 +100,7 @@ fn fetch_auth_check_token(base_url: &str, cookie: &str) -> Option<String> {
         .header("sec-fetch-site", "same-origin")
         .header("sec-gpc", "1")
         .header("cache-control", "no-cache")
-        .header("pragma", "no-cache")
-        .header("next-action", "009276f6a217bd1a06954e5ac591c5cbd42c0afca5");
+        .header("pragma", "no-cache");
     if !cookie.is_empty() {
         auth_request = auth_request.header("Cookie", cookie);
     }
@@ -256,6 +258,11 @@ pub fn bootstrap_museai_config(config: &Config) -> io::Result<Config> {
     let session = fetch_session_metadata(base_url, &config.museai_cookie)?;
     validate_muse_session_readiness(&session)?;
     apply_muse_session_metadata(&mut bootstrapped, &session);
+    if session.get("vm_state").and_then(|v| v.as_str()) != Some("RUNNING")
+        && !bootstrapped.museai_vm_id.is_empty()
+    {
+        wake_vm_if_needed(base_url, &bootstrapped.museai_vm_id, &config.museai_cookie);
+    }
     if bootstrapped.museai_access_token.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,

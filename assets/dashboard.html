@@ -503,14 +503,14 @@
 
             <div class="card padding">
               <div class="card-header">
-                <h3>DevTools HAR Import</h3>
+                <h3>DevTools HAR / Cookie Import</h3>
                 <span class="tag">Auto-Config</span>
               </div>
-              <p class="card-sub">Import a DevTools HAR capture (muse-ai.har) to automatically extract WebSocket URL, Access Token, and Session Cookie.</p>
+              <p class="card-sub">Import a DevTools HAR capture (muse-ai.har) or exported session cookies (cookie.txt) to automatically configure WebSocket URL, Access Token, and Session Cookie.</p>
               <div class="form-actions">
                 <label class="btn primary" for="muse-har-file">
-                  Choose HAR File
-                  <input type="file" id="muse-har-file" class="is-hidden" accept=".har,.json">
+                  Choose HAR / Cookie File
+                  <input type="file" id="muse-har-file" class="is-hidden" accept=".har,.json,.txt">
                 </label>
                 <a class="btn secondary" href="/muse-config" target="_blank" rel="noopener">Open Dedicated HAR Import Page ↗</a>
               </div>

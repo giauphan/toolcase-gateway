@@ -35,7 +35,7 @@ fn init_noise_session(
         &format!("Connecting to Muse CVM WebSocket (origin: {base_origin})"),
     );
 
-    let mut socket = MuseWebSocket::connect(&ws_url, base_origin, "")?;
+    let mut socket = MuseWebSocket::connect(&ws_url, base_origin, &config.museai_cookie)?;
     let mut session = MuseNoiseSession::new_initiator(NOISE_PATTERN_XX, None)
         .map_err(|e| io::Error::other(format!("Noise initiator error: {e}")))?;
 
