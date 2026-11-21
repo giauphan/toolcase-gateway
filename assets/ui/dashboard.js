@@ -120,6 +120,9 @@
   const saveMuseBtn = byId("save-muse-btn");
   const museOkMsg = byId("muse-ok-msg");
   const museErrMsg = byId("muse-err-msg");
+  const museHarFile = byId("muse-har-file");
+  const museHarOkMsg = byId("muse-har-ok-msg");
+  const museHarErrMsg = byId("muse-har-err-msg");
 
   // Accounts Form & Table
   const tableBody = byId("accounts-tbody");
@@ -2001,6 +2004,52 @@
               setMessageVisible(museCleanupMsg, true);
             }
           });
+      });
+    }
+
+    if (museHarFile) {
+      museHarFile.addEventListener("change", function() {
+        const file = museHarFile.files ? museHarFile.files[0] : null;
+        if (!file) return;
+        setMessageVisible(museHarOkMsg, false);
+        setMessageVisible(museHarErrMsg, false);
+        showToast("Parsing HAR file: " + file.name + "...", false);
+
+        file.text().then(function(text) {
+          return fetch("/muse-ai/v1/config/har", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: text,
+          });
+        }).then(function(r) {
+          return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; });
+        }).then(function(res) {
+          museHarFile.value = "";
+          if (!res.ok) {
+            const err = (res.data && res.data.error && res.data.error.message) || res.data.message || "Failed to import HAR file";
+            if (museHarErrMsg) {
+              museHarErrMsg.textContent = err;
+              setMessageVisible(museHarErrMsg, true);
+            }
+            showToast("HAR import failed: " + err, true);
+            return;
+          }
+          const appliedKeys = (res.data.applied || []).map(function(item) { return item.key; }).join(", ");
+          const msg = "HAR capture applied successfully (" + (res.data.applied ? res.data.applied.length : 0) + " fields): " + (appliedKeys || "live configuration updated.");
+          if (museHarOkMsg) {
+            museHarOkMsg.textContent = msg;
+            setMessageVisible(museHarOkMsg, true);
+          }
+          showToast("HAR capture imported and saved!", false);
+          loadOverview();
+        }).catch(function(err) {
+          museHarFile.value = "";
+          if (museHarErrMsg) {
+            museHarErrMsg.textContent = "Error reading HAR: " + err.message;
+            setMessageVisible(museHarErrMsg, true);
+          }
+          showToast("Error reading HAR: " + err.message, true);
+        });
       });
     }
   }

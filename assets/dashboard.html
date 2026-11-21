@@ -500,6 +500,23 @@
               <span class="tag idle" id="muse-badge">Defaults</span>
             </div>
             <p class="card-sub">Manage endpoints, target VM ID, credentials and Sentinel approval policies. Leave secrets blank to retain existing.</p>
+
+            <div class="card padding">
+              <div class="card-header">
+                <h3>DevTools HAR Import</h3>
+                <span class="tag">Auto-Config</span>
+              </div>
+              <p class="card-sub">Import a DevTools HAR capture (muse-ai.har) to automatically extract WebSocket URL, Access Token, and Session Cookie.</p>
+              <div class="form-actions">
+                <label class="btn primary" for="muse-har-file">
+                  Choose HAR File
+                  <input type="file" id="muse-har-file" class="is-hidden" accept=".har,.json">
+                </label>
+                <a class="btn secondary" href="/muse-config" target="_blank" rel="noopener">Open Dedicated HAR Import Page ↗</a>
+              </div>
+              <div class="ok-box is-hidden" id="muse-har-ok-msg"></div>
+              <div class="err-box is-hidden" id="muse-har-err-msg"></div>
+            </div>
             <form id="muse-form">
               <div class="grid-2 formgrid">
                 <div class="field-group formgroup">

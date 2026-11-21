@@ -206,7 +206,9 @@ pub fn apply_har_config(
         }
     };
 
-    let _ = store.save_to_persistent_file();
+    if let Err(e) = store.save_to_persistent_file() {
+        eprintln!("[warn] failed to save persistent config after HAR apply: {e}");
+    }
 
     let report = ApplyReport {
         applied,
