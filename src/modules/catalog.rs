@@ -228,7 +228,7 @@ pub fn get_system_module_catalog() -> Vec<SystemCatalogModule> {
                 "studio",
             ],
             Some("ⓕ"),
-            Some("addons/facebook-suite"),
+            Some("https://github.com/giauphan/gateway-modules/tree/main/modules/facebook-suite"),
             Some(config_schema(
                 "Meta Business Suite Config & HAR Import",
                 "facebook-suite",

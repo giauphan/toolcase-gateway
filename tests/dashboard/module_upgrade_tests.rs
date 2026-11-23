@@ -198,7 +198,10 @@ fn test_dashboard_upgrade_module_resolves_catalog_and_addon_source() {
         .into_iter()
         .find(|c| c.id == "facebook-suite")
         .expect("facebook-suite in catalog");
-    assert_eq!(fb_cat.source.as_deref(), Some("addons/facebook-suite"));
+    assert_eq!(
+        fb_cat.source.as_deref(),
+        Some("https://github.com/giauphan/gateway-modules/tree/main/modules/facebook-suite")
+    );
 
     // 2. Register facebook-suite if not yet in registry
     let tmp_bin = std::env::temp_dir().join(format!("test_fb_ep_{}.sh", uuid::Uuid::new_v4()));
@@ -238,40 +241,42 @@ fn test_dashboard_upgrade_module_resolves_catalog_and_addon_source() {
     };
 
     // 3. Upgrade facebook-suite with payload without explicit source
-    // It should locate source via catalog / addons and not fail with missing source
+    // It should locate canonical source via catalog and not fail with 400 missing source
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/upgrade",
+        br#"{"id": "facebook-suite"}"#,
+        &store,
+    );
+    let resp_str = String::from_utf8_lossy(&body);
+    assert_ne!(
+        head.status, 400,
+        "Upgrade must not fail with missing source 400: {}",
+        resp_str
+    );
+    if head.status == 200 {
+        let upg_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(upg_json["ok"], true);
+    } else {
+        assert_eq!(
+            head.status, 500,
+            "Expected 200 success or 500 download failure in offline sandbox: {}",
+            resp_str
+        );
+    }
+
+    // 4. Verify explicit local upgrade succeeds atomically
     if std::path::Path::new("addons/facebook-suite").is_dir() {
         let (head, body) = request_gateway(
             "POST",
             "/api/v1/dashboard/modules/upgrade",
-            br#"{"id": "facebook-suite"}"#,
+            br#"{"id": "facebook-suite", "source": "addons/facebook-suite"}"#,
             &store,
         );
         let resp_str = String::from_utf8_lossy(&body);
-        assert_ne!(
-            head.status, 400,
-            "Upgrade must not fail with missing source 400: {}",
-            resp_str
-        );
         assert_eq!(head.status, 200, "Upgrade response: {}", resp_str);
         let upg_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(upg_json["ok"], true);
-    } else {
-        let (head, body) = request_gateway(
-            "POST",
-            "/api/v1/dashboard/modules/upgrade",
-            br#"{"id": "facebook-suite"}"#,
-            &store,
-        );
-        let resp_str = String::from_utf8_lossy(&body);
-        assert_eq!(head.status, 400, "Expected 400 bad request: {}", resp_str);
-        assert!(
-            resp_str.contains("has no configured source repository")
-                || resp_str.contains("Local module source directory")
-                || resp_str.contains("Failed to copy directory")
-                || resp_str.contains("is not currently installed"),
-            "Expected failure due to missing source directory or installation in CI, got: {}",
-            resp_str
-        );
     }
 
     // 4. Teardown: restore previous registry state and remove test artifacts
