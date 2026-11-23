@@ -284,3 +284,62 @@ fn test_dashboard_test_module_muse_builtin_healthy() {
 
     let _ = fs::remove_file(&tmp_env);
 }
+
+#[test]
+fn test_dashboard_test_module_facebook_suite_healthy() {
+    let tmp_env = std::env::temp_dir().join(format!("test_mod_test_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    let fb_dir = std::path::Path::new("addons/facebook-suite");
+    if !fb_dir.join("module.json").exists() || !fb_dir.join("run.sh").exists() {
+        return;
+    }
+
+    let abs_entrypoint = match fb_dir.join("run.sh").canonicalize() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(_) => return,
+    };
+
+    let manifest = toolcase_gateway::gateway::modules::PersonalManifest {
+        id: "facebook-suite".to_string(),
+        name: "Meta Business Suite / Facebook Creator Studio Adapter".to_string(),
+        short_name: Some("Meta Business Suite".to_string()),
+        version: "1.0.0".to_string(),
+        namespace: "/custom/facebook".to_string(),
+        entrypoint: abs_entrypoint,
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec!["studio".to_string(), "publish".to_string()],
+        icon: Some("ⓕ".to_string()),
+        config_schema: None,
+        permissions: vec!["network".to_string()],
+        group: None,
+        source: Some("addons/facebook-suite".to_string()),
+        tools: None,
+    };
+    {
+        let reg = store.module_registry();
+        let mut guard = reg.write().unwrap();
+        let _ = guard.unregister_personal_module("facebook-suite");
+        guard.register_personal_module(manifest).unwrap();
+    }
+
+    let test_payload = serde_json::json!({ "id": "facebook-suite" });
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/test",
+        &serde_json::to_vec(&test_payload).unwrap(),
+        &store,
+    );
+    assert_eq!(head.status, 200);
+    let res: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(res["ok"], true);
+    assert_eq!(res["id"], "facebook-suite");
+    assert_eq!(res["status"], "healthy");
+    assert_eq!(res["protocol"], "stdio-stream");
+    assert!(res["message"]
+        .as_str()
+        .unwrap()
+        .contains("Module responded successfully"));
+
+    let _ = fs::remove_file(&tmp_env);
+}
