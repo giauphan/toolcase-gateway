@@ -130,6 +130,11 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_install_personal_module(c, b, store)
             })
         }
+        "/api/v1/dashboard/modules/validate" => {
+            handle_post(client, request, "dashboard modules/validate", |c, b| {
+                crate::features::dashboard::handle_validate_module_config(c, b, store)
+            })
+        }
         "/api/v1/dashboard/modules/upgrade" | "/api/v1/dashboard/modules/update" => {
             handle_post(client, request, "dashboard modules/upgrade", |c, b| {
                 crate::features::dashboard::handle_upgrade_personal_module(c, b, store)

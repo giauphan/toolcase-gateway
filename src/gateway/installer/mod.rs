@@ -8,9 +8,13 @@ pub mod builder;
 mod ingest;
 mod manifest;
 mod upgrade;
+pub mod validation;
 
 pub use ingest::{copy_dir_all, decode_base64, resolve_source};
 pub use upgrade::upgrade_module;
+pub use validation::{
+    validate_module_manifest_direct, validate_module_source, ModuleValidationReport,
+};
 
 use crate::gateway::modules::{ModuleError, PersonalManifest};
 use ingest::{extract_source_url, ingest_source_into_staging};

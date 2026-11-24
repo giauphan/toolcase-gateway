@@ -193,6 +193,10 @@
   const modEntrypoint = byId("mod-entrypoint");
   const modCaps = byId("mod-caps");
   const installBtn = byId("install-module-btn");
+  const validateModuleBtn = byId("validate-module-btn");
+  const modValCard = byId("mod-val-card");
+  const modValBadge = byId("mod-val-badge");
+  const modValDetails = byId("mod-val-details");
   const modOkMsg = byId("mod-ok-msg");
   const modErrMsg = byId("mod-err-msg");
 
@@ -1700,6 +1704,7 @@
     if (modNamespace) modNamespace.value = "";
     if (modEntrypoint) modEntrypoint.value = "";
     if (modCaps) modCaps.value = "";
+    if (modValCard) modValCard.classList.add("is-hidden");
   }
 
   function handleInstallModuleSuccess(moduleData) {
@@ -1714,6 +1719,92 @@
     const errorDetail = result.json?.message || ("HTTP " + result.status);
     modErrMsg.textContent = "Installation error: " + errorDetail;
     setMessageVisible(modErrMsg, true);
+  }
+
+  function autoInferFromSource(raw) {
+    if (!raw) return;
+    const clean = raw.trim().replace(/\/+$/, "");
+    const parts = clean.split("/").filter(Boolean);
+    if (!parts.length) return;
+    const last = parts[parts.length - 1].replace(/\.git$/, "").replace(/\.zip$/, "");
+    if (!last || last === "main" || last === "master") {
+      if (parts.length >= 2) {
+        const prev = parts[parts.length - 2].replace(/\.git$/, "");
+        if (prev) return autoInferFromSource(prev);
+      }
+      return;
+    }
+    const cleanId = last.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    const cleanName = last.replace(/[-_]/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    if (modId && !modId.value.trim()) modId.value = cleanId;
+    if (modName && !modName.value.trim()) modName.value = cleanName;
+    if (modNamespace && !modNamespace.value.trim()) modNamespace.value = "/custom/" + cleanId;
+  }
+
+  function runModuleValidation(sourceVal, zipBase64) {
+    if (!validateModuleBtn) return;
+    validateModuleBtn.disabled = true;
+    validateModuleBtn.textContent = "Validating...";
+    setMessageVisible(modErrMsg, false);
+    setMessageVisible(modOkMsg, false);
+    if (modValCard) modValCard.classList.add("is-hidden");
+
+    const payload = buildModuleInstallPayload(sourceVal, zipBase64);
+    postJson("/api/v1/dashboard/modules/validate", payload)
+      .then(function(result) {
+        validateModuleBtn.disabled = false;
+        validateModuleBtn.textContent = "Validate Config";
+        const data = result.json || {};
+        if (data.valid) {
+          const mod = data.module || {};
+          if (mod.id && modId && !modId.value.trim()) modId.value = mod.id;
+          if (mod.name && modName && !modName.value.trim()) modName.value = mod.name;
+          if (mod.namespace && modNamespace && !modNamespace.value.trim()) modNamespace.value = mod.namespace;
+          if (mod.capabilities && mod.capabilities.length && modCaps && !modCaps.value.trim()) {
+            modCaps.value = mod.capabilities.join(", ");
+          }
+          if (mod.entrypoint && modEntrypoint && !modEntrypoint.value.trim()) {
+            modEntrypoint.value = mod.entrypoint;
+          }
+
+          if (modValCard && modValDetails) {
+            modValCard.classList.remove("is-hidden");
+            if (modValBadge) {
+              modValBadge.textContent = mod.is_update ? "Valid (Update)" : "Valid";
+              modValBadge.className = "tag ok";
+            }
+            let infoHtml = "<div><strong>ID:</strong> " + escapeHtml(mod.id || "") +
+              " &nbsp;|&nbsp; <strong>Namespace:</strong> <code>" + escapeHtml(mod.namespace || "") + "</code>" +
+              " &nbsp;|&nbsp; <strong>Entrypoint:</strong> " + escapeHtml(mod.entrypoint_type || "detected") +
+              "</div>";
+            if (data.warnings && data.warnings.length) {
+              infoHtml += "<div style=\"color:#e2a03f;margin-top:0.25rem;\"><strong>Notice:</strong> " + escapeHtml(data.warnings.join("; ")) + "</div>";
+            }
+            if (data.diagnostics && data.diagnostics.length) {
+              infoHtml += "<div style=\"color:rgba(255,255,255,0.5);font-size:0.8rem;margin-top:0.25rem;\">" + escapeHtml(data.diagnostics.join(" • ")) + "</div>";
+            }
+            modValDetails.innerHTML = infoHtml;
+          }
+        } else {
+          const err = data.message || result.json?.message || "Validation failed";
+          modErrMsg.textContent = "Validation error: " + err;
+          setMessageVisible(modErrMsg, true);
+          if (modValCard && modValDetails) {
+            modValCard.classList.remove("is-hidden");
+            if (modValBadge) {
+              modValBadge.textContent = "Invalid";
+              modValBadge.className = "tag err";
+            }
+            modValDetails.textContent = err;
+          }
+        }
+      })
+      .catch(function(err) {
+        validateModuleBtn.disabled = false;
+        validateModuleBtn.textContent = "Validate Config";
+        modErrMsg.textContent = "Network error validating module: " + err.message;
+        setMessageVisible(modErrMsg, true);
+      });
   }
 
   function submitCustomModuleInstall(payload) {
@@ -1770,6 +1861,54 @@
   // Custom module install form
   function initCustomInstallForm() {
     if (!installForm) return;
+
+    if (modSource) {
+      modSource.addEventListener("blur", function() {
+        autoInferFromSource(modSource.value);
+      });
+      modSource.addEventListener("input", function() {
+        const val = modSource.value.trim();
+        if (val.length > 8) {
+          autoInferFromSource(val);
+        }
+      });
+    }
+
+    if (modZipFile) {
+      modZipFile.addEventListener("change", function() {
+        const file = modZipFile.files?.[0];
+        if (file) {
+          autoInferFromSource(file.name);
+        }
+      });
+    }
+
+    if (validateModuleBtn) {
+      validateModuleBtn.addEventListener("click", function() {
+        const sourceVal = modSource ? modSource.value.trim() : "";
+        const zipFileInput = modZipFile?.files?.[0] ?? null;
+        if (!sourceVal && !zipFileInput && (!modId || !modId.value.trim())) {
+          modErrMsg.textContent = "Please specify a GitHub/ZIP URL, select a ZIP file, or enter module parameters to validate.";
+          setMessageVisible(modErrMsg, true);
+          return;
+        }
+        if (zipFileInput) {
+          const reader = new FileReader();
+          reader.onload = function() {
+            const base64 = reader.result.split(",")[1];
+            runModuleValidation(sourceVal, base64);
+          };
+          reader.onerror = function() {
+            modErrMsg.textContent = "Error reading selected zip file for validation.";
+            setMessageVisible(modErrMsg, true);
+          };
+          reader.readAsDataURL(zipFileInput);
+        } else {
+          runModuleValidation(sourceVal, null);
+        }
+      });
+    }
+
     installForm.addEventListener("submit", function(e) {
       e.preventDefault();
       setMessageVisible(modOkMsg, false);
@@ -1778,8 +1917,8 @@
       const sourceVal = modSource ? modSource.value.trim() : "";
       const zipFileInput = modZipFile?.files?.[0] ?? null;
 
-      if (!sourceVal && !zipFileInput) {
-        modErrMsg.textContent = "Please specify a GitHub/ZIP URL or select a ZIP archive file to upload.";
+      if (!sourceVal && !zipFileInput && (!modId || !modId.value.trim())) {
+        modErrMsg.textContent = "Please specify a GitHub/ZIP URL, select a ZIP archive file, or provide module identifier.";
         setMessageVisible(modErrMsg, true);
         return;
       }

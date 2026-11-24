@@ -350,24 +350,24 @@
             <div class="grid-2 formgrid">
               <div class="field-group formgroup">
                 <label for="mod-id">Module Identifier (optional)</label>
-                <input type="text" id="mod-id" placeholder="custom-cohere">
+                <input type="text" id="mod-id" placeholder="my-module">
                 <div class="hint">Alphanumeric identifier without spaces (auto-inferred if omitted).</div>
               </div>
               <div class="field-group formgroup">
                 <label for="mod-name">Display Name (optional)</label>
-                <input type="text" id="mod-name" placeholder="Custom Cohere Adapter">
+                <input type="text" id="mod-name" placeholder="My Custom Module">
               </div>
             </div>
             <div class="grid-2 formgrid">
               <div class="field-group formgroup">
-                <label for="mod-namespace">Route Path URL Prefix (Required)</label>
-                <input type="text" id="mod-namespace" placeholder="/custom/cohere" required>
-                <div class="hint">Unique routing path prefix starting with a forward slash (e.g. /custom/my-tool).</div>
+                <label for="mod-namespace">Route Path URL Prefix (Auto-detected if omitted)</label>
+                <input type="text" id="mod-namespace" placeholder="/custom/my-module">
+                <div class="hint">Unique routing path prefix starting with a forward slash (e.g. /custom/my-tool). Auto-inferred if omitted.</div>
               </div>
               <div class="field-group formgroup">
                 <label for="mod-entrypoint">Entrypoint Command or Script (optional)</label>
-                <input type="text" id="mod-entrypoint" placeholder="run.sh or /usr/local/bin/cohere-adapter">
-                <div class="hint">Auto-detected from run.sh, main.py, or index.js if omitted.</div>
+                <input type="text" id="mod-entrypoint" placeholder="run.sh or executable binary">
+                <div class="hint">Auto-detected from run.sh, Cargo.toml, main.py, or index.js if omitted.</div>
               </div>
             </div>
             <div class="field-group formgroup">
@@ -375,7 +375,15 @@
               <input type="text" id="mod-caps" placeholder="chat_completions, models">
             </div>
             <div class="btns">
+              <button type="button" id="validate-module-btn" class="btn secondary">Validate Config</button>
               <button type="submit" id="install-module-btn" class="btn primary btn-primary">Install Module</button>
+            </div>
+            <div class="card is-hidden mod-val-card" id="mod-val-card">
+              <div class="mod-val-header">
+                <strong class="mod-val-title">Configuration Validation</strong>
+                <span class="tag ok" id="mod-val-badge">Valid</span>
+              </div>
+              <div class="mod-val-details" id="mod-val-details"></div>
             </div>
             <div class="ok-box" id="mod-ok-msg"></div>
             <div class="err-box" id="mod-err-msg"></div>

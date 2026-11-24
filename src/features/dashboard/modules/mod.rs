@@ -6,6 +6,7 @@ mod source;
 mod synthesis;
 mod testing;
 mod upgrade;
+mod validation;
 
 pub use docs::{handle_get_module_doc, handle_module_doc_page};
 pub use queue::{clear_all_upgrade_locks, try_acquire_upgrade, try_acquire_upgrade_with_ttl};
@@ -15,6 +16,7 @@ pub use testing::handle_test_personal_module;
 pub use upgrade::{
     handle_get_upgrade_queue_status, handle_upgrade_all_modules, handle_upgrade_personal_module,
 };
+pub use validation::handle_validate_module_config;
 
 use crate::config::ConfigStore;
 use crate::gateway::installer::{

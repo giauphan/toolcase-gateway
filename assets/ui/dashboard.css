@@ -1338,3 +1338,26 @@ body .mt-12,
     animation: none;
   }
 }
+
+.mod-val-card {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+}
+.mod-val-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.mod-val-title {
+  font-size: 0.9rem;
+}
+.mod-val-details {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.warning-hint {
+  color: #e2a03f;
+  margin-top: 0.25rem;
+}

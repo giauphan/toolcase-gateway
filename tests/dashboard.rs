@@ -21,3 +21,6 @@ mod module_test_action_tests;
 
 #[path = "dashboard/module_docs_tests.rs"]
 mod module_docs_tests;
+
+#[path = "dashboard/module_validate_action_tests.rs"]
+mod module_validate_action_tests;
