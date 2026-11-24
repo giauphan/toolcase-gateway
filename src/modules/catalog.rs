@@ -63,6 +63,125 @@ fn derive_catalog_docs(
     (doc_url, Some(doc_content))
 }
 
+fn read_local_readme(id: &str) -> Option<String> {
+    if id.contains("..") || id.contains('/') || id.contains('\\') {
+        return None;
+    }
+    let state_dir = crate::gateway::installer::get_state_dir();
+    let candidates = [
+        state_dir.join("modules").join(id).join("README.md"),
+        std::path::PathBuf::from("addons")
+            .join(id)
+            .join("README.md"),
+        std::path::PathBuf::from("modules")
+            .join(id)
+            .join("README.md"),
+    ];
+    for cand in &candidates {
+        if cand.is_file() {
+            if let Ok(text) = std::fs::read_to_string(cand) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(text);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn is_archive_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let path = lower.split('?').next().unwrap_or(&lower);
+    path.ends_with(".zip")
+        || path.ends_with(".tar.gz")
+        || path.ends_with(".tgz")
+        || path.ends_with(".tar.bz2")
+        || path.ends_with(".tar")
+}
+
+fn is_repo_url(url: &str) -> bool {
+    (url.starts_with("http://") || url.starts_with("https://"))
+        && !is_archive_url(url)
+        && (url.contains("github.com")
+            || url.contains("gitlab.com")
+            || url.contains("bitbucket.org")
+            || url.ends_with(".git"))
+}
+
+/// Resolves comprehensive documentation URL and markdown document block for any module,
+/// applying the intelligent hierarchy:
+/// 1. Explicit override if already present and non-empty.
+/// 2. Local README.md file in module state directory or addons.
+/// 3. System catalog default documentation and external links.
+/// 4. Clean synthesized markdown document block.
+pub fn resolve_module_documentation(
+    id: &str,
+    name: &str,
+    namespace: &str,
+    capabilities: &[String],
+    source: Option<&str>,
+    existing_url: Option<String>,
+    existing_content: Option<String>,
+) -> (Option<String>, Option<String>) {
+    let clean_existing_content = existing_content.filter(|s| !s.trim().is_empty());
+    let clean_existing_url = existing_url.filter(|s| !s.trim().is_empty());
+
+    let catalog_item = get_system_module_catalog().into_iter().find(|c| c.id == id);
+    let catalog_doc_url = catalog_item.as_ref().and_then(|c| c.doc_url.clone());
+    let catalog_doc_content = catalog_item.as_ref().and_then(|c| c.doc_content.clone());
+
+    let default_canonical_url = format!("/modules/{id}/doc");
+    let default_plural_url = format!("/modules/{id}/docs");
+
+    let doc_url = if let Some(url) = clean_existing_url {
+        let is_default_generated = url == default_canonical_url || url == default_plural_url;
+        if is_default_generated {
+            catalog_doc_url
+                .or_else(|| {
+                    source
+                        .filter(|s| is_repo_url(s))
+                        .map(|src| format!("{src}#readme"))
+                })
+                .or(Some(url))
+        } else {
+            // Preserve explicit local or external URLs configured by user or manifest
+            Some(url)
+        }
+    } else if let Some(cat_url) = catalog_doc_url {
+        Some(cat_url)
+    } else if let Some(src) = source.filter(|s| is_repo_url(s)) {
+        Some(format!("{src}#readme"))
+    } else {
+        Some(default_canonical_url)
+    };
+
+    let doc_content = if let Some(content) = clean_existing_content {
+        Some(content)
+    } else if let Some(readme) = read_local_readme(id) {
+        Some(readme)
+    } else if let Some(cat_content) = catalog_doc_content {
+        Some(cat_content)
+    } else if doc_url
+        .as_ref()
+        .map(|u| u.starts_with("http://") || u.starts_with("https://"))
+        .unwrap_or(false)
+    {
+        None
+    } else {
+        let caps_str = if capabilities.is_empty() {
+            "None declared".to_string()
+        } else {
+            capabilities.join(", ")
+        };
+        Some(format!(
+            "# {name}\n\n**Module ID**: `{id}`  \n**Route Prefix**: `{namespace}`  \n**Capabilities**: {caps_str}\n\n### Overview\nActive Toolcase Gateway provider module routed at `{namespace}`.\n\n### Endpoints\n- Route base: `{namespace}`\n- Module UI Configuration: `/modules/{id}/config`\n- Documentation Viewer: `/modules/{id}/doc`\n"
+        ))
+    };
+
+    (doc_url, doc_content)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn rich_catalog_item(
     id: &str,

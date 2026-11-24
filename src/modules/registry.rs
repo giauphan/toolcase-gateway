@@ -128,11 +128,15 @@ impl ModuleRegistry {
             manifest.short_name.clone(),
             None,
         );
-        let doc_url = manifest
-            .doc_url
-            .clone()
-            .or_else(|| Some(format!("/modules/{id}/doc")));
-        let doc_content = manifest.doc_content.clone();
+        let (doc_url, doc_content) = super::catalog::resolve_module_documentation(
+            &id,
+            &manifest.name,
+            &ns,
+            &manifest.capabilities,
+            manifest.source.as_deref(),
+            manifest.doc_url.take(),
+            manifest.doc_content.take(),
+        );
         manifest.doc_url = doc_url.clone();
         manifest.doc_content = doc_content.clone();
         let desc = ModuleDescriptor {
@@ -220,18 +224,36 @@ impl ModuleRegistry {
             Some(existing),
         );
 
-        let source = manifest.source.clone().or_else(|| existing.source.clone());
-        manifest.source = source.clone();
+        let effective_source = manifest.source.clone().or_else(|| existing.source.clone());
+        manifest.source = effective_source.clone();
 
-        let doc_url = manifest
-            .doc_url
-            .clone()
-            .or_else(|| existing.doc_url.clone())
-            .or_else(|| Some(format!("/modules/{id}/doc")));
-        let doc_content = manifest
-            .doc_content
-            .clone()
-            .or_else(|| existing.doc_content.clone());
+        // Refresh source-derived links when source changes; preserve explicit overrides
+        let fallback_existing_url = existing.doc_url.clone().filter(|url| {
+            if let Some(old_src) = existing.source.as_ref() {
+                if manifest.source.is_some() && manifest.source.as_ref() != Some(old_src) {
+                    let derived = format!("{old_src}#readme");
+                    if url == &derived {
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+
+        // Regenerate synthesized documentation when metadata changes; preserve caller-supplied content
+        let fallback_existing_content = existing.doc_content.clone().filter(|content| {
+            !content.contains("Active Toolcase Gateway provider module routed at")
+        });
+
+        let (doc_url, doc_content) = super::catalog::resolve_module_documentation(
+            &id,
+            &manifest.name,
+            &ns,
+            &manifest.capabilities,
+            effective_source.as_deref(),
+            manifest.doc_url.take().or(fallback_existing_url),
+            manifest.doc_content.take().or(fallback_existing_content),
+        );
         manifest.doc_url = doc_url.clone();
         manifest.doc_content = doc_content.clone();
 
@@ -255,7 +277,7 @@ impl ModuleRegistry {
             config_url: Some(format!("/modules/{id}/config")),
             settings_tab: Some(id.clone()),
             config_schema: Some(schema),
-            source,
+            source: effective_source,
             tools: manifest.tools.clone(),
             doc_url,
             doc_content,
@@ -449,6 +471,29 @@ impl ModuleRegistry {
         let mut list: Vec<PersonalManifest> = self.personal_manifests.values().cloned().collect();
         list.sort_by(|a, b| a.id.cmp(&b.id));
         list
+    }
+
+    /// Ensures all registered personal modules have populated `doc_url` and `doc_content`.
+    pub fn backfill_all_module_documentation(&mut self) {
+        for (id, desc) in self.modules.iter_mut() {
+            if desc.kind == ModuleKind::Personal {
+                let (url, content) = super::catalog::resolve_module_documentation(
+                    id,
+                    &desc.name,
+                    &desc.namespace,
+                    &desc.capabilities,
+                    desc.source.as_deref(),
+                    desc.doc_url.take(),
+                    desc.doc_content.take(),
+                );
+                desc.doc_url = url.clone();
+                desc.doc_content = content.clone();
+                if let Some(manifest) = self.personal_manifests.get_mut(id) {
+                    manifest.doc_url = url;
+                    manifest.doc_content = content;
+                }
+            }
+        }
     }
 
     /// Applies enablement states from configuration.

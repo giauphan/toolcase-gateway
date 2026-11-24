@@ -307,6 +307,7 @@ fn apply_stored_module_statuses(
 fn hydrate_stored_modules(
     reg: &mut crate::gateway::modules::ModuleRegistry,
     stored_modules: &[crate::storage::StoredModule],
+    storage: Option<&dyn crate::storage::StorageRepository>,
 ) {
     for sm in stored_modules {
         if let Err(e) = reg.register_personal_module(sm.manifest.clone()) {
@@ -321,6 +322,16 @@ fn hydrate_stored_modules(
                 crate::gateway::modules::ModuleStatus::Disabled
             };
             let _ = reg.set_module_status(&sm.manifest.id, status);
+
+            if let Some(storage) = storage {
+                if let Some(updated_manifest) = reg.get_personal_manifest(&sm.manifest.id) {
+                    let docs_changed = updated_manifest.doc_url != sm.manifest.doc_url
+                        || updated_manifest.doc_content != sm.manifest.doc_content;
+                    if docs_changed {
+                        let _ = storage.save_module_with_status(updated_manifest, sm.enabled);
+                    }
+                }
+            }
         }
     }
 }
@@ -367,7 +378,7 @@ fn build_module_registry(
     let stored_modules = storage.get_stored_modules().unwrap_or_default();
 
     // 1. Authoritative hydration from SQLite modules table
-    hydrate_stored_modules(&mut reg, &stored_modules);
+    hydrate_stored_modules(&mut reg, &stored_modules, Some(storage));
 
     // 2. Discover modules on disk (addons, modules dir)
     let discovered = crate::gateway::installer::scan_and_register_modules(&mut reg, state_dir);
@@ -380,5 +391,6 @@ fn build_module_registry(
         apply_persistent_fallback(&mut reg, persistent, &stored_modules);
     }
 
+    reg.backfill_all_module_documentation();
     reg
 }

@@ -453,6 +453,12 @@
       return;
     }
 
+    const updateAllBtn = e.target.closest("#modules-update-all-btn");
+    if (updateAllBtn) {
+      requestUpdateAllModules();
+      return;
+    }
+
     const testBtn = e.target.closest(".module-test");
     if (testBtn) {
       testModule(testBtn.dataset.moduleId, testBtn);
@@ -977,6 +983,57 @@
     moduleActionDialog.returnValue = '';
     moduleActionDialog.showModal();
   }
+
+  function requestUpdateAllModules() {
+    const personalMods = allModules.filter(function(m) { return m.kind !== "builtin"; });
+    if (!personalMods.length) {
+      showToast("No personal modules are installed.", false);
+      return;
+    }
+
+    const eligible = personalMods.filter(function(m) {
+      const qItem = upgradeQueue.getItem(m.id);
+      if (qItem && (qItem.status === "queued" || qItem.status === "upgrading")) {
+        return false;
+      }
+      const catItem = allCatalogItems.find(function(c) { return c.id === m.id; });
+      return Boolean(m.source || (catItem && catItem.source));
+    });
+
+    if (!eligible.length) {
+      const busyCount = personalMods.filter(function(m) {
+        const qItem = upgradeQueue.getItem(m.id);
+        return qItem && (qItem.status === "queued" || qItem.status === "upgrading");
+      }).length;
+      if (busyCount > 0) {
+        showToast("All eligible modules are already queued or being upgraded.", false);
+      } else {
+        showToast("No installed personal modules have an upgrade source configured.", false);
+      }
+      return;
+    }
+
+    const moduleNames = eligible.map(function(m) { return m.name || m.id; }).join(", ");
+    const confirmMsg = "Upgrade " + eligible.length + " module" + (eligible.length > 1 ? "s" : "") +
+      " (" + moduleNames + ") to their latest versions? Existing configuration and credentials will be preserved.";
+
+    if (!window.confirm(confirmMsg)) return;
+
+    let queuedCount = 0;
+    eligible.forEach(function(m) {
+      const catItem = allCatalogItems.find(function(c) { return c.id === m.id; });
+      const source = m.source || (catItem ? catItem.source : null);
+      upgradeQueue.enqueue(m.id, source, null);
+      queuedCount++;
+    });
+
+    showToast(queuedCount + " module" + (queuedCount > 1 ? "s" : "") + " added to upgrade queue.", false);
+    if (views.modules?.classList.contains("visible")) {
+      showModulesFeedback(queuedCount + " module" + (queuedCount > 1 ? "s" : "") + " queued for upgrade. You can track progress in the queue.", false);
+    }
+  }
+
+  window.updateAllModules = requestUpdateAllModules;
 
   function showModuleDetail(id) {
     const module = renderedModules.find(function(candidate) { return candidate.id === id; });

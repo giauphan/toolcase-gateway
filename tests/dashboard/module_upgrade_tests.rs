@@ -501,3 +501,30 @@ fn test_copy_dir_all_preserves_modification_times() {
     let _ = fs::remove_dir_all(&tmp_src);
     let _ = fs::remove_dir_all(&tmp_dst);
 }
+
+#[test]
+fn test_dashboard_upgrade_all_modules_endpoint_and_batch_execution() {
+    let tmp_env = std::env::temp_dir().join(format!("test_upg_all_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    // 1. Test GET /api/v1/dashboard/modules/upgrade/all
+    let (head, body) = request_gateway("GET", "/api/v1/dashboard/modules/upgrade/all", &[], &store);
+    assert_eq!(head.status, 200);
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(val["ok"], true);
+    assert!(val["modules"].is_array());
+
+    // 2. Test POST /api/v1/dashboard/modules/upgrade/all with default / preview (execute: false)
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/upgrade/all",
+        b"{\"execute\":false}",
+        &store,
+    );
+    assert_eq!(head.status, 200);
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(val["ok"], true);
+    assert!(val.get("total_eligible").is_some());
+
+    let _ = fs::remove_file(&tmp_env);
+}

@@ -535,3 +535,99 @@ fn test_sync_module_config_from_disk_projects_documentation_to_metadata() {
         );
     }
 }
+
+#[test]
+fn test_universal_documentation_auto_population_for_all_modules() {
+    let tmp_env = std::env::temp_dir().join(format!("test_docs_univ_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env);
+    let reg = store.module_registry();
+
+    // 1. Register arbitrary personal module with zero doc metadata
+    let custom_manifest = PersonalManifest {
+        id: "zero-doc-mod".to_string(),
+        name: "Zero Doc Module".to_string(),
+        short_name: None,
+        version: "1.0.0".to_string(),
+        namespace: "/custom/zero-doc".to_string(),
+        entrypoint: "/bin/echo".to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec!["chat".to_string()],
+        icon: None,
+        config_schema: None,
+        permissions: Vec::new(),
+        group: None,
+        source: None,
+        tools: None,
+        doc_url: None,
+        doc_content: None,
+    };
+
+    {
+        let mut guard = reg.write().unwrap();
+        guard.register_personal_module(custom_manifest).unwrap();
+        let desc = guard.get_module("zero-doc-mod").unwrap();
+        assert_eq!(
+            desc.doc_url.as_deref(),
+            Some("/modules/zero-doc-mod/doc"),
+            "Default doc_url should point to canonical doc path"
+        );
+        let content = desc
+            .doc_content
+            .as_deref()
+            .expect("synthesized doc_content");
+        assert!(content.contains("# Zero Doc Module"));
+        assert!(content.contains("/custom/zero-doc"));
+        assert!(content.contains("chat"));
+    }
+
+    // 2. Register catalog module (facebook-suite) without explicit doc metadata in manifest
+    let fb_manifest = PersonalManifest {
+        id: "facebook-suite".to_string(),
+        name: "Meta Business Suite".to_string(),
+        short_name: None,
+        version: "1.0.0".to_string(),
+        namespace: "/custom/facebook".to_string(),
+        entrypoint: "/bin/echo".to_string(),
+        protocol: "stdio-stream".to_string(),
+        capabilities: vec!["studio".to_string()],
+        icon: None,
+        config_schema: None,
+        permissions: Vec::new(),
+        group: None,
+        source: None,
+        tools: None,
+        doc_url: None,
+        doc_content: None,
+    };
+
+    {
+        let mut guard = reg.write().unwrap();
+        guard.register_personal_module(fb_manifest).unwrap();
+        let desc = guard.get_module("facebook-suite").unwrap();
+        let url = desc.doc_url.as_deref().expect("resolved catalog doc_url");
+        assert!(url.contains("facebook-suite"));
+        assert!(url.starts_with("http"));
+        let content = desc.doc_content.as_deref().expect("resolved doc_content");
+        assert!(!content.trim().is_empty());
+    }
+
+    // 3. Verify GET /api/v1/dashboard/overview returns non-empty doc_url and doc_content for ALL modules
+    let (head, body) = request_gateway("GET", "/api/v1/dashboard/overview", &[], &store);
+    assert_eq!(head.status, 200);
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let modules = val["modules"].as_array().expect("modules array");
+    assert!(!modules.is_empty());
+    for m in modules {
+        let m_id = m["id"].as_str().unwrap_or("unknown");
+        let doc_url = m.get("doc_url").and_then(|v| v.as_str());
+        assert!(
+            doc_url.is_some() && !doc_url.unwrap().is_empty(),
+            "Module '{m_id}' must have a valid doc_url"
+        );
+        let doc_content = m.get("doc_content").and_then(|v| v.as_str());
+        assert!(
+            doc_content.is_some() && !doc_content.unwrap().is_empty(),
+            "Module '{m_id}' must have a valid doc_content"
+        );
+    }
+}

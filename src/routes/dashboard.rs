@@ -135,6 +135,17 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_upgrade_personal_module(c, b, store)
             })
         }
+        "/api/v1/dashboard/modules/upgrade/all" | "/api/v1/dashboard/modules/update/all" => {
+            if request.method.eq_ignore_ascii_case("get") {
+                handle_get(client, request, "dashboard modules/upgrade/all", |c| {
+                    crate::features::dashboard::handle_upgrade_all_modules(c, &[], store)
+                })
+            } else {
+                handle_post(client, request, "dashboard modules/upgrade/all", |c, b| {
+                    crate::features::dashboard::handle_upgrade_all_modules(c, b, store)
+                })
+            }
+        }
         "/api/v1/dashboard/modules/remove" | "/api/v1/dashboard/modules/uninstall" => {
             handle_post(client, request, "dashboard modules/remove", |c, b| {
                 crate::features::dashboard::handle_remove_personal_module(c, b, store)
