@@ -61,6 +61,8 @@ fn test_example_echo_provider_dispatch_stdio_flow() {
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -180,6 +182,8 @@ fn test_personal_module_accepts_structured_json_body() {
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -243,6 +247,8 @@ fn test_crashing_module_captures_stderr_message() {
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -323,6 +329,8 @@ EOF
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {
@@ -400,6 +408,8 @@ EOF
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     let (mut client, mut server) = match create_stream_pair() {

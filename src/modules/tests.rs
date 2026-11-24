@@ -67,6 +67,8 @@ pub(super) fn sample_manifest(id: &str, name: &str, namespace: &str) -> Personal
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     }
 }
 

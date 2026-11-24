@@ -160,6 +160,30 @@ pub fn dispatch_dashboard_route(
                 })
             }
         }
+        "/api/v1/dashboard/modules/doc" | "/api/v1/dashboard/modules/docs" => {
+            handle_get(client, request, "dashboard modules/doc", |c| {
+                crate::features::dashboard::handle_get_module_doc(c, &request.path, store)
+            })
+        }
+        p if (p.starts_with("/modules/")
+            && (p.ends_with("/doc")
+                || p.ends_with("/docs")
+                || p.ends_with("/documentation")
+                || p.ends_with("/doc.html"))) =>
+        {
+            if request.headers.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("accept")
+                    && v.to_ascii_lowercase().contains("application/json")
+            }) {
+                handle_get(client, request, "module doc json", |c| {
+                    crate::features::dashboard::handle_get_module_doc(c, &request.path, store)
+                })
+            } else {
+                handle_get(client, request, "module doc page", |c| {
+                    crate::features::dashboard::handle_module_doc_page(c, &request.path, store)
+                })
+            }
+        }
         p if p == "/tiktok-config"
             || (p.starts_with("/modules/")
                 && (p.ends_with("/config")

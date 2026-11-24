@@ -76,6 +76,8 @@ for line in sys.stdin:
         }),
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     let temp_env = std::env::temp_dir().join(format!("suite_env_{}.env", uuid::Uuid::new_v4()));

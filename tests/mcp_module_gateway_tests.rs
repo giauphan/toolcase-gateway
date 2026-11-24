@@ -73,6 +73,8 @@ fn test_mcp_module_gateway_tools_and_resources_stdio() {
                 "required": ["city"]
             }),
         }]),
+        doc_url: None,
+        doc_content: None,
     };
 
     {
@@ -179,6 +181,8 @@ fn test_mcp_module_gateway_subprovider_tools_and_capabilities_synthesis() {
         }),
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     {
@@ -259,6 +263,8 @@ fn test_mcp_module_tool_call_over_streamable_http() {
                 }
             }),
         }]),
+        doc_url: None,
+        doc_content: None,
     };
 
     {
@@ -325,6 +331,8 @@ fn test_mcp_module_tool_call_over_sse_transport() {
             description: "Echo action".to_string(),
             input_schema: serde_json::json!({ "type": "object" }),
         }]),
+        doc_url: None,
+        doc_content: None,
     };
 
     {
@@ -443,6 +451,8 @@ fn test_mcp_module_gateway_local_http_tool_execution() {
             description: "Fetch remote data".to_string(),
             input_schema: serde_json::json!({ "type": "object" }),
         }]),
+        doc_url: None,
+        doc_content: None,
     };
 
     {

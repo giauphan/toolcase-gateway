@@ -116,6 +116,8 @@ mod tests {
             group: None,
             source: None,
             tools: None,
+            doc_url: None,
+            doc_content: None,
         };
         let cmd_sh = build_fallback_interpreter_command(&manifest_sh, None).expect("sh fallback");
         assert_eq!(cmd_sh.get_program(), "/bin/sh");
@@ -153,6 +155,8 @@ mod tests {
             group: None,
             source: None,
             tools: None,
+            doc_url: None,
+            doc_content: None,
         };
 
         let _cmd = build_command(&manifest, None);

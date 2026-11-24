@@ -233,6 +233,8 @@ fn test_dashboard_test_module_local_http() {
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
     {
         let reg = store.module_registry();
@@ -315,6 +317,8 @@ fn test_dashboard_test_module_facebook_suite_healthy() {
         group: None,
         source: Some("addons/facebook-suite".to_string()),
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
     {
         let reg = store.module_registry();

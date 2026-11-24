@@ -128,6 +128,13 @@ impl ModuleRegistry {
             manifest.short_name.clone(),
             None,
         );
+        let doc_url = manifest
+            .doc_url
+            .clone()
+            .or_else(|| Some(format!("/modules/{id}/doc")));
+        let doc_content = manifest.doc_content.clone();
+        manifest.doc_url = doc_url.clone();
+        manifest.doc_content = doc_content.clone();
         let desc = ModuleDescriptor {
             id: id.clone(),
             name: manifest.name.clone(),
@@ -150,10 +157,13 @@ impl ModuleRegistry {
             config_schema: Some(schema),
             source: manifest.source.clone(),
             tools: manifest.tools.clone(),
+            doc_url,
+            doc_content,
         };
 
         self.modules.insert(id.clone(), desc);
         self.personal_manifests.insert(id.clone(), manifest);
+        self.uninstalled.remove(&id);
         self.sync_module_config_from_disk(&id);
         Ok(())
     }
@@ -213,6 +223,18 @@ impl ModuleRegistry {
         let source = manifest.source.clone().or_else(|| existing.source.clone());
         manifest.source = source.clone();
 
+        let doc_url = manifest
+            .doc_url
+            .clone()
+            .or_else(|| existing.doc_url.clone())
+            .or_else(|| Some(format!("/modules/{id}/doc")));
+        let doc_content = manifest
+            .doc_content
+            .clone()
+            .or_else(|| existing.doc_content.clone());
+        manifest.doc_url = doc_url.clone();
+        manifest.doc_content = doc_content.clone();
+
         let desc = ModuleDescriptor {
             id: id.clone(),
             name: manifest.name.clone(),
@@ -235,13 +257,16 @@ impl ModuleRegistry {
             config_schema: Some(schema),
             source,
             tools: manifest.tools.clone(),
+            doc_url,
+            doc_content,
         };
 
         self.modules.insert(id.clone(), desc.clone());
         self.personal_manifests.insert(id.clone(), manifest);
         self.uninstalled.remove(&id);
         self.sync_module_config_from_disk(&id);
-        Ok(desc)
+        let final_desc = self.modules.get(&id).cloned().unwrap_or(desc);
+        Ok(final_desc)
     }
 
     /// Unregisters an installed personal module by id.

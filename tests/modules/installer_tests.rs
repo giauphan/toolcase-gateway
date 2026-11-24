@@ -213,6 +213,8 @@ fn test_unregistered_module_is_not_resurrected_by_scan() {
         source: None,
         group: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
     reg.register_personal_module(manifest).unwrap();
     assert!(reg.get_module("test-uninstalled-module").is_some());

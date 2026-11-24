@@ -208,6 +208,7 @@ impl ModuleRegistry {
                 entry.insert(k, v);
             }
         }
+        self.apply_documentation_projection(id);
     }
 
     fn write_disk_module_config(&self, id: &str) {
@@ -299,7 +300,54 @@ impl ModuleRegistry {
             }
         }
         self.write_disk_module_config(id);
+        self.apply_documentation_projection(id);
         Ok(())
+    }
+
+    /// Projects documentation configuration keys (`doc_url`, `doc_content`) into the module's
+    /// descriptor and personal manifest.
+    pub fn apply_documentation_projection(&mut self, id: &str) {
+        let (doc_url_opt, doc_content_opt) = match self.module_configs.get(id) {
+            Some(cfg) => {
+                let url = cfg.get("doc_url").and_then(|v| v.as_str()).map(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.is_empty() {
+                        format!("/modules/{id}/doc")
+                    } else {
+                        trimmed.to_string()
+                    }
+                });
+                let content = cfg.get("doc_content").and_then(|v| v.as_str()).map(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                });
+                (url, content)
+            }
+            None => (None, None),
+        };
+
+        if doc_url_opt.is_some() || doc_content_opt.is_some() {
+            if let Some(desc) = self.modules.get_mut(id) {
+                if let Some(url) = doc_url_opt {
+                    desc.doc_url = Some(url);
+                }
+                if let Some(content_res) = doc_content_opt {
+                    desc.doc_content = content_res;
+                }
+            }
+            if let Some(desc) = self.modules.get(id) {
+                let doc_url = desc.doc_url.clone();
+                let doc_content = desc.doc_content.clone();
+                if let Some(manifest) = self.personal_manifests.get_mut(id) {
+                    manifest.doc_url = doc_url;
+                    manifest.doc_content = doc_content;
+                }
+            }
+        }
     }
 
     /// Exports all per-module configurations for persistent storage.
@@ -324,6 +372,7 @@ impl ModuleRegistry {
         for (id, cfg) in map {
             self.module_configs.insert(id.clone(), cfg.clone());
             self.write_disk_module_config(id);
+            self.apply_documentation_projection(id);
         }
     }
 }

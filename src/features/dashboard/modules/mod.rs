@@ -1,10 +1,12 @@
 //! Dashboard personal module management handlers and route dispatchers.
 
+mod docs;
 mod queue;
 mod source;
 mod synthesis;
 mod testing;
 
+pub use docs::{handle_get_module_doc, handle_module_doc_page};
 pub use queue::{
     clear_all_upgrade_locks, get_in_flight_upgrades, try_acquire_upgrade,
     try_acquire_upgrade_with_ttl,

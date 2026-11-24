@@ -212,6 +212,8 @@ pub fn parse_or_synthesize_manifest(
                     group,
                     source: cat.source,
                     tools: None,
+                    doc_url: cat.doc_url,
+                    doc_content: cat.doc_content,
                 },
                 false,
             ));
@@ -259,6 +261,8 @@ pub fn parse_or_synthesize_manifest(
             group: None,
             source: payload.source.clone(),
             tools: None,
+            doc_url: None,
+            doc_content: None,
         },
         false,
     ))

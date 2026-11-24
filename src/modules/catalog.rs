@@ -20,6 +20,47 @@ pub struct SystemCatalogModule {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_content: Option<String>,
+}
+
+fn derive_catalog_docs(
+    id: &str,
+    name: &str,
+    namespace: &str,
+    capabilities: &[&str],
+    source: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let doc_url = match id {
+        "facebook-suite" => Some(
+            "https://github.com/giauphan/gateway-modules/tree/main/modules/facebook-suite#readme"
+                .to_string(),
+        ),
+        "tiktok-studio" => {
+            Some("https://github.com/giauphan/TikTok-Creator-Studio-Adapter#readme".to_string())
+        }
+        "daily-news" => Some(
+            "https://github.com/giauphan/gateway-modules/tree/main/modules/daily-news#readme"
+                .to_string(),
+        ),
+        "cohere-provider" => Some("https://docs.cohere.com".to_string()),
+        "claude-adapter" => Some("https://docs.anthropic.com".to_string()),
+        "groq-fast" => Some("https://console.groq.com/docs".to_string()),
+        "mistral-ai" => Some("https://docs.mistral.ai".to_string()),
+        _ => source
+            .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
+            .map(|s| format!("{s}#readme"))
+            .or_else(|| Some(format!("/modules/{id}/doc"))),
+    };
+
+    let caps_str = capabilities.join(", ");
+    let doc_content = format!(
+        "# {name}\n\n**Module ID**: `{id}`  \n**Route Prefix**: `{namespace}`  \n**Capabilities**: {caps_str}\n\n### Overview\nPre-configured gateway provider module ready for installation.\n\n### Endpoints\n- Route base: `{namespace}`\n"
+    );
+
+    (doc_url, Some(doc_content))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -34,6 +75,7 @@ fn rich_catalog_item(
     source: Option<&str>,
     config_schema: Option<serde_json::Value>,
 ) -> SystemCatalogModule {
+    let (doc_url, doc_content) = derive_catalog_docs(id, name, namespace, capabilities, source);
     SystemCatalogModule {
         id: id.to_string(),
         name: name.to_string(),
@@ -46,6 +88,8 @@ fn rich_catalog_item(
         icon: icon.map(ToString::to_string),
         source: source.map(ToString::to_string),
         config_schema,
+        doc_url,
+        doc_content,
     }
 }
 

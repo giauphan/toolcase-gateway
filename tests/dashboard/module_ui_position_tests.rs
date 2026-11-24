@@ -192,6 +192,8 @@ fn test_tiktok_creator_studio_adapter_alias_and_config_sync() {
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     store

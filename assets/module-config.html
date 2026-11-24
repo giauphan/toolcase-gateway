@@ -71,6 +71,7 @@
       <p class="subtitle" id="mod-subtitle">Automatic schema-driven UI configuration and Dashboard menu positioning.</p>
     </div>
     <div class="nav-links">
+      <a class="nav-link" id="view-doc-link" href="#" target="_blank" rel="noopener noreferrer">Docs ↗</a>
       <a class="nav-link" href="/dashboard#provider-settings">← Provider Settings</a>
       <a class="nav-link" href="/dashboard#modules-section">Installed Modules</a>
     </div>
@@ -248,6 +249,16 @@
     if (type === "number") {
       return renderNumberField(field, inputId, label, desc, configValues, stateRef);
     }
+    if (type === "textarea") {
+      const placeholder = field.placeholder || "";
+      const curVal = configValues[key] !== undefined ? String(configValues[key]) : "";
+      if (curVal) stateRef.hasConfigured = true;
+      return "<div class=\"field-group\" style=\"grid-column: 1 / -1;\">" +
+        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+        "<textarea id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"textarea\" rows=\"4\" placeholder=\"" + escapeHtml(placeholder) + "\">" + escapeHtml(curVal) + "</textarea>" +
+        (desc ? ("<div class=\"hint\">" + escapeHtml(desc) + "</div>") : "") +
+      "</div>";
+    }
     return renderTextField(field, inputId, label, desc, configValues, stateRef);
   }
 
@@ -319,6 +330,12 @@
         statusBadge.textContent = modStatus;
         statusBadge.className = "badge " + (modStatus === "enabled" ? "badge-ok" : "badge-idle");
         nsCode.textContent = d.namespace || "/";
+        const viewDocLink = document.getElementById("view-doc-link");
+        if (viewDocLink) {
+          const docUrl = d.doc_url || ("/modules/" + moduleId + "/doc");
+          viewDocLink.href = docUrl;
+          viewDocLink.title = "View documentation for " + (d.name || moduleId);
+        }
         menuPosEl.value = d.menu_position || "providers";
         menuOrderEl.value = d.menu_order != null ? d.menu_order : 100;
         const schema = d.config_schema || {};

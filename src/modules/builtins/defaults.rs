@@ -86,6 +86,51 @@ pub fn register_default_builtins(registry: &mut ModuleRegistry) {
     );
 }
 
+fn builtin_docs(id: &str, name: &str, namespace: &str) -> (Option<String>, Option<String>) {
+    let doc_url = Some(format!("/modules/{id}/doc"));
+    let doc_content = match id {
+        "omniroute" => Some(
+            "# OmniRoute LLM Proxy\n\n\
+            OpenAI-compatible reverse proxy with dynamic model fallback, casing normalization, and stream repair.\n\n\
+            ### Endpoints\n\
+            - `POST /ominroute/v1/chat/completions`: Chat completions proxy\n\
+            - `GET /ominroute/v1/models`: Upstream model listing\n\
+            - `GET /ominroute/dashboard`: OmniRoute embedded dashboard\n\n\
+            ### Documentation\n\
+            Official gateway documentation available in `docs/ARCHITECTURE.md`.\n"
+                .to_string(),
+        ),
+        "muse" => Some(
+            "# Muse AI Provider\n\n\
+            Chat completions, image and video pipeline with Sentinel approvals and thread cleanup cronjob.\n\n\
+            ### Endpoints\n\
+            - `POST /muse-ai/chat`: Chat completions\n\
+            - `POST /muse-ai/image`: Image synthesis\n\
+            - `POST /muse-ai/video`: Video synthesis\n\
+            - `GET /muse-ai/threads`: Active thread listing\n\
+            - `GET /muse-config`: Standalone Muse configuration page\n\n\
+            ### Documentation\n\
+            Official guide available in `docs/muse-video-generation.md`.\n"
+                .to_string(),
+        ),
+        "jev" => Some(
+            "# Jev Decision Provider\n\n\
+            High-reliability decision evaluation gateway with pooled multi-account rotation and failover.\n\n\
+            ### Endpoints\n\
+            - `POST /jev/decisions`: Parallel decision evaluation\n\
+            - `GET /jev/models`: Model availability check\n\
+            - `GET /modules/jev/config`: Jev UI configuration\n\n\
+            ### Documentation\n\
+            Official guide available in `docs/JEV_INTEGRATION.md`.\n"
+                .to_string(),
+        ),
+        _ => Some(format!(
+            "# {name}\n\nBuilt-in platform module routed at `{namespace}`.\n"
+        )),
+    };
+    (doc_url, doc_content)
+}
+
 fn register_builtin(
     registry: &mut ModuleRegistry,
     id: &str,
@@ -96,6 +141,7 @@ fn register_builtin(
 ) {
     let clean_ns = namespace.trim_end_matches('/').to_string();
     let (order, icon, desc, config_url, tab, schema) = builtin_ui_defaults(id, name, &clean_ns);
+    let (doc_url, doc_content) = builtin_docs(id, name, &clean_ns);
     let short_name = match id {
         "omniroute" => Some("OmniRoute".to_string()),
         "muse" => Some("Muse AI".to_string()),
@@ -121,5 +167,7 @@ fn register_builtin(
         config_schema: schema,
         source: None,
         tools: None,
+        doc_url,
+        doc_content,
     });
 }

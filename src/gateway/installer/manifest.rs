@@ -159,6 +159,8 @@ fn auto_synthesize_manifest(
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     })
 }
 

@@ -199,6 +199,8 @@ pub fn handle_get_module_config(
         "icon": desc.icon,
         "description": desc.description,
         "config_url": desc.config_url,
+        "doc_url": desc.doc_url,
+        "doc_content": desc.doc_content,
         "settings_tab": desc.settings_tab,
         "config_schema": schema,
         "config": merged_cfg,

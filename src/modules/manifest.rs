@@ -125,6 +125,10 @@ pub struct PersonalManifest {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ModuleToolDefinition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_content: Option<String>,
 }
 
 impl Default for PersonalManifest {
@@ -144,6 +148,8 @@ impl Default for PersonalManifest {
             group: None,
             source: None,
             tools: None,
+            doc_url: None,
+            doc_content: None,
         }
     }
 }
@@ -248,6 +254,20 @@ pub fn default_module_config_schema(id: &str, name: &str, namespace: &str) -> se
                 "type": "number",
                 "default": 30,
                 "description": "Maximum execution time in seconds"
+            },
+            {
+                "key": "doc_url",
+                "label": "Documentation URL / Path",
+                "type": "text",
+                "placeholder": "https://... or /docs/...",
+                "description": "External documentation URL or path reference"
+            },
+            {
+                "key": "doc_content",
+                "label": "Document Content Block (Markdown/Text)",
+                "type": "textarea",
+                "placeholder": "# Module Overview\n\nUsage and API endpoints...",
+                "description": "Inline documentation block displayed at the module's documentation route"
             }
         ]
     })
@@ -286,6 +306,10 @@ pub struct ModuleDescriptor {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ModuleToolDefinition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_content: Option<String>,
 }
 
 pub fn builtin_ui_defaults(

@@ -999,6 +999,7 @@
 
     const tabTarget = module.settings_tab || (module.id === "omniroute" ? "omni" : module.id);
     const cfgUrl = module.config_url || ("/modules/" + module.id + "/config");
+    const docUrl = module.doc_url || ("/modules/" + module.id + "/doc");
 
     moduleDetailContent.innerHTML =
       "<div class=\"formgroup\">" +
@@ -1008,6 +1009,8 @@
         (module.version ? ("<div><strong>Version:</strong> <span class=\"pill gray\">" + escapeHtml(module.version) + "</span></div>") : "") +
         (module.source ? ("<div><strong>Source:</strong> <code>" + escapeHtml(module.source) + "</code></div>") : "") +
         "<div><strong>Route Namespace:</strong> <code>" + escapeHtml(module.namespace) + "</code></div>" +
+        "<div><strong>Documentation Path / URL:</strong> <a href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\"><code>" + escapeHtml(docUrl) + "</code> ↗</a></div>" +
+        (module.doc_content ? ("<div style=\"margin-top:6px;\"><strong>Document Block:</strong><pre style=\"max-height:120px;overflow-y:auto;background:#0d1017;padding:8px 12px;border-radius:6px;border:1px solid #232a3b;font-size:0.8rem;white-space:pre-wrap;margin-top:4px;color:#cbd5e1;\">" + escapeHtml(module.doc_content) + "</pre></div>") : "") +
         "<div><strong>Status:</strong> <span class=\"pill " + (module.status === "enabled" ? "good" : "gray") + "\">" + escapeHtml(module.status) + "</span></div>" +
         "<div><strong>Capabilities:</strong><br>" + capabilities + "</div>" +
         "<div><strong>Nested Providers:</strong><ul>" + providers + "</ul></div>" +
@@ -1015,6 +1018,7 @@
           "<button class=\"btn module-test\" data-module-id=\"" + escapeHtml(module.id) + "\">Test Module</button> " +
           (module.kind !== "builtin" ? ("<button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(module.id) + "\">Upgrade Module</button> ") : "") +
           "<a class=\"btn primary btn-primary\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Configure in Provider Settings</a> " +
+          "<a class=\"btn\" href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\">View Docs ↗</a> " +
           "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config ↗</a>" +
         "</div>" +
       "</div>";
@@ -1080,6 +1084,7 @@
     const toggleBtn = "<button class=\"btn module-toggle\" data-module-id=\"" + escapeHtml(m.id) + "\" data-enable=\"" + toggleAction + "\"" + busyAttr + ">" + toggleLabel + "</button>";
     const tabTarget = m.settings_tab || (m.id === "omniroute" ? "omni" : m.id);
     const cfgUrl = m.config_url || ("/modules/" + m.id + "/config");
+    const docUrl = m.doc_url || ("/modules/" + m.id + "/doc");
     const curPos = m.menu_position || "providers";
     const posOptions = renderMenuPositionOptions(curPos);
     const posSelect = " <select class=\"field module-pos-select\" data-module-id=\"" + escapeHtml(m.id) + "\" aria-label=\"Menu position for " + escapeHtml(m.name) + "\"" + busyAttr + ">" +
@@ -1089,9 +1094,10 @@
       " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
     const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
       " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
+    const docBtn = " <a class=\"btn module-doc-btn\" href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\" title=\"View documentation for " + escapeHtml(m.name) + "\">Docs ↗</a>";
     const testBtn = " <button class=\"btn module-test\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Test module execution and health\">Test</button>";
     const personalBtns = !isBuiltin ? renderPersonalModuleActions(m.id, busyAttr) : "";
-    return toggleBtn + testBtn + configBtns + posSelect + orderBtns + personalBtns;
+    return toggleBtn + testBtn + configBtns + docBtn + posSelect + orderBtns + personalBtns;
   }
 
   function renderModules(modules, isFiltered) {
@@ -1203,6 +1209,9 @@
         if (qItem.status === "upgrading") upgDisabled += " aria-busy=\"true\"";
       }
 
+      const docUrl = item.doc_url || ("/modules/" + item.id + "/doc");
+      const docLink = " <a class=\"btn catalog-doc-btn\" href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\" title=\"View documentation\">Docs ↗</a>";
+
       return "<div class=\"card catalogitem\">" +
         "<span class=\"pill gray\">Catalog template</span>" +
         versionBadge +
@@ -1212,6 +1221,7 @@
           (isInstalled
             ? "<span class=\"pill good\">Installed</span> <button class=\"btn catalog-upgrade-btn\" data-catalog-id=\"" + escapeHtml(item.id) + "\"" + upgDisabled + " title=\"Upgrade to latest version\">" + upgBtnLabel + "</button>"
             : "<button class=\"btn catalog-install-btn\" data-catalog-id=\"" + escapeHtml(item.id) + "\">Explore &amp; install</button>") +
+          docLink +
         "</div>" +
       "</div>";
     }).join("");
@@ -1384,6 +1394,14 @@
         "<input type=\"number\" id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"number\" value=\"" + escapeHtml(numVal) + "\">" +
       "</div>";
     }
+    if (type === "textarea") {
+      const strVal = cfg[key] != null ? String(cfg[key]) : "";
+      return "<div class=\"field-group formgroup\" style=\"grid-column: 1 / -1;\">" +
+        "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
+        "<textarea id=\"" + escapeHtml(inputId) + "\" data-key=\"" + escapeHtml(key) + "\" data-type=\"textarea\" rows=\"4\" placeholder=\"" + escapeHtml(f.placeholder || "") + "\">" + escapeHtml(strVal) + "</textarea>" +
+        (f.description ? ("<div class=\"hint\">" + escapeHtml(f.description) + "</div>") : "") +
+      "</div>";
+    }
     const strVal = cfg[key] != null ? String(cfg[key]) : "";
     return "<div class=\"field-group formgroup\">" +
       "<label for=\"" + escapeHtml(inputId) + "\">" + escapeHtml(label) + "</label>" +
@@ -1507,6 +1525,8 @@
             "</div>")
           : "";
 
+        const docUrl = m.doc_url || ("/modules/" + m.id + "/doc");
+
         return "<div class=\"provider-panel" + (isCurrent ? "" : " is-hidden") + "\" id=\"panel-" + escapeHtml(m.id) + "\" role=\"tabpanel\" aria-labelledby=\"tab-" + escapeHtml(m.id) + "\">" +
           "<div class=\"card-header\">" +
             "<h2>" + escapeHtml(m.name) + " Configuration</h2>" +
@@ -1518,6 +1538,7 @@
             harHtml +
             "<div class=\"btns\">" +
               "<button type=\"submit\" class=\"btn primary btn-primary\">Save " + escapeHtml(m.name) + " Settings</button>" +
+              "<a class=\"btn\" href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Docs (" + escapeHtml(docUrl) + ") ↗</a>" +
               "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config (" + escapeHtml(cfgUrl) + ") ↗</a>" +
             "</div>" +
           "</form>" +

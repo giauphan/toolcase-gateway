@@ -46,6 +46,8 @@ fn test_sqlite_storage_lifecycle_and_migration() {
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
     storage.save_module(&manifest).unwrap();
     let modules = storage.get_modules().unwrap();
@@ -140,6 +142,8 @@ fn test_sqlite_module_enabled_status_lifecycle() {
         group: None,
         source: None,
         tools: None,
+        doc_url: None,
+        doc_content: None,
     };
 
     // 1. Save module with status false (disabled)
