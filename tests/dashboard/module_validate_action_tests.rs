@@ -169,3 +169,35 @@ fn test_dashboard_validate_module_direct_payload() {
 
     let _ = fs::remove_file(&tmp_env);
 }
+
+#[test]
+fn test_dashboard_validate_module_empty_source_string_treated_as_direct() {
+    let tmp_env = std::env::temp_dir().join(format!("test_val_env_{}.env", uuid::Uuid::new_v4()));
+    let store = ConfigStore::new(test_config(), tmp_env.clone());
+
+    let validate_payload = serde_json::json!({
+        "source": "   ",
+        "id": "whitespace-src-mod",
+        "namespace": "/custom/ws-src",
+        "entrypoint": "http://127.0.0.1:9090",
+        "protocol": "local-http",
+        "capabilities": ["custom_cap_1", "custom_cap_2"]
+    });
+    let (head, body) = request_gateway(
+        "POST",
+        "/api/v1/dashboard/modules/validate",
+        &serde_json::to_vec(&validate_payload).unwrap(),
+        &store,
+    );
+    assert_eq!(head.status, 200);
+    let res: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(res["ok"], true);
+    assert_eq!(res["valid"], true);
+    assert_eq!(res["module"]["id"], "whitespace-src-mod");
+    assert_eq!(
+        res["module"]["capabilities"],
+        serde_json::json!(["custom_cap_1", "custom_cap_2"])
+    );
+
+    let _ = fs::remove_file(&tmp_env);
+}

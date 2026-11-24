@@ -1777,11 +1777,11 @@
               " &nbsp;|&nbsp; <strong>Namespace:</strong> <code>" + escapeHtml(mod.namespace || "") + "</code>" +
               " &nbsp;|&nbsp; <strong>Entrypoint:</strong> " + escapeHtml(mod.entrypoint_type || "detected") +
               "</div>";
-            if (data.warnings && data.warnings.length) {
-              infoHtml += "<div style=\"color:#e2a03f;margin-top:0.25rem;\"><strong>Notice:</strong> " + escapeHtml(data.warnings.join("; ")) + "</div>";
+            if (Array.isArray(data.warnings) && data.warnings.length) {
+              infoHtml += "<div class=\"warning-hint\"><strong>Notice:</strong> " + escapeHtml(data.warnings.join("; ")) + "</div>";
             }
-            if (data.diagnostics && data.diagnostics.length) {
-              infoHtml += "<div style=\"color:rgba(255,255,255,0.5);font-size:0.8rem;margin-top:0.25rem;\">" + escapeHtml(data.diagnostics.join(" • ")) + "</div>";
+            if (Array.isArray(data.diagnostics) && data.diagnostics.length) {
+              infoHtml += "<div class=\"diag-hint\">" + escapeHtml(data.diagnostics.join(" • ")) + "</div>";
             }
             modValDetails.innerHTML = infoHtml;
           }

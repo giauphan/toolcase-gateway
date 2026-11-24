@@ -22,6 +22,8 @@ pub struct InstallPayload {
     pub protocol: Option<String>,
     #[serde(default)]
     pub branch: Option<String>,
+    #[serde(default)]
+    pub capabilities: Option<Vec<String>>,
 }
 
 pub fn generate_module_adapter_script(target_dir: &std::path::Path) -> io::Result<String> {
@@ -133,6 +135,116 @@ pub fn resolve_entrypoint_path(payload_entrypoint: Option<String>, id: &str) -> 
     abs.to_string_lossy().to_string()
 }
 
+pub fn parse_or_synthesize_manifest_non_destructive(
+    body: &[u8],
+    payload: &InstallPayload,
+) -> Result<PersonalManifest, String> {
+    if let Ok(m) = serde_json::from_slice::<PersonalManifest>(body) {
+        return Ok(m);
+    }
+    if let Some(target_id) = payload.id.as_deref().or(payload.namespace.as_deref()) {
+        if let Some(cat) = crate::gateway::modules::get_system_module_catalog()
+            .into_iter()
+            .find(|c| c.id == target_id || c.namespace == target_id)
+        {
+            let ep = resolve_entrypoint_path(payload.entrypoint.clone(), &cat.id);
+            let group = if cat.id == "suite-test" {
+                Some(crate::gateway::modules::ModuleGroupManifest {
+                    enabled: true,
+                    providers: vec![
+                        crate::gateway::modules::SubProviderManifest {
+                            id: "chat".to_string(),
+                            name: "Chat Provider".to_string(),
+                            subpath: "/chat".to_string(),
+                            capabilities: vec!["chat_completions".to_string()],
+                            tools: None,
+                        },
+                        crate::gateway::modules::SubProviderManifest {
+                            id: "vision".to_string(),
+                            name: "Vision Provider".to_string(),
+                            subpath: "/vision".to_string(),
+                            capabilities: vec!["vision".to_string()],
+                            tools: None,
+                        },
+                    ],
+                })
+            } else {
+                None
+            };
+            let capabilities = payload
+                .capabilities
+                .clone()
+                .unwrap_or_else(|| cat.capabilities.clone());
+            return Ok(PersonalManifest {
+                id: cat.id,
+                name: cat.name,
+                short_name: cat.short_name,
+                version: cat.version,
+                namespace: cat.namespace,
+                entrypoint: ep,
+                protocol: cat.protocol,
+                capabilities,
+                icon: cat.icon,
+                config_schema: cat.config_schema,
+                permissions: Vec::new(),
+                group,
+                source: cat.source,
+                tools: None,
+                doc_url: cat.doc_url,
+                doc_content: cat.doc_content,
+            });
+        }
+    }
+    let ns = payload
+        .namespace
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            "Route Path URL Prefix (namespace) is required (e.g. /custom/my-tool)".to_string()
+        })?;
+    let id = payload.id.clone().unwrap_or_else(|| {
+        let clean = ns.trim_matches('/').replace('/', "-");
+        let filtered: String = clean
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !filtered.is_empty() {
+            filtered
+        } else {
+            format!("mod-{}", &uuid::Uuid::new_v4().to_string()[..8])
+        }
+    });
+    let name = payload.name.clone().unwrap_or_else(|| id.clone());
+    let entrypoint = resolve_entrypoint_path(payload.entrypoint.clone(), &id);
+    let protocol = payload
+        .protocol
+        .clone()
+        .unwrap_or_else(|| "stdio-stream".to_string());
+    let capabilities = payload
+        .capabilities
+        .clone()
+        .unwrap_or_else(|| vec!["chat_completions".to_string(), "models".to_string()]);
+    Ok(PersonalManifest {
+        id,
+        name,
+        short_name: None,
+        version: "0.1.0".to_string(),
+        namespace: ns.to_string(),
+        entrypoint,
+        protocol,
+        capabilities,
+        icon: None,
+        config_schema: None,
+        permissions: Vec::new(),
+        group: None,
+        source: payload.source.clone(),
+        tools: None,
+        doc_url: None,
+        doc_content: None,
+    })
+}
+
 pub fn parse_or_synthesize_manifest(
     body: &[u8],
     payload: &InstallPayload,
@@ -169,101 +281,13 @@ pub fn parse_or_synthesize_manifest(
                     if m.config_schema.is_none() {
                         m.config_schema = cat.config_schema.clone();
                     }
+                    if let Some(caps) = payload.capabilities.clone() {
+                        m.capabilities = caps;
+                    }
                     return Ok((m, true));
                 }
             }
-            let ep = resolve_entrypoint_path(payload.entrypoint.clone(), &cat.id);
-            let group = if cat.id == "suite-test" {
-                Some(crate::gateway::modules::ModuleGroupManifest {
-                    enabled: true,
-                    providers: vec![
-                        crate::gateway::modules::SubProviderManifest {
-                            id: "chat".to_string(),
-                            name: "Chat Provider".to_string(),
-                            subpath: "/chat".to_string(),
-                            capabilities: vec!["chat_completions".to_string()],
-                            tools: None,
-                        },
-                        crate::gateway::modules::SubProviderManifest {
-                            id: "vision".to_string(),
-                            name: "Vision Provider".to_string(),
-                            subpath: "/vision".to_string(),
-                            capabilities: vec!["vision".to_string()],
-                            tools: None,
-                        },
-                    ],
-                })
-            } else {
-                None
-            };
-            return Ok((
-                PersonalManifest {
-                    id: cat.id,
-                    name: cat.name,
-                    short_name: cat.short_name,
-                    version: cat.version,
-                    namespace: cat.namespace,
-                    entrypoint: ep,
-                    protocol: cat.protocol,
-                    capabilities: cat.capabilities,
-                    icon: cat.icon,
-                    config_schema: cat.config_schema,
-                    permissions: Vec::new(),
-                    group,
-                    source: cat.source,
-                    tools: None,
-                    doc_url: cat.doc_url,
-                    doc_content: cat.doc_content,
-                },
-                false,
-            ));
         }
     }
-    let ns = payload
-        .namespace
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            "Route Path URL Prefix (namespace) is required (e.g. /custom/my-tool)".to_string()
-        })?;
-    let id = payload.id.clone().unwrap_or_else(|| {
-        let clean = ns.trim_matches('/').replace('/', "-");
-        let filtered: String = clean
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .collect();
-        if !filtered.is_empty() {
-            filtered
-        } else {
-            format!("mod-{}", &uuid::Uuid::new_v4().to_string()[..8])
-        }
-    });
-    let name = payload.name.clone().unwrap_or_else(|| id.clone());
-    let entrypoint = resolve_entrypoint_path(payload.entrypoint.clone(), &id);
-    let protocol = payload
-        .protocol
-        .clone()
-        .unwrap_or_else(|| "stdio-stream".to_string());
-    Ok((
-        PersonalManifest {
-            id,
-            name,
-            short_name: None,
-            version: "0.1.0".to_string(),
-            namespace: ns.to_string(),
-            entrypoint,
-            protocol,
-            capabilities: vec!["chat_completions".to_string(), "models".to_string()],
-            icon: None,
-            config_schema: None,
-            permissions: Vec::new(),
-            group: None,
-            source: payload.source.clone(),
-            tools: None,
-            doc_url: None,
-            doc_content: None,
-        },
-        false,
-    ))
+    parse_or_synthesize_manifest_non_destructive(body, payload).map(|m| (m, false))
 }

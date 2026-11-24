@@ -16,7 +16,19 @@ pub fn handle_validate_module_config(
     store: &ConfigStore,
 ) -> io::Result<()> {
     let payload = serde_json::from_slice::<InstallPayload>(body).unwrap_or_default();
-    let has_direct_source = payload.source.is_some() || payload.zip_base64.is_some();
+    let clean_source = payload
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let clean_zip = payload
+        .zip_base64
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let has_direct_source = clean_source.is_some() || clean_zip.is_some();
 
     let reg = store.module_registry();
     let reg_guard = match reg.read() {
@@ -29,9 +41,9 @@ pub fn handle_validate_module_config(
     let state_dir = get_state_dir();
 
     let report_result = if has_direct_source {
-        let source = if let Some(ref s) = payload.source {
+        let source = if let Some(ref s) = clean_source {
             crate::gateway::installer::resolve_source(s)
-        } else if let Some(ref b64) = payload.zip_base64 {
+        } else if let Some(ref b64) = clean_zip {
             match crate::gateway::installer::decode_base64(b64) {
                 Ok(bytes) => InstallSource::ZipBytes(bytes),
                 Err(e) => return write_error(client, 400, "Bad Request", &e),
@@ -51,23 +63,47 @@ pub fn handle_validate_module_config(
 
         validate_module_source(&source, &opts, &state_dir, &registered_modules)
     } else {
-        match super::synthesis::parse_or_synthesize_manifest(body, &payload) {
-            Ok((manifest, _)) => validate_module_manifest_direct(&manifest, &registered_modules),
-            Err(e) => {
-                let resp = serde_json::json!({
-                    "ok": false,
-                    "valid": false,
-                    "message": e,
-                    "diagnostics": vec![format!("Failed to parse or synthesize configuration: {e}")],
-                });
-                let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
-                write!(
-                    client,
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    resp_bytes.len()
-                )?;
-                client.write_all(&resp_bytes)?;
-                return client.flush();
+        let catalog_source = payload
+            .id
+            .as_deref()
+            .or(payload.namespace.as_deref())
+            .and_then(|target_id| {
+                crate::gateway::modules::get_system_module_catalog()
+                    .into_iter()
+                    .find(|c| c.id == target_id || c.namespace == target_id)
+                    .and_then(|c| c.source.map(|s| (c.id, c.name, c.namespace, c.protocol, s)))
+            });
+
+        if let Some((cat_id, cat_name, cat_ns, cat_proto, cat_src)) = catalog_source {
+            let source = crate::gateway::installer::resolve_source(&cat_src);
+            let opts = InstallOptions {
+                id: payload.id.or(Some(cat_id)),
+                name: payload.name.or(Some(cat_name)),
+                namespace: payload.namespace.or(Some(cat_ns)),
+                entrypoint: payload.entrypoint,
+                protocol: payload.protocol.or(Some(cat_proto)),
+                branch: payload.branch,
+            };
+            validate_module_source(&source, &opts, &state_dir, &registered_modules)
+        } else {
+            match super::synthesis::parse_or_synthesize_manifest_non_destructive(body, &payload) {
+                Ok(manifest) => validate_module_manifest_direct(&manifest, &registered_modules),
+                Err(e) => {
+                    let resp = serde_json::json!({
+                        "ok": false,
+                        "valid": false,
+                        "message": e,
+                        "diagnostics": vec![format!("Failed to parse or synthesize configuration: {e}")],
+                    });
+                    let resp_bytes = serde_json::to_vec(&resp).unwrap_or_default();
+                    write!(
+                        client,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        resp_bytes.len()
+                    )?;
+                    client.write_all(&resp_bytes)?;
+                    return client.flush();
+                }
             }
         }
     };

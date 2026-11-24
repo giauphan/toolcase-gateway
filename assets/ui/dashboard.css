@@ -1361,3 +1361,8 @@ body .mt-12,
   color: #e2a03f;
   margin-top: 0.25rem;
 }
+.diag-hint {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}

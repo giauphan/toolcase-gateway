@@ -22,7 +22,16 @@ struct StagingDirGuard<'a>(&'a Path);
 impl<'a> Drop for StagingDirGuard<'a> {
     fn drop(&mut self) {
         if self.0.exists() {
-            let _ = fs::remove_dir_all(self.0);
+            if let Err(e) = fs::remove_dir_all(self.0) {
+                crate::runtime::logger::log_message(
+                    "WARN",
+                    "validation",
+                    &format!(
+                        "failed to cleanup validation staging directory '{}': {e}",
+                        self.0.display()
+                    ),
+                );
+            }
         }
     }
 }
@@ -86,15 +95,10 @@ fn check_manifest_file_exists(staging_dir: &Path) -> bool {
 pub fn validate_module_source(
     source: &InstallSource,
     options: &InstallOptions,
-    state_dir: &Path,
+    _state_dir: &Path,
     registered_modules: &HashMap<String, ModuleDescriptor>,
 ) -> Result<ModuleValidationReport, ModuleError> {
-    let modules_root = state_dir.join("modules");
-    fs::create_dir_all(&modules_root)
-        .map_err(|e| ModuleError::InvalidManifest(format!("Failed to create modules root: {e}")))?;
-
-    let staging_id = format!("stage_val_{}", uuid::Uuid::new_v4());
-    let staging_dir = modules_root.join(&staging_id);
+    let staging_dir = std::env::temp_dir().join(format!("gw_val_stage_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&staging_dir)
         .map_err(|e| ModuleError::InvalidManifest(format!("Failed to create staging dir: {e}")))?;
 
@@ -129,15 +133,16 @@ pub fn validate_module_source(
     let entrypoint_type = detect_staging_entrypoint_type(&staging_dir, &manifest);
     diagnostics.push(format!("Detected entrypoint type: {entrypoint_type}"));
 
-    // Check if this module is already installed
-    let is_update = registered_modules.contains_key(&manifest.id);
+    // Check if this module is already registered and validate ID
+    let is_update = registered_modules
+        .get(&manifest.id)
+        .is_some_and(|m| m.kind == crate::gateway::modules::ModuleKind::Personal);
+    validate_module_id(&manifest.id, registered_modules)?;
     if is_update {
         warnings.push(format!(
             "Module '{}' is already registered; installing will replace existing code",
             manifest.id
         ));
-    } else {
-        validate_module_id(&manifest.id, registered_modules)?;
     }
 
     // Validate namespace
@@ -194,14 +199,15 @@ pub fn validate_module_manifest_direct(
     let mut warnings = Vec::new();
     let mut diagnostics = Vec::new();
 
-    let is_update = registered_modules.contains_key(&manifest.id);
+    let is_update = registered_modules
+        .get(&manifest.id)
+        .is_some_and(|m| m.kind == crate::gateway::modules::ModuleKind::Personal);
+    validate_module_id(&manifest.id, registered_modules)?;
     if is_update {
         warnings.push(format!(
             "Module '{}' is already registered; installing will replace existing configuration",
             manifest.id
         ));
-    } else {
-        validate_module_id(&manifest.id, registered_modules)?;
     }
 
     let ns_trimmed = manifest.namespace.trim().trim_end_matches('/');
@@ -231,6 +237,8 @@ pub fn validate_module_manifest_direct(
         "shell-script".to_string()
     } else if manifest.entrypoint.ends_with(".py") {
         "python-script".to_string()
+    } else if manifest.entrypoint.ends_with(".js") {
+        "node-script".to_string()
     } else {
         "custom-binary".to_string()
     };
@@ -326,6 +334,81 @@ mod tests {
         let registered = HashMap::new();
         let err = validate_module_manifest_direct(&manifest, &registered).unwrap_err();
         assert!(matches!(err, ModuleError::InvalidId(_)));
+    }
+
+    #[test]
+    fn test_validate_module_manifest_direct_rejects_builtin_override() {
+        let manifest = PersonalManifest {
+            id: "system-core".to_string(),
+            name: "Override Core".to_string(),
+            short_name: None,
+            version: "1.0.0".to_string(),
+            namespace: "/custom/core".to_string(),
+            entrypoint: "/bin/sh".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            icon: None,
+            config_schema: None,
+            permissions: vec![],
+            group: None,
+            source: None,
+            tools: None,
+            doc_url: None,
+            doc_content: None,
+        };
+        let mut registered = HashMap::new();
+        registered.insert(
+            "system-core".to_string(),
+            ModuleDescriptor {
+                id: "system-core".to_string(),
+                name: "System Core".to_string(),
+                short_name: None,
+                namespace: "/core".to_string(),
+                kind: crate::gateway::modules::ModuleKind::BuiltIn,
+                status: crate::gateway::modules::ModuleStatus::Enabled,
+                capabilities: vec![],
+                version: Some("1.0.0".to_string()),
+                providers: None,
+                menu_position: "modules".to_string(),
+                menu_order: 1,
+                icon: None,
+                description: None,
+                config_url: None,
+                settings_tab: None,
+                config_schema: None,
+                source: None,
+                tools: None,
+                doc_url: None,
+                doc_content: None,
+            },
+        );
+        let err = validate_module_manifest_direct(&manifest, &registered).unwrap_err();
+        assert!(matches!(err, ModuleError::InvalidId(_)));
+    }
+
+    #[test]
+    fn test_validate_module_manifest_direct_js_entrypoint() {
+        let manifest = PersonalManifest {
+            id: "my-node-mod".to_string(),
+            name: "Node Mod".to_string(),
+            short_name: None,
+            version: "1.0.0".to_string(),
+            namespace: "/custom/node".to_string(),
+            entrypoint: "/usr/local/bin/index.js".to_string(),
+            protocol: "stdio-stream".to_string(),
+            capabilities: vec![],
+            icon: None,
+            config_schema: None,
+            permissions: vec![],
+            group: None,
+            source: None,
+            tools: None,
+            doc_url: None,
+            doc_content: None,
+        };
+        let registered = HashMap::new();
+        let report = validate_module_manifest_direct(&manifest, &registered).unwrap();
+        assert_eq!(report.entrypoint_type, "node-script");
     }
 
     #[test]
