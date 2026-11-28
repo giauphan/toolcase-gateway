@@ -1061,6 +1061,9 @@
     const tabTarget = module.settings_tab || (module.id === "omniroute" ? "omni" : module.id);
     const cfgUrl = module.config_url || ("/modules/" + module.id + "/config");
     const docUrl = module.doc_url || ("/modules/" + module.id + "/doc");
+    const dashUrl = (module.kind !== "builtin" && module.namespace && module.namespace.startsWith("/custom/"))
+      ? (module.namespace.replace(/\/+$/, "") + "/ui")
+      : null;
 
     moduleDetailContent.innerHTML =
       "<div class=\"formgroup\">" +
@@ -1080,6 +1083,7 @@
           (module.kind !== "builtin" ? ("<button class=\"btn module-upgrade\" data-module-id=\"" + escapeHtml(module.id) + "\">Upgrade Module</button> ") : "") +
           "<a class=\"btn primary btn-primary\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Configure in Provider Settings</a> " +
           "<a class=\"btn\" href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\">View Docs ↗</a> " +
+          (dashUrl ? ("<a class=\"btn primary btn-primary\" href=\"" + escapeHtml(dashUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Open Dashboard ↗</a> ") : "") +
           "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config ↗</a>" +
         "</div>" +
       "</div>";
@@ -1153,7 +1157,11 @@
     "</select>";
     const orderBtns = " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"up\" title=\"Move up in menu\"" + busyAttr + ">↑</button>" +
       " <button class=\"btn module-move\" data-module-id=\"" + escapeHtml(m.id) + "\" data-direction=\"down\" title=\"Move down in menu\"" + busyAttr + ">↓</button>";
+    const dashUrl = (!isBuiltin && m.namespace && m.namespace.startsWith("/custom/"))
+      ? (m.namespace.replace(/\/+$/, "") + "/ui")
+      : null;
     const configBtns = " <a class=\"btn\" data-go=\"providers\" data-tab=\"" + escapeHtml(tabTarget) + "\" href=\"#provider-settings\">Settings</a>" +
+      (dashUrl ? (" <a class=\"btn primary btn-primary\" href=\"" + escapeHtml(dashUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\" title=\"Open module dashboard (" + escapeHtml(dashUrl) + ")\">Dashboard ↗</a>") : "") +
       " <a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">UI Config ↗</a>";
     const docBtn = " <a class=\"btn module-doc-btn\" href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\" title=\"View documentation for " + escapeHtml(m.name) + "\">Docs ↗</a>";
     const testBtn = " <button class=\"btn module-test\" data-module-id=\"" + escapeHtml(m.id) + "\"" + busyAttr + " title=\"Test module execution and health\">Test</button>";
@@ -1587,6 +1595,9 @@
           : "";
 
         const docUrl = m.doc_url || ("/modules/" + m.id + "/doc");
+        const dashUrl = (m.kind !== "builtin" && m.namespace && m.namespace.startsWith("/custom/"))
+          ? (m.namespace.replace(/\/+$/, "") + "/ui")
+          : null;
 
         return "<div class=\"provider-panel" + (isCurrent ? "" : " is-hidden") + "\" id=\"panel-" + escapeHtml(m.id) + "\" role=\"tabpanel\" aria-labelledby=\"tab-" + escapeHtml(m.id) + "\">" +
           "<div class=\"card-header\">" +
@@ -1599,6 +1610,7 @@
             harHtml +
             "<div class=\"btns\">" +
               "<button type=\"submit\" class=\"btn primary btn-primary\">Save " + escapeHtml(m.name) + " Settings</button>" +
+              (dashUrl ? ("<a class=\"btn\" href=\"" + escapeHtml(dashUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Open Dashboard (" + escapeHtml(dashUrl) + ") ↗</a>") : "") +
               "<a class=\"btn\" href=\"" + escapeHtml(docUrl) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Docs (" + escapeHtml(docUrl) + ") ↗</a>" +
               "<a class=\"btn\" href=\"" + escapeHtml(cfgUrl) + "\">Open Standalone UI Config (" + escapeHtml(cfgUrl) + ") ↗</a>" +
             "</div>" +
