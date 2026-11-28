@@ -213,8 +213,63 @@ pub fn dispatch_dashboard_route(
                 crate::features::dashboard::handle_module_config_page,
             )
         }
+        p if p.starts_with("/modules/") && p.ends_with("/ui") => {
+            redirect_module_ui_route(client, request, store, p)
+        }
         _ => Ok(None),
     }
+}
+
+fn redirect_module_ui_route(
+    client: &mut TcpStream,
+    request: &crate::http::Request,
+    store: &ConfigStore,
+    clean_path: &str,
+) -> io::Result<Option<u16>> {
+    if !request.method.eq_ignore_ascii_case("get") {
+        write_error(
+            client,
+            405,
+            "Method Not Allowed",
+            "module ui redirect only supports GET",
+        )?;
+        return Ok(Some(405));
+    }
+    let Some(raw_id) = clean_path
+        .strip_prefix("/modules/")
+        .and_then(|rest| rest.strip_suffix("/ui"))
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+    else {
+        return Ok(None);
+    };
+
+    let reg = store.module_registry();
+    let target_location = reg.read().ok().and_then(|guard| {
+        let resolved_id = guard
+            .resolve_module_id(raw_id)
+            .unwrap_or_else(|| raw_id.to_string());
+        let desc = guard.get_module(&resolved_id)?;
+        if desc.status != crate::gateway::modules::ModuleStatus::Enabled {
+            return None;
+        }
+        let ns = desc.namespace.trim_end_matches('/');
+        if ns.is_empty() || ns == "/" {
+            return None;
+        }
+        Some(format!("{ns}/ui"))
+    });
+
+    if let Some(location) = target_location {
+        use std::io::Write;
+        write!(
+            client,
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nCache-Control: no-cache\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )?;
+        client.flush()?;
+        return Ok(Some(302));
+    }
+
+    Ok(None)
 }
 
 fn handle_get<F>(

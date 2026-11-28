@@ -71,6 +71,7 @@
       <p class="subtitle" id="mod-subtitle">Automatic schema-driven UI configuration and Dashboard menu positioning.</p>
     </div>
     <div class="nav-links">
+      <a class="nav-link" id="open-dashboard-link" href="#" style="display:none;background:#1e3a5f;border-color:#2563eb;color:#93c5fd;">Open Dashboard ↗</a>
       <a class="nav-link" id="view-doc-link" href="#" target="_blank" rel="noopener noreferrer">Docs ↗</a>
       <a class="nav-link" href="/dashboard#provider-settings">← Provider Settings</a>
       <a class="nav-link" href="/dashboard#modules-section">Installed Modules</a>
@@ -330,6 +331,13 @@
         statusBadge.textContent = modStatus;
         statusBadge.className = "badge " + (modStatus === "enabled" ? "badge-ok" : "badge-idle");
         nsCode.textContent = d.namespace || "/";
+        const openDashLink = document.getElementById("open-dashboard-link");
+        if (openDashLink && d.namespace && d.namespace.startsWith("/custom/")) {
+          const dashUrl = d.namespace.replace(/\/+$/, "") + "/ui";
+          openDashLink.href = dashUrl;
+          openDashLink.title = "Open interactive dashboard for " + (d.name || moduleId) + " (" + dashUrl + ")";
+          openDashLink.style.display = "inline-flex";
+        }
         const viewDocLink = document.getElementById("view-doc-link");
         if (viewDocLink) {
           const docUrl = d.doc_url || ("/modules/" + moduleId + "/doc");
